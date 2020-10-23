@@ -1,3 +1,6 @@
+"""I was tasked by my supervisor at a previous job with coming up with a list of all executable files in one of our working directories.
+This program is simply designed to compile a spreadsheet of all files in a given directory which may be able to execute malicious code."""
+
 import os, datetime, xlsxwriter as xl, tkinter.filedialog
 
 direc=tkinter.Tk()
