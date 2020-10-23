@@ -1,7 +1,7 @@
 """
 Dudley_ngrams.py
 Adapted from code by Paul Ebreo
-Last changed 2020-10-19 by John-Rick Dudley
+Last changed 2020-10-20 by John-Rick Dudley
 """
 
 from random import choice
@@ -12,7 +12,7 @@ import argparse, sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-f", "--file", action="store", default="dickens.txt", help="Corpus to generate from")
-parser.add_argument("-s", "--starter", action="store", help="Starting N-gram phrase")
+parser.add_argument("-s", "--starter", action="store", help="Starting N-gram phrase") #my addition
 options = parser.parse_args()
 starter = options.starter
 
@@ -48,34 +48,33 @@ def get_counts(context_length, training_text):
 
 
 def generate_from_file(context_length, training_file, output_length=60):
-    global starter
+    global starter #my addition
     # Open the training file
     with open(training_file, 'r') as f:
         training_data = f.read()
 
     counts = get_counts(context_length, training_data)
-
+    #My biggest contribution starts here:
     if starter is not None:
         starter = word_tokenize(starter)
         starter = tuple(starter)
-
+    #A check to see if user input matches the context length specified by their n-gram generator
         if len(starter) < context_length:
             print("Your starting phrase was too short. Please retry with a phrase containing", context_length,
                   "tokens, OR adjust your context length.")
             sys.exit()
-
+    #If user input is longer than expected, truncates it
         elif len(starter) > context_length:
             print("Your starting phrase was too long. Truncating the input to first", context_length,"tokens...")
             first_tokens = tuple(starter[:context_length])
-
         else:
             first_tokens = starter
-
+    #Unspecified user input = random seleciton of tokens
     else:
-        first_tokens = choice(list(counts.keys()))  # Choose a random first context
+        first_tokens = choice(list(counts.keys()))
 
     output_list = list(first_tokens)
-    if first_tokens not in counts:
+    if first_tokens not in counts: #We were expected to check if the input was OOV, and if so proceed with random tokens
         if output_list[-1] == "." or output_list[-1] == "!" or output_list[-1] == "?":
             pass
         else:
