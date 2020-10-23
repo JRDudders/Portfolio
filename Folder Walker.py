@@ -1,3 +1,7 @@
+"""This program was designed to prevent redundant files form being sent by our triage team to workflow. Although the majority of our work was tracked via a web portal,
+some adhoc projects required us to manually search through our sent files folder tree to see if the files had been previously nominated for exploitation. This
+program takes a spreadsheet filled with MD5 hashes and searches recursively to see if they're already in a given directory."""
+
 import os, csv, xlsxwriter as xl, tkinter.filedialog, re
 
 direc = tkinter.Tk()
