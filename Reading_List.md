@@ -6,7 +6,7 @@ Hands-On Machine Learning with Scikit-Learn, Keras, and Tensorflow -Geron
 
 Python Machine Learning -Raschka & Mirjalili
 
-Statistics for Linguists: an Introduction to R -Winter
+Statistics for Linguists: an Introduction Using R -Winter
 
 Machine Learning for Algorithmic Trading: Predictive models to extract signals from market and alternative data for systematic trading strategies with Python -Jansen (There's a dedicated chapter on NLP and mining market analysis sites for clues)
 
