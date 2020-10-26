@@ -14,6 +14,7 @@ Machine Learning for Algorithmic Trading: Predictive models to extract signals f
 #BERT resources:
 
 https://towardsdatascience.com/bert-explained-state-of-the-art-language-model-for-nlp-f8b21a9b6270
+
 https://jalammar.github.io/illustrated-transformer/
 
 #General NLP knowledge:
