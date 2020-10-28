@@ -96,7 +96,7 @@ def generate_from_file(context_length, training_file, output_length=60):
     if output_list[-1] not in ['.', '?','!']:
         output_list.append(".")
     output_list = TreebankWordDetokenizer().detokenize(output_list)
-    print(" ".join(output_list))
+    print(output_list)
 
 
 generate_from_file(3,options.file)
