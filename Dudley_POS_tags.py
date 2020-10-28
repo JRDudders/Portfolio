@@ -1,4 +1,4 @@
-"""A simple POS tagger that also uses the Dickens.txt file to list and plot the most common nouns in a given corpus."
+# A simple POS tagger that also uses the Dickens.txt file to list and plot the most common nouns in a given corpus.
 
 import nltk, numpy, matplotlib, argparse
 from collections import Counter
