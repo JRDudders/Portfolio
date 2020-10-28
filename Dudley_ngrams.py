@@ -93,9 +93,9 @@ def generate_from_file(context_length, training_file, output_length=60):
         current_context = next_context
 
         output_list.append(next_token)
-    if output_list[-1] != "." and output_list[-1] != "!" and output_list[-1] != "?":
+    if output_list[-1] not in ['.', '?','!']:
         output_list.append(".")
-    TreebankWordDetokenizer().detokenize(output_list)
+    output_list = TreebankWordDetokenizer().detokenize(output_list)
     print(" ".join(output_list))
 
 
