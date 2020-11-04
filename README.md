@@ -36,6 +36,8 @@ https://rare-technologies.com/word2vec-tutorial/
 
 https://web.stanford.edu/~jurafsky/slp3/
 
+https://github.com/flairNLP/flair
+
 # New Two Six collaboration effort:
 
 https://github.com/mitre/advmlthreatmatrix
