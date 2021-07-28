@@ -1,4 +1,4 @@
-"""This program was written in Jupyter Notebook using Anaconda. It's goal is to reconcile a spreadsheet that our triage team was using to track
+"""This program was written in Jupyter Notebook using Anaconda. Its goal is to reconcile a spreadsheet that our triage team was using to track
 requests for service being manually maintained in the workcenter against a CSV export of the RFS database."""
 
 import pandas as pd, tkinter.filedialog
