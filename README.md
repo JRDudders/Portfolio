@@ -2,7 +2,7 @@
 
 This is my first attempt to create a public portfolio.
 
-Folder Walker, Extenstion Finder, and Pandas Practice were created to solve practical problems in a previous job. N-Grams and Viterbi Tagger are modified assignments from my Intro to NLP course at Georgetown.
+Folder Walker, Extenstion Finder, and Pandas Practice were created to solve practical problems in a previous job. N-Grams, POS Tagger, and Viterbi Tagger are modified assignments from my Intro to NLP course at Georgetown.
 
 
 Please also see my current reading list for areas where I'm trying to develop my knowledge in my spare time:
