@@ -5,11 +5,11 @@ This is my first attempt to create a public portfolio.
 Folder Walker, Extenstion Finder, and Pandas Practice were created to solve practical problems in a previous job. N-Grams, POS Tagger, and Viterbi Tagger are modified assignments from my Intro to NLP course at Georgetown.
 
 
-Please also see my current reading list for areas where I'm trying to develop my knowledge in my spare time:
+Please see my current reading list for areas where I'm trying to develop my knowledge in my spare time:
 
 # My Reading List
 
-Also, here's what's on my bookshelf to be read when I'm not busy with schoolwork:
+Here's what's on my bookshelf to be read when I'm not busy with schoolwork:
 
 Hands-On Machine Learning with Scikit-Learn, Keras, and Tensorflow -Geron
 
