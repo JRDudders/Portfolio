@@ -1,8 +1,6 @@
 # Portfolio
 
-This is my first attempt to create a public portfolio.
-
-Folder Walker, Extenstion Finder, and Pandas Practice were created to solve practical problems in a previous job. N-Grams, POS Tagger, and Viterbi Tagger are modified assignments from my Intro to NLP course at Georgetown.
+This is my first attempt to create a public portfolio showcasing some of my NLP coursework and a few practical solutions I've developed at previous positions. Naive Bayes is an assignment from my Advanced NLP course where we were taksed with building a Multinomial Naive Bayes document classifier. Folder Walker, Extenstion Finder, Pandas Practice, and Folder Mapper Improved were created to solve problems in a previous job. N-Grams, POS Tagger, and Viterbi Tagger are modified assignments from my Intro to NLP course.
 
 
 Please see my current reading list for areas where I'm trying to develop my knowledge in my spare time:
