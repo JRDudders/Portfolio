@@ -1,18 +1,14 @@
 # tweeteval_100_sentiment_json.py
 # Prereqs: pip install transformers datasets torch
 
-import json
-import torch
+import json, os, torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig
 from datasets import load_dataset
-import os
-import json
 from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from transformers import pipeline
-import torch
 
 # -------- Config via env --------
 MODEL_ID = os.getenv("MODEL_ID", "cardiffnlp/twitter-roberta-base-sentiment-latest")
