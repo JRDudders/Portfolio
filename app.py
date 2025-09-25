@@ -1,5 +1,8 @@
-# tweeteval_100_sentiment_json.py
-# Prereqs: pip install transformers datasets torch
+"""
+tweeteval_100_sentiment_json.py
+Prereqs: pip install transformers datasets torch
+This is the app.py for a docker conatiner I'm building to run huggingface pipeline models, specifically sentiment analysis at the moment
+"""
 
 import json, os, torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig, pipeline
