@@ -69,6 +69,14 @@ def build_pipeline(model_id: str, task: str):
 def _startup():
     global PIPE
     PIPE = build_pipeline(MODEL_ID, TASK)
+''' i actually am not sure if `/` will work, but let's find out
+@app.get("/")
+def entrypoint():
+    return {"hello": "world"}
+'''    
+@app.get("/")
+def entrypoint():
+    return main()
 
 @app.get("/healthz")
 def healthz():
