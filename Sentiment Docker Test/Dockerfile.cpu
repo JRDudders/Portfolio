@@ -14,6 +14,7 @@ COPY req.txt /app/
 RUN pip install --no-cache-dir -r req.txt
 
 COPY app.py /app/
+COPY index.html /app/index.html
 
 # Defaults (overridable at runtime)
 ENV MODEL_ID=cardiffnlp/twitter-roberta-base-sentiment-latest \
@@ -24,4 +25,3 @@ ENV MODEL_ID=cardiffnlp/twitter-roberta-base-sentiment-latest \
 
 EXPOSE 8080
 CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
-
