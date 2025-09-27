@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Tweet Sentiment Processor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b0c10; --card:#15171c; --fg:#e6e6e6; --muted:#9aa0a6; --accent:#5aa9e6; }
+    * { box-sizing: border-box; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+    body { margin: 0; background: var(--bg); color: var(--fg); }
+    .wrap { max-width: 900px; margin: 40px auto; padding: 0 16px; }
+    h1 { font-size: 28px; margin: 0 0 16px; }
+    p { color: var(--muted); margin: 8px 0 20px; }
+    .card { background: var(--card); border: 1px solid #23262d; border-radius: 14px; padding: 16px; margin-bottom: 20px; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    input[type="file"], input[type="url"], button { font-size: 16px; }
+    input[type="url"] { width: min(600px, 100%); padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2f37; background: #0f1116; color: var(--fg); }
+    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #2a2f37; background: #18202b; color: var(--fg); cursor: pointer; }
+    button.primary { background: var(--accent); color: #061826; border: none; }
+    .hint { font-size: 13px; color: var(--muted); }
+    .status { margin-top: 10px; font-size: 14px; white-space: pre-wrap; }
+    .drop { border: 2px dashed #2a2f37; border-radius: 12px; padding: 16px; text-align: center; color: var(--muted); }
+    .ok { color: #66d9a3; }
+    .err { color: #ff7b7b; }
+    code { background: #0f1116; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Tweet Sentiment Processor</h1>
+    <p>Upload a <code>.json</code> or <code>.csv</code>, or provide a direct URL to one. The server returns the
+       same type with scores added as a file download.</p>
+
+    <!-- FILE UPLOAD -->
+    <div class="card">
+      <h3>Upload file</h3>
+      <form id="fileform">
+        <div class="row" style="margin-bottom:10px;">
+          <input id="file" type="file" name="file" accept=".json,.csv" required />
+          <button class="primary" type="submit">Process</button>
+        </div>
+        <div id="drop" class="drop">or drag & drop a .json / .csv here</div>
+        <div class="hint">Sent to <code>POST /predict/file</code>. The response triggers a download.</div>
+        <div id="fstatus" class="status"></div>
+      </form>
+    </div>
+
+    <!-- URL INPUT -->
+    <div class="card">
+      <h3>Process by URL</h3>
+      <form id="urlform" class="row">
+        <input id="url" type="url" placeholder="https://example.com/sample.json" required />
+        <button class="primary" type="submit">Process</button>
+      </form>
+      <div class="hint">Sends <code>{"url": "..."}</code> to <code>POST /predict/url</code> and downloads the result.</div>
+      <div id="ustatus" class="status"></div>
+    </div>
+  </div>
+
+  <script>
+    // Helper: parse filename from Content-Disposition
+    function filenameFrom(res) {
+      const cd = res.headers.get('Content-Disposition') || '';
+      const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+      return m ? decodeURIComponent(m[1]) : 'output';
+    }
+    // Helper: download a Response as a file
+    async function downloadResponse(res) {
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob();
+      const name = filenameFrom(res);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click();
+      a.remove(); URL.revokeObjectURL(url);
+      return name;
+    }
+    // Status helpers
+    const setStatus = (el, msg, kind='') => { el.className = 'status ' + kind; el.textContent = msg; };
+
+    // -------- File form ----------
+    const fileForm = document.getElementById('fileform');
+    const fileInput = document.getElementById('file');
+    const fstatus = document.getElementById('fstatus');
+    const drop = document.getElementById('drop');
+
+    fileForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!fileInput.files.length) { setStatus(fstatus, 'Pick a file first.', 'err'); return; }
+      const fd = new FormData();
+      fd.append('file', fileInput.files[0]);
+      setStatus(fstatus, 'Uploading…');
+      try {
+        const res = await fetch('/predict/file', { method: 'POST', body: fd });
+        const name = await downloadResponse(res);
+        setStatus(fstatus, 'Downloaded ' + name, 'ok');
+      } catch (err) {
+        setStatus(fstatus, 'Error: ' + err.message, 'err');
+      }
+    });
+
+    // Drag & drop support
+    ;['dragenter','dragover','dragleave','drop'].forEach(ev => {
+      drop.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }, false);
+    });
+    ;['dragenter','dragover'].forEach(ev => {
+      drop.addEventListener(ev, () => drop.style.borderColor = '#5aa9e6');
+    });
+    ;['dragleave','drop'].forEach(ev => {
+      drop.addEventListener(ev, () => drop.style.borderColor = '#2a2f37');
+    });
+    drop.addEventListener('drop', (e) => {
+      const files = e.dataTransfer.files;
+      if (files && files.length) fileInput.files = files;
+    });
+
+    // -------- URL form ----------
+    const urlForm = document.getElementById('urlform');
+    const urlInput = document.getElementById('url');
+    const ustatus = document.getElementById('ustatus');
+
+    urlForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const url = urlInput.value.trim();
+      if (!url) { setStatus(ustatus, 'Enter a URL.', 'err'); return; }
+      setStatus(ustatus, 'Fetching…');
+      try {
+        const res = await fetch('/predict/url', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const name = await downloadResponse(res);
+        setStatus(ustatus, 'Downloaded ' + name, 'ok');
+      } catch (err) {
+        setStatus(ustatus, 'Error: ' + err.message, 'err');
+      }
+    });
+  </script>
+</body>
+</html>
