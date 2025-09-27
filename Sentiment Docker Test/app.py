@@ -1,190 +1,203 @@
-"""
-tweeteval_100_sentiment_json.py
-Prereqs: pip install transformers datasets torch
-This is the app.py for a docker conatiner I'm building to run huggingface pipeline models, specifically sentiment analysis at the moment
-"""
+# app.py
+# Headless FastAPI service: CSV/JSON -> sentiment -> same type out (download)
+# No tkinter, no templates folder. Serves ./index.html directly if present.
 
-import json, os, torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoConfig, pipeline
-from datasets import load_dataset
-from typing import Any, Dict, Optional
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from typing import Annotated, Dict, Any, List, Optional, Tuple
+from fastapi import FastAPI, File, UploadFile, Request, HTTPException
+from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
-# -------- Config via env --------
+import io, os, json, shutil
+from pathlib import Path
+
+import requests
+import pandas as pd
+from transformers import pipeline, AutoConfig
+
+# ----------------------- Config -----------------------
+
 MODEL_ID = os.getenv("MODEL_ID", "cardiffnlp/twitter-roberta-base-sentiment-latest")
-TASK = os.getenv("TASK", "text-classification")  # e.g., "text-classification", "token-classification", "question-answering", "image-classification", "automatic-speech-recognition"
-TRUST_REMOTE_CODE = os.getenv("TRUST_REMOTE_CODE", "false").lower() in {"1","true","yes"}
-PIPELINE_KWARGS = os.getenv("PIPELINE_KWARGS", "{}")  # JSON string, e.g. {"top_k": null, "return_all_scores": true}
-DEVICE_MAP = os.getenv("DEVICE_MAP", "auto")          # "auto" or integer device id
-DTYPE = os.getenv("DTYPE", "auto")                    # "auto" | "float16" | "bfloat16" | "float32"
+BATCH_SIZE = int(os.getenv("BATCH_SIZE", "64"))
+MAX_LEN = int(os.getenv("MAX_LEN", "256"))
+HTTP_TIMEOUT = (10, 120)
+MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 
-def _dtype_from_env(dtype: str):
-    if dtype == "auto":
-        return "auto"
-    m = {
-        "float16": torch.float16,
-        "fp16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "bf16": torch.bfloat16,
-        "float32": torch.float32,
-        "fp32": torch.float32,
-    }
-    return m.get(dtype.lower(), "auto")
+app = FastAPI(title="Tweet Sentiment Service", version="1.0")
 
-def _safe_json_loads(s: str):
-    try:
-        return json.loads(s) if s.strip() else {}
-    except Exception:
-        return {}
+# Optional: serve /static if a directory exists
+if os.path.isdir("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
-EXTRA = _safe_json_loads(PIPELINE_KWARGS)
+# Lazy pipeline
+_PIPE = None
+_CFG = None
+def get_pipe():
+    global _PIPE, _CFG
+    if _PIPE is None:
+        _PIPE = pipeline("text-classification", model=MODEL_ID)
+        _CFG = AutoConfig.from_pretrained(MODEL_ID)
+    return _PIPE, _CFG
 
-# -------- App --------
-app = FastAPI(title="Transformers Pipeline Service", version="1.0.0")
+# ----------------------- NLP helpers -----------------------
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-PIPE = None
-
-def build_pipeline(model_id: str, task: str):
-    dtype = _dtype_from_env(DTYPE)
-    kwargs = dict(
-        model=model_id,
-        task=task,
-        device_map=DEVICE_MAP,
-        torch_dtype=dtype if dtype != "auto" else None,
-        trust_remote_code=TRUST_REMOTE_CODE,
-    )
-    kwargs = {k: v for k, v in kwargs.items() if v is not None}
-    return pipeline(**kwargs)
-
-@app.on_event("startup")
-def _startup():
-    global PIPE
-    PIPE = build_pipeline(MODEL_ID, TASK)
-''' i actually am not sure if `/` will work, but let's find out
-@app.get("/")
-def entrypoint():
-    return {"hello": "world"}
-'''    
-@app.get("/")
-def entrypoint():
-    return main()
-
-@app.get("/healthz")
-def healthz():
-    return {"status": "ok", "model": MODEL_ID, "task": TASK}
-
-class PredictRequest(BaseModel):
-    inputs: Any
-    parameters: Optional[dict] = None
-
-class ReloadRequest(BaseModel):
-    model_id: Optional[str] = None
-    task: Optional[str] = None
-
-@app.post("/predict")
-def predict(req: PredictRequest):
-    global PIPE
-    if PIPE is None:
-        raise HTTPException(status_code=500, detail="Pipeline not initialized")
-    call_kwargs = dict(EXTRA)
-    if req.parameters:
-        call_kwargs.update(req.parameters)
-    try:
-        outputs = PIPE(req.inputs, **call_kwargs)
-        return {"outputs": outputs}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/reload")
-def reload_model(req: ReloadRequest):
-    global PIPE, MODEL_ID, TASK
-    MODEL_ID = req.model_id or MODEL_ID
-    TASK = req.task or TASK
-    try:
-        PIPE = build_pipeline(MODEL_ID, TASK)
-        return {"status": "reloaded", "model": MODEL_ID, "task": TASK}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Reload failed: {e}")
-        
-        
-MODEL = "cardiffnlp/twitter-roberta-base-sentiment-latest"
-SPLIT = "test"          # from cardiffnlp/tweet_eval: sentiment
-SUBSET = "sentiment"
-N = 100
-BATCH_SIZE = 32
-MAX_LEN = 256
-
-def preprocess(text: str) -> str:
-    # Same normalization as your original code
+def preprocess_tweet(s: str) -> str:
     out = []
-    for t in text.split(" "):
+    for t in s.split(" "):
         t = "@user" if t.startswith("@") and len(t) > 1 else t
         t = "http" if t.startswith("http") else t
         out.append(t)
     return " ".join(out)
 
-def batched(xs, n):
-    for i in range(0, len(xs), n):
-        yield xs[i:i+n], i, min(i+n, len(xs))
+def classify_texts(texts: List[str]) -> List[Dict[str, Any]]:
+    pipe, _ = get_pipe()
+    results: List[Dict[str, Any]] = []
+    for i in range(0, len(texts), BATCH_SIZE):
+        chunk = texts[i:i+BATCH_SIZE]
+        preds = pipe(
+            chunk,
+            truncation=True, padding=True,
+            top_k=None, return_all_scores=True,
+            max_length=MAX_LEN, batch_size=BATCH_SIZE,
+        )
+        for scores in preds:
+            m = {d["label"]: float(d["score"]) for d in scores}
+            lab, sc = max(m.items(), key=lambda kv: kv[1]) if m else ("", 0.0)
+            results.append({"scores": m, "top": {"label": lab, "score": sc}})
+    return results
 
-def main():
-    # 1) Load data (TweetEval sentiment/test)
-    ds = load_dataset("cardiffnlp/tweet_eval", SUBSET, split=SPLIT)
-    texts = ds["text"][:N]
-    proc_texts = [preprocess(t) for t in texts]
+# ----------------------- I/O helpers -----------------------
 
-    # 2) Load model/tokenizer/config
-    tok = AutoTokenizer.from_pretrained(MODEL, use_fast=True)
-    cfg = AutoConfig.from_pretrained(MODEL)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL)
-    model.eval()
+def _infer_kind_from_headers(url: str, headers: Dict[str, str]) -> Optional[str]:
+    ct = (headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if ct in {"application/json", "text/json"}: return "json"
+    if ct in {"text/csv", "application/csv"}:   return "csv"
+    if url.lower().endswith(".json"):           return "json"
+    if url.lower().endswith(".csv"):            return "csv"
+    return None
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
+def _fetch_url_bytes(url: str) -> Tuple[bytes, str]:
+    with requests.get(url, stream=True, timeout=HTTP_TIMEOUT) as r:
+        r.raise_for_status()
+        kind = _infer_kind_from_headers(url, r.headers)
+        buf = bytearray()
+        for chunk in r.iter_content(8192):
+            if chunk:
+                buf += chunk
+                if len(buf) > MAX_DOWNLOAD_BYTES:
+                    raise HTTPException(413, detail="Download too large (>100MB)")
+        if kind is None:
+            head = bytes(buf[:2048]).lstrip()
+            kind = "json" if head.startswith((b"{", b"[")) else "csv"
+        return bytes(buf), kind
 
-    # 3) Batched inference → probabilities
-    all_probs = []
-    with torch.no_grad():
-        for batch, lo, hi in batched(proc_texts, BATCH_SIZE):
-            inputs = tok(
-                batch,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=MAX_LEN,
-            ).to(device)
-            logits = model(**inputs).logits
-            probs = torch.softmax(logits, dim=-1).cpu().tolist()
-            all_probs.extend(probs)
+def _pick_text_column(df: pd.DataFrame) -> str:
+    for c in df.columns:
+        if c.lower() in {"text", "tweet", "content"}:
+            return c
+    for c in df.columns:
+        if pd.api.types.is_object_dtype(df[c]):
+            return c
+    raise HTTPException(400, detail="No suitable text column found in CSV")
 
-    # 4) Build JSON: one entry per tweet with label→score mapping
-    id2label = {int(k): v for k, v in cfg.id2label.items()}
-    predictions = []
-    for t_orig, p in zip(texts, all_probs):
-        scores = {id2label[i]: float(p[i]) for i in range(len(p))}
-        predictions.append({"text": t_orig, "scores": scores})
+def _process_csv_bytes(csv_bytes: bytes) -> bytes:
+    try:
+        df = pd.read_csv(io.BytesIO(csv_bytes))
+    except UnicodeDecodeError:
+        df = pd.read_csv(io.BytesIO(csv_bytes), encoding="latin-1")
+    text_col = _pick_text_column(df)
+    texts = df[text_col].astype(str).map(preprocess_tweet).tolist()
+    preds = classify_texts(texts)
 
-    result = {
-        "dataset": "cardiffnlp/tweet_eval:sentiment:test",
-        "model": MODEL,
-        "count": len(predictions),
-        "predictions": predictions,
-    }
+    all_labels = set()
+    for p in preds: all_labels.update(p["scores"].keys())
+    for lab in sorted(all_labels):
+        df[f"score_{lab}"] = [p["scores"].get(lab, float("nan")) for p in preds]
+    df["top_label"] = [p["top"]["label"] for p in preds]
+    df["top_score"]  = [p["top"]["score"]  for p in preds]
 
-    # 5) Print JSON to stdout and also save to file
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    with open("tweeteval_sentiment_100.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    return result
+    return df.to_csv(index=False).encode("utf-8")
 
-if __name__ == "__main__":
-    main()
+def _process_json_bytes(json_bytes: bytes) -> bytes:
+    data = json.loads(json_bytes.decode("utf-8"))
+    if isinstance(data, list) and (not data or isinstance(data[0], str)):
+        texts = [preprocess_tweet(x) for x in data]
+        preds = classify_texts(texts)
+        out = [{"text": t, "scores": p["scores"], "top": p["top"]} for t, p in zip(data, preds)]
+        return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
+    if isinstance(data, list) and isinstance(data[0], dict):
+        key = next((k for k in ("text","tweet","content") if k in data[0]), None)
+        if key is None:
+            raise HTTPException(400, detail="JSON objects must include a 'text'/'tweet'/'content' field")
+        texts = [preprocess_tweet(str(obj.get(key, ""))) for obj in data]
+        preds = classify_texts(texts)
+        out = []
+        for obj, p in zip(data, preds):
+            new_obj = dict(obj)
+            new_obj["scores"] = p["scores"]
+            new_obj["top"] = p["top"]
+            out.append(new_obj)
+        return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
+    raise HTTPException(400, detail="JSON must be a list of strings or list of objects")
+
+def _filename_with_suffix(name: str, suffix: str) -> str:
+    stem = Path(name).stem or "output"
+    return f"{stem}_scored.{suffix}"
+
+# ----------------------- Endpoints -----------------------
+
+@app.get("/healthz")
+def healthz():
+    return {"status": "ok", "model": MODEL_ID}
+
+@app.get("/", response_class=HTMLResponse)
+def index(_: Request):
+    p = Path("index.html")
+    if p.exists():
+        return HTMLResponse(p.read_text(encoding="utf-8"))
+    return HTMLResponse(
+        "<h3>Service is up</h3><p>POST <code>/predict/file</code> (multipart) or "
+        "POST <code>/predict/url</code> with <code>{\"url\": \"https://...csv|json\"}</code>.</p>",
+        status_code=200
+    )
+
+@app.post("/predict/file")
+async def predict_file(file: Annotated[UploadFile, File(...)]):
+    buf = io.BytesIO()
+    await file.seek(0)
+    shutil.copyfileobj(file.file, buf)
+    raw = buf.getvalue()
+
+    fname = file.filename or "input"
+    if fname.lower().endswith(".csv") or file.content_type in {"text/csv", "application/csv"}:
+        out_bytes = _process_csv_bytes(raw)
+        out_name = _filename_with_suffix(fname, "csv")
+        media = "text/csv; charset=utf-8"
+    elif fname.lower().endswith(".json") or file.content_type in {"application/json", "text/json"}:
+        out_bytes = _process_json_bytes(raw)
+        out_name = _filename_with_suffix(fname, "json")
+        media = "application/json; charset=utf-8"
+    else:
+        raise HTTPException(400, detail="Please upload a .csv or .json")
+
+    return StreamingResponse(io.BytesIO(out_bytes), media_type=media,
+                             headers={"Content-Disposition": f'attachment; filename="{out_name}"'})
+
+@app.post("/predict/url")
+async def predict_url(request: Request):
+    body = await request.json()
+    url = body.get("url")
+    if not url:
+        raise HTTPException(400, detail="Body must include {'url': '<http(s)://...>'}")
+    raw, kind = _fetch_url_bytes(url)
+
+    if kind == "csv":
+        out_bytes = _process_csv_bytes(raw)
+        media = "text/csv; charset=utf-8"
+        out_name = _filename_with_suffix(Path(url).name or "input.csv", "csv")
+    else:
+        out_bytes = _process_json_bytes(raw)
+        media = "application/json; charset=utf-8"
+        out_name = _filename_with_suffix(Path(url).name or "input.json", "json")
+
+    return StreamingResponse(io.BytesIO(out_bytes), media_type=media,
+                             headers={"Content-Disposition": f'attachment; filename="{out_name}"'})
