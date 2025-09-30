@@ -1,27 +1,29 @@
-# Dockerfile.cpu
-FROM python:3.12-slim
+# ---------- base ----------
+FROM python:3.12-slim AS base
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
-
-# System libs (ffmpeg for ASR, git for model downloads with LFS pointers)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg git ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
-COPY req.txt /app/
-RUN pip install --no-cache-dir -r req.txt
 
-COPY app.py /app/
-COPY index.html /app/index.html
+# System deps (build tools minimal; playwright will add its own runtime deps)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates git \
+ && rm -rf /var/lib/apt/lists/*
 
-# Defaults (overridable at runtime)
-ENV MODEL_ID=cardiffnlp/twitter-roberta-base-sentiment-latest \
-    TASK=text-classification \
-    DEVICE_MAP=auto \
-    DTYPE=auto \
-    PIPELINE_KWARGS='{"truncation": true, "padding": true, "return_all_scores": true}'
+# ---------- deps ----------
+COPY req.txt /app/req.txt
+RUN python -m pip install --upgrade pip \
+ && pip install --no-cache-dir -r /app/req.txt
+
+# Install Chromium + required OS deps for Playwright (one line is easiest)
+RUN python -m playwright install --with-deps chromium
+
+# ---------- app ----------
+COPY app.py index.html nlp.py fetch.py render.py adapters.py apputils.py /app/
 
 EXPOSE 8080
-CMD ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# Use a single worker; reload off in container; lifespan on (for graceful shutdown)
+CMD ["python","-m","uvicorn","app:app","--host","0.0.0.0","--port","8080","--lifespan","on","--workers","1"]

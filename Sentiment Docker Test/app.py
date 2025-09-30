@@ -1,149 +1,24 @@
-# app.py
-# Headless FastAPI service: CSV/JSON -> sentiment -> same type out (download)
-# No tkinter, no templates folder. Serves ./index.html directly if present.
-
-from typing import Annotated, Dict, Any, List, Optional, Tuple
-from fastapi import FastAPI, File, UploadFile, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse, HTMLResponse
+# app.py — thin API
+from __future__ import annotations
+import io
+from pathlib import Path
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-import io, os, json, shutil
-from pathlib import Path
+from nlp import MODEL_ID
+from adapters import process_url, AdapterOutput
+from apputils import process_csv_bytes, process_json_bytes, filename_with_suffix
+from fetch import shutdown_playwright
 
-import requests
-import pandas as pd
-from transformers import pipeline, AutoConfig
+app = FastAPI(title="Sentiment Processor", version="4.0")
 
-# ----------------------- Config -----------------------
-
-MODEL_ID = os.getenv("MODEL_ID", "cardiffnlp/twitter-roberta-base-sentiment-latest")
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "64"))
-MAX_LEN = int(os.getenv("MAX_LEN", "256"))
-HTTP_TIMEOUT = (10, 120)
-MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
-
-app = FastAPI(title="Tweet Sentiment Service", version="1.0")
-
-# Optional: serve /static if a directory exists
-if os.path.isdir("static"):
+if Path("static").is_dir():
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Lazy pipeline
-_PIPE = None
-_CFG = None
-def get_pipe():
-    global _PIPE, _CFG
-    if _PIPE is None:
-        _PIPE = pipeline("text-classification", model=MODEL_ID)
-        _CFG = AutoConfig.from_pretrained(MODEL_ID)
-    return _PIPE, _CFG
-
-# ----------------------- NLP helpers -----------------------
-
-def preprocess_tweet(s: str) -> str:
-    out = []
-    for t in s.split(" "):
-        t = "@user" if t.startswith("@") and len(t) > 1 else t
-        t = "http" if t.startswith("http") else t
-        out.append(t)
-    return " ".join(out)
-
-def classify_texts(texts: List[str]) -> List[Dict[str, Any]]:
-    pipe, _ = get_pipe()
-    results: List[Dict[str, Any]] = []
-    for i in range(0, len(texts), BATCH_SIZE):
-        chunk = texts[i:i+BATCH_SIZE]
-        preds = pipe(
-            chunk,
-            truncation=True, padding=True,
-            top_k=None, return_all_scores=True,
-            max_length=MAX_LEN, batch_size=BATCH_SIZE,
-        )
-        for scores in preds:
-            m = {d["label"]: float(d["score"]) for d in scores}
-            lab, sc = max(m.items(), key=lambda kv: kv[1]) if m else ("", 0.0)
-            results.append({"scores": m, "top": {"label": lab, "score": sc}})
-    return results
-
-# ----------------------- I/O helpers -----------------------
-
-def _infer_kind_from_headers(url: str, headers: Dict[str, str]) -> Optional[str]:
-    ct = (headers.get("Content-Type") or "").split(";")[0].strip().lower()
-    if ct in {"application/json", "text/json"}: return "json"
-    if ct in {"text/csv", "application/csv"}:   return "csv"
-    if url.lower().endswith(".json"):           return "json"
-    if url.lower().endswith(".csv"):            return "csv"
-    return None
-
-def _fetch_url_bytes(url: str) -> Tuple[bytes, str]:
-    with requests.get(url, stream=True, timeout=HTTP_TIMEOUT) as r:
-        r.raise_for_status()
-        kind = _infer_kind_from_headers(url, r.headers)
-        buf = bytearray()
-        for chunk in r.iter_content(8192):
-            if chunk:
-                buf += chunk
-                if len(buf) > MAX_DOWNLOAD_BYTES:
-                    raise HTTPException(413, detail="Download too large (>100MB)")
-        if kind is None:
-            head = bytes(buf[:2048]).lstrip()
-            kind = "json" if head.startswith((b"{", b"[")) else "csv"
-        return bytes(buf), kind
-
-def _pick_text_column(df: pd.DataFrame) -> str:
-    for c in df.columns:
-        if c.lower() in {"text", "tweet", "content"}:
-            return c
-    for c in df.columns:
-        if pd.api.types.is_object_dtype(df[c]):
-            return c
-    raise HTTPException(400, detail="No suitable text column found in CSV")
-
-def _process_csv_bytes(csv_bytes: bytes) -> bytes:
-    try:
-        df = pd.read_csv(io.BytesIO(csv_bytes))
-    except UnicodeDecodeError:
-        df = pd.read_csv(io.BytesIO(csv_bytes), encoding="latin-1")
-    text_col = _pick_text_column(df)
-    texts = df[text_col].astype(str).map(preprocess_tweet).tolist()
-    preds = classify_texts(texts)
-
-    all_labels = set()
-    for p in preds: all_labels.update(p["scores"].keys())
-    for lab in sorted(all_labels):
-        df[f"score_{lab}"] = [p["scores"].get(lab, float("nan")) for p in preds]
-    df["top_label"] = [p["top"]["label"] for p in preds]
-    df["top_score"]  = [p["top"]["score"]  for p in preds]
-
-    return df.to_csv(index=False).encode("utf-8")
-
-def _process_json_bytes(json_bytes: bytes) -> bytes:
-    data = json.loads(json_bytes.decode("utf-8"))
-    if isinstance(data, list) and (not data or isinstance(data[0], str)):
-        texts = [preprocess_tweet(x) for x in data]
-        preds = classify_texts(texts)
-        out = [{"text": t, "scores": p["scores"], "top": p["top"]} for t, p in zip(data, preds)]
-        return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
-    if isinstance(data, list) and isinstance(data[0], dict):
-        key = next((k for k in ("text","tweet","content") if k in data[0]), None)
-        if key is None:
-            raise HTTPException(400, detail="JSON objects must include a 'text'/'tweet'/'content' field")
-        texts = [preprocess_tweet(str(obj.get(key, ""))) for obj in data]
-        preds = classify_texts(texts)
-        out = []
-        for obj, p in zip(data, preds):
-            new_obj = dict(obj)
-            new_obj["scores"] = p["scores"]
-            new_obj["top"] = p["top"]
-            out.append(new_obj)
-        return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
-    raise HTTPException(400, detail="JSON must be a list of strings or list of objects")
-
-def _filename_with_suffix(name: str, suffix: str) -> str:
-    stem = Path(name).stem or "output"
-    return f"{stem}_scored.{suffix}"
-
-# ----------------------- Endpoints -----------------------
+@app.on_event("shutdown")
+async def _shutdown():
+    await shutdown_playwright(app)
 
 @app.get("/healthz")
 def healthz():
@@ -152,35 +27,37 @@ def healthz():
 @app.get("/", response_class=HTMLResponse)
 def index(_: Request):
     p = Path("index.html")
-    if p.exists():
-        return HTMLResponse(p.read_text(encoding="utf-8"))
-    return HTMLResponse(
-        "<h3>Service is up</h3><p>POST <code>/predict/file</code> (multipart) or "
-        "POST <code>/predict/url</code> with <code>{\"url\": \"https://...csv|json\"}</code>.</p>",
-        status_code=200
-    )
+    return HTMLResponse(p.read_text(encoding="utf-8")) if p.exists() else HTMLResponse("<h3>Service up</h3>")
 
 @app.post("/predict/file")
-async def predict_file(file: Annotated[UploadFile, File(...)]):
-    buf = io.BytesIO()
-    await file.seek(0)
-    shutil.copyfileobj(file.file, buf)
-    raw = buf.getvalue()
-
+async def predict_file(file: UploadFile = File(...)):
+    data = await file.read()
     fname = file.filename or "input"
-    if fname.lower().endswith(".csv") or file.content_type in {"text/csv", "application/csv"}:
-        out_bytes = _process_csv_bytes(raw)
-        out_name = _filename_with_suffix(fname, "csv")
-        media = "text/csv; charset=utf-8"
-    elif fname.lower().endswith(".json") or file.content_type in {"application/json", "text/json"}:
-        out_bytes = _process_json_bytes(raw)
-        out_name = _filename_with_suffix(fname, "json")
-        media = "application/json; charset=utf-8"
-    else:
-        raise HTTPException(400, detail="Please upload a .csv or .json")
+    ctype = (file.content_type or "").lower()
 
-    return StreamingResponse(io.BytesIO(out_bytes), media_type=media,
-                             headers={"Content-Disposition": f'attachment; filename="{out_name}"'})
+    if fname.lower().endswith(".csv") or ctype in {"text/csv","application/csv"}:
+        out_bytes = process_csv_bytes(data)
+        out_name = filename_with_suffix(fname, "csv")
+        return StreamingResponse(io.BytesIO(out_bytes), media_type="text/csv; charset=utf-8",
+                                 headers={"Content-Disposition": f'attachment; filename="{out_name}"'})
+
+    if fname.lower().endswith(".json") or ctype in {"application/json","text/json"}:
+        out_bytes = process_json_bytes(data)
+        out_name = filename_with_suffix(fname, "json")
+        return StreamingResponse(io.BytesIO(out_bytes), media_type="application/json; charset=utf-8",
+                                 headers={"Content-Disposition": f'attachment; filename="{out_name}"'})
+
+    if fname.lower().endswith((".htm",".html")) or ctype == "text/html":
+        # Let the generic URL adapter handle local HTML if you prefer — or keep old path.
+        from render import html_to_paragraphs, extract_title, render_annotated_html
+        from nlp import preprocess_text, classify_texts
+        paras = html_to_paragraphs(data)
+        preds = classify_texts([preprocess_text(p) for p in paras])
+        title = extract_title(data) or Path(fname).stem
+        html_out = render_annotated_html(title, fname, paras, preds)
+        return Response(content=html_out, media_type="text/html; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{filename_with_suffix(fname, "html")}"'})
+    raise HTTPException(400, detail="Upload a .csv, .json, or .html file")
 
 @app.post("/predict/url")
 async def predict_url(request: Request):
@@ -188,16 +65,22 @@ async def predict_url(request: Request):
     url = body.get("url")
     if not url:
         raise HTTPException(400, detail="Body must include {'url': '<http(s)://...>'}")
-    raw, kind = _fetch_url_bytes(url)
+    render = bool(body.get("render", False))
+    cookies = body.get("cookies")
+    crawl = bool(body.get("crawl", False))
+    max_pages = int(body.get("max_pages", 50))
+    max_depth = int(body.get("max_depth", 2))
+    same_host_only = bool(body.get("same_host_only", True))
+    delay_ms = int(body.get("delay_ms", 300))
 
-    if kind == "csv":
-        out_bytes = _process_csv_bytes(raw)
-        media = "text/csv; charset=utf-8"
-        out_name = _filename_with_suffix(Path(url).name or "input.csv", "csv")
-    else:
-        out_bytes = _process_json_bytes(raw)
-        media = "application/json; charset=utf-8"
-        out_name = _filename_with_suffix(Path(url).name or "input.json", "json")
+    try:
+        out: AdapterOutput = await process_url(
+            url, app=app, render=render, cookies=cookies,
+            crawl=crawl, max_pages=max_pages, max_depth=max_depth,
+            same_host_only=same_host_only, delay_ms=delay_ms
+        )
+    except Exception as e:
+        raise HTTPException(502, detail=str(e))
 
-    return StreamingResponse(io.BytesIO(out_bytes), media_type=media,
-                             headers={"Content-Disposition": f'attachment; filename="{out_name}"'})
+    headers = {"Content-Disposition": f'attachment; filename="{out.filename}"'}
+    return Response(content=out.content, media_type=out.media_type, headers=headers)

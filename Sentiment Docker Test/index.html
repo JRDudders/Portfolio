@@ -1,139 +1,185 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <title>Tweet Sentiment Processor</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sentiment Processor</title>
   <style>
-    :root { --bg:#0b0c10; --card:#15171c; --fg:#e6e6e6; --muted:#9aa0a6; --accent:#5aa9e6; }
-    * { box-sizing: border-box; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
-    body { margin: 0; background: var(--bg); color: var(--fg); }
-    .wrap { max-width: 900px; margin: 40px auto; padding: 0 16px; }
-    h1 { font-size: 28px; margin: 0 0 16px; }
-    p { color: var(--muted); margin: 8px 0 20px; }
-    .card { background: var(--card); border: 1px solid #23262d; border-radius: 14px; padding: 16px; margin-bottom: 20px; }
-    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    input[type="file"], input[type="url"], button { font-size: 16px; }
-    input[type="url"] { width: min(600px, 100%); padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2f37; background: #0f1116; color: var(--fg); }
-    button { padding: 10px 14px; border-radius: 10px; border: 1px solid #2a2f37; background: #18202b; color: var(--fg); cursor: pointer; }
-    button.primary { background: var(--accent); color: #061826; border: none; }
-    .hint { font-size: 13px; color: var(--muted); }
-    .status { margin-top: 10px; font-size: 14px; white-space: pre-wrap; }
-    .drop { border: 2px dashed #2a2f37; border-radius: 12px; padding: 16px; text-align: center; color: var(--muted); }
-    .ok { color: #66d9a3; }
-    .err { color: #ff7b7b; }
-    code { background: #0f1116; padding: 2px 6px; border-radius: 6px; }
+    :root { --bg:#0b0c10; --fg:#e6e6e6; --muted:#9aa0a6; --card:#13151b; --stroke:#23262d; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
+    .wrap { max-width:920px; margin:32px auto; padding:0 16px; }
+    h1 { margin:0 0 10px; font-size:26px; }
+    h2 { margin:22px 0 8px; font-size:18px; }
+    .card { background:var(--card); border:1px solid var(--stroke); border-radius:14px; padding:16px; margin:14px 0; }
+    .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    input[type="url"], input[type="text"], input[type="number"] {
+      flex:1; min-width:260px; padding:10px 12px; border:1px solid #3a3f48; border-radius:10px; background:#0f1116; color:var(--fg);
+    }
+    label { user-select:none; color:var(--fg); }
+    .hint { color:var(--muted); font-size:0.9rem; margin-top:6px; }
+    button { padding:10px 14px; border:1px solid #3a3f48; border-radius:10px; background:#222733; color:#e6e6e6; cursor:pointer; }
+    button[disabled] { opacity:.6; cursor:not-allowed; }
+    #file-upload-input { display:none; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; }
+    .small { width:110px; }
+    .status { white-space:pre-wrap; margin-top:8px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Tweet Sentiment Processor</h1>
-    <p>Upload a <code>.json</code> or <code>.csv</code>, or provide a direct URL to one. The server returns the
-       same type with scores added as a file download.</p>
+    <h1>Sentiment Processor</h1>
+    <div class="hint">Upload a JSON/CSV/HTML file or provide a URL (JSON/CSV/Webpage). Optional: JS rendering, cookies, or crawl a site.</div>
 
-    <!-- FILE UPLOAD -->
+    <!-- FILE -->
     <div class="card">
-      <h3>Upload file</h3>
-      <form id="fileform">
-        <div class="row" style="margin-bottom:10px;">
-          <input id="file" type="file" name="file" accept=".json,.csv" required />
-          <button class="primary" type="submit">Process</button>
-        </div>
-        <div id="drop" class="drop">or drag & drop a .json / .csv here</div>
-        <div class="hint">Sent to <code>POST /predict/file</code>. The response triggers a download.</div>
-        <div id="fstatus" class="status"></div>
-      </form>
+      <h2>File (JSON / CSV / HTML)</h2>
+      <div class="row">
+        <button id="trigger-file-select">Select File</button>
+        <span class="hint">Sends to <code>POST /predict/file</code> and downloads the result.</span>
+      </div>
+      <input type="file" id="file-upload-input" accept=".json,.csv,.html"/>
+      <div id="file-info" class="status"></div>
     </div>
 
-    <!-- URL INPUT -->
+    <!-- URL -->
     <div class="card">
-      <h3>Process by URL</h3>
-      <form id="urlform" class="row">
-        <input id="url" type="url" placeholder="https://example.com/sample.json" required />
-        <button class="primary" type="submit">Process</button>
-      </form>
-      <div class="hint">Sends <code>{"url": "..."}</code> to <code>POST /predict/url</code> and downloads the result.</div>
-      <div id="ustatus" class="status"></div>
+      <h2>URL (hosted JSON / CSV / Webpage)</h2>
+      <div class="row">
+        <input id="url-input" type="url" placeholder="https://example.com/data.json | data.csv | article.html"/>
+        <label><input type="checkbox" id="render-checkbox"> Enable JavaScript (render)</label>
+        <button id="process-url">Process URL</button>
+      </div>
+
+      <div class="row">
+        <input id="cookies-input" type="text" placeholder='Optional cookies, e.g. auth_token=...; ct0=...' />
+      </div>
+
+      <div class="row">
+        <label><input type="checkbox" id="crawl-checkbox"> Crawl site</label>
+        <span class="hint">Crawls starting at the URL; aggregates results into one HTML report.</span>
+      </div>
+
+      <div id="crawl-opts" class="grid" style="display:none; margin-top:8px;">
+        <label>Max pages<br><input id="max-pages" type="number" min="1" max="1000" value="50"></label>
+        <label>Max depth<br><input id="max-depth" type="number" min="0" max="10" value="2"></label>
+        <label>Delay (ms)<br><input id="delay-ms" type="number" min="0" max="10000" value="300"></label>
+        <label><br><input type="checkbox" id="same-host-only" checked> Same host only</label>
+      </div>
+
+      <div id="url-info" class="status"></div>
     </div>
   </div>
 
   <script>
-    // Helper: parse filename from Content-Disposition
+    // ---------- helpers ----------
     function filenameFrom(res) {
       const cd = res.headers.get('Content-Disposition') || '';
-      const m = cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
-      return m ? decodeURIComponent(m[1]) : 'output';
+      let m = cd.match(/filename\\*=(?:UTF-8'')?([^;]+)/i);
+      if (m) return decodeURIComponent(m[1].replace(/(^"|"$)/g, ''));
+      m = cd.match(/filename="?([^";]+)"?/i);
+      return m ? m[1] : null;
     }
-    // Helper: download a Response as a file
-    async function downloadResponse(res) {
-      if (!res.ok) throw new Error(await res.text());
+    async function downloadResponse(res, fallback='output') {
+      if (!res.ok) {
+        let text = '';
+        try { text = await res.text(); } catch {}
+        throw new Error(text || ('HTTP '+res.status));
+      }
       const blob = await res.blob();
-      const name = filenameFrom(res);
+      const name = filenameFrom(res) || fallback;
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = name; document.body.appendChild(a); a.click();
       a.remove(); URL.revokeObjectURL(url);
       return name;
     }
-    // Status helpers
-    const setStatus = (el, msg, kind='') => { el.className = 'status ' + kind; el.textContent = msg; };
+    const set = (el, msg) => el.textContent = msg;
 
-    // -------- File form ----------
-    const fileForm = document.getElementById('fileform');
-    const fileInput = document.getElementById('file');
-    const fstatus = document.getElementById('fstatus');
-    const drop = document.getElementById('drop');
+    // ---------- file upload ----------
+    const trigger = document.getElementById('trigger-file-select');
+    const fileInput = document.getElementById('file-upload-input');
+    const fileInfo  = document.getElementById('file-info');
 
-    fileForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      if (!fileInput.files.length) { setStatus(fstatus, 'Pick a file first.', 'err'); return; }
-      const fd = new FormData();
-      fd.append('file', fileInput.files[0]);
-      setStatus(fstatus, 'Uploading…');
+    trigger.addEventListener('click', () => fileInput.click());
+
+    fileInput.addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
       try {
+        trigger.disabled = true;
+        set(fileInfo, `Uploading: ${file.name} ...`);
+        const fd = new FormData();
+        fd.append('file', file);
         const res = await fetch('/predict/file', { method: 'POST', body: fd });
-        const name = await downloadResponse(res);
-        setStatus(fstatus, 'Downloaded ' + name, 'ok');
+        const name = await downloadResponse(res, (file.name.replace(/\\.[^.]+$/, '') || 'output') + '_scored');
+        set(fileInfo, `Downloaded: ${name}`);
       } catch (err) {
-        setStatus(fstatus, 'Error: ' + err.message, 'err');
+        console.error(err); set(fileInfo, `Error: ${err.message || err}`);
+      } finally {
+        trigger.disabled = false;
+        fileInput.value = '';
       }
     });
 
-    // Drag & drop support
-    ;['dragenter','dragover','dragleave','drop'].forEach(ev => {
-      drop.addEventListener(ev, e => { e.preventDefault(); e.stopPropagation(); }, false);
-    });
-    ;['dragenter','dragover'].forEach(ev => {
-      drop.addEventListener(ev, () => drop.style.borderColor = '#5aa9e6');
-    });
-    ;['dragleave','drop'].forEach(ev => {
-      drop.addEventListener(ev, () => drop.style.borderColor = '#2a2f37');
-    });
-    drop.addEventListener('drop', (e) => {
-      const files = e.dataTransfer.files;
-      if (files && files.length) fileInput.files = files;
+    // ---------- crawl UI toggle ----------
+    const crawlCk = document.getElementById('crawl-checkbox');
+    const crawlOpts = document.getElementById('crawl-opts');
+    crawlCk.addEventListener('change', () => {
+      crawlOpts.style.display = crawlCk.checked ? 'grid' : 'none';
     });
 
-    // -------- URL form ----------
-    const urlForm = document.getElementById('urlform');
-    const urlInput = document.getElementById('url');
-    const ustatus = document.getElementById('ustatus');
+    // ---------- url processing ----------
+    const urlInput = document.getElementById('url-input');
+    const renderCk = document.getElementById('render-checkbox');
+    const cookiesIn = document.getElementById('cookies-input');
+    const urlBtn   = document.getElementById('process-url');
+    const urlInfo  = document.getElementById('url-info');
 
-    urlForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
+    const maxPagesIn = document.getElementById('max-pages');
+    const maxDepthIn = document.getElementById('max-depth');
+    const delayMsIn  = document.getElementById('delay-ms');
+    const sameHostCk = document.getElementById('same-host-only');
+
+    urlBtn.addEventListener('click', async () => {
       const url = urlInput.value.trim();
-      if (!url) { setStatus(ustatus, 'Enter a URL.', 'err'); return; }
-      setStatus(ustatus, 'Fetching…');
+      if (!url) { set(urlInfo, 'Please enter a URL.'); return; }
+
+      const body = {
+        url,
+        render: renderCk.checked,
+        cookies: cookiesIn.value.trim() || undefined,
+        crawl: crawlCk.checked,
+        max_pages: parseInt(maxPagesIn.value || '50', 10),
+        max_depth: parseInt(maxDepthIn.value || '2', 10),
+        same_host_only: !!sameHostCk.checked,
+        delay_ms: parseInt(delayMsIn.value || '300', 10),
+      };
+
       try {
+        urlBtn.disabled = true;
+        set(urlInfo, body.crawl ? 'Crawling site … (this may take a bit)' : 'Processing URL …');
         const res = await fetch('/predict/url', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ url })
+          body: JSON.stringify(body)
         });
-        const name = await downloadResponse(res);
-        setStatus(ustatus, 'Downloaded ' + name, 'ok');
+
+        // If backend ever returns 401 with an authorize_url, open & retry (optional)
+        if (res.status === 401) {
+          try { const p = await res.json(); if (p.authorize_url) window.open(p.authorize_url, '_blank'); } catch {}
+        }
+
+        const tail = (() => {
+          try { return (new URL(url)).pathname.split('/').pop() || (new URL(url)).hostname + '_scored'; }
+          catch { return 'output_scored'; }
+        })();
+        const name = await downloadResponse(res, tail);
+        set(urlInfo, `Downloaded: ${name}`);
       } catch (err) {
-        setStatus(ustatus, 'Error: ' + err.message, 'err');
+        console.error(err); set(urlInfo, `Error: ${err.message || err}`);
+      } finally {
+        urlBtn.disabled = false;
       }
     });
   </script>
