@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Sentiment Processor</title>
+  <title>Text Processor (Sentiment • NER • Zero-Shot)</title>
   <style>
     :root { --bg:#0b0c10; --fg:#e6e6e6; --muted:#9aa0a6; --card:#13151b; --stroke:#23262d; }
     * { box-sizing: border-box; }
     body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial; }
-    .wrap { max-width:920px; margin:32px auto; padding:0 16px; }
+    .wrap { max-width:980px; margin:32px auto; padding:0 16px; }
     h1 { margin:0 0 10px; font-size:26px; }
     h2 { margin:22px 0 8px; font-size:18px; }
     .card { background:var(--card); border:1px solid var(--stroke); border-radius:14px; padding:16px; margin:14px 0; }
     .row { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
-    input[type="url"], input[type="text"], input[type="number"] {
-      flex:1; min-width:260px; padding:10px 12px; border:1px solid #3a3f48; border-radius:10px; background:#0f1116; color:var(--fg);
+    input[type="url"], input[type="text"], input[type="number"], select {
+      flex:1; min-width:220px; padding:10px 12px; border:1px solid #3a3f48; border-radius:10px; background:#0f1116; color:var(--fg);
     }
     label { user-select:none; color:var(--fg); }
     .hint { color:var(--muted); font-size:0.9rem; margin-top:6px; }
@@ -22,27 +22,57 @@
     button[disabled] { opacity:.6; cursor:not-allowed; }
     #file-upload-input { display:none; }
     .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; }
-    .small { width:110px; }
     .status { white-space:pre-wrap; margin-top:8px; }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>Sentiment Processor</h1>
-    <div class="hint">Upload a JSON/CSV/HTML file or provide a URL (JSON/CSV/Webpage). Optional: JS rendering, cookies, or crawl a site.</div>
+    <h1>Text Processor (Sentiment • NER • Zero-Shot)</h1>
+    <div class="hint">Upload a JSON/CSV/HTML file or process a URL. Choose a preset; zero-shot can auto-label webpages.</div>
 
-    <!-- FILE -->
+    <div class="card">
+      <h2>Task / Model</h2>
+      <div class="row">
+        <select id="preset">
+          <option value="">(use service default)</option>
+          <optgroup label="Sentiment / Toxicity / Emotion">
+            <option value="sentiment-twitter" selected>Sentiment: Twitter RoBERTa</option>
+            <option value="sentiment-sst2">Sentiment: DistilBERT SST-2</option>
+            <option value="emotion">Emotion (7-way)</option>
+            <option value="offensive-twitter">Offensive (Twitter)</option>
+            <option value="toxic-roberta">Toxicity (unbiased-roberta)</option>
+          </optgroup>
+          <optgroup label="NER">
+            <option value="ner-conll">NER: English (CoNLL-2003)</option>
+            <option value="ner-multi">NER: Multilingual (HRL)</option>
+          </optgroup>
+          <optgroup label="Zero-shot">
+            <option value="zeroshot-bart">Zero-shot (BART-MNLI)</option>
+            <option value="zeroshot-xnli">Zero-shot (XLM-R XNLI)</option>
+            <option value="__custom_zero_shot__">Zero-shot (custom labels)</option>
+          </optgroup>
+        </select>
+        <input id="zs-labels" type="text" placeholder="comma-separated labels (e.g., politics,sports,tech)" style="display:none;">
+      </div>
+      <div class="row">
+        <label>
+          <input type="checkbox" id="include-stopwords">
+          Include stopwords when auto-labeling webpages (zero-shot without labels)
+        </label>
+      </div>
+      <div class="hint">If unchecked, we remove stopwords before extracting candidate topics from title/meta/headings.</div>
+    </div>
+
     <div class="card">
       <h2>File (JSON / CSV / HTML)</h2>
       <div class="row">
         <button id="trigger-file-select">Select File</button>
-        <span class="hint">Sends to <code>POST /predict/file</code> and downloads the result.</span>
+        <span class="hint">Uploads to <code>POST /predict/file</code> and downloads the result.</span>
       </div>
       <input type="file" id="file-upload-input" accept=".json,.csv,.html"/>
       <div id="file-info" class="status"></div>
     </div>
 
-    <!-- URL -->
     <div class="card">
       <h2>URL (hosted JSON / CSV / Webpage)</h2>
       <div class="row">
@@ -57,7 +87,7 @@
 
       <div class="row">
         <label><input type="checkbox" id="crawl-checkbox"> Crawl site</label>
-        <span class="hint">Crawls starting at the URL; aggregates results into one HTML report.</span>
+        <span class="hint">Crawls from the URL; aggregates results into one HTML report.</span>
       </div>
 
       <div id="crawl-opts" class="grid" style="display:none; margin-top:8px;">
@@ -72,70 +102,82 @@
   </div>
 
   <script>
-    // ---------- helpers ----------
     function filenameFrom(res) {
       const cd = res.headers.get('Content-Disposition') || '';
-      let m = cd.match(/filename\\*=(?:UTF-8'')?([^;]+)/i);
+      let m = cd.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
       if (m) return decodeURIComponent(m[1].replace(/(^"|"$)/g, ''));
       m = cd.match(/filename="?([^";]+)"?/i);
       return m ? m[1] : null;
     }
     async function downloadResponse(res, fallback='output') {
       if (!res.ok) {
-        let text = '';
-        try { text = await res.text(); } catch {}
+        let text = ''; try { text = await res.text(); } catch {}
         throw new Error(text || ('HTTP '+res.status));
       }
       const blob = await res.blob();
       const name = filenameFrom(res) || fallback;
       const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = name; document.body.appendChild(a); a.click();
+      const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
       a.remove(); URL.revokeObjectURL(url);
       return name;
     }
+    const visible = (el, on) => el.style.display = on ? '' : 'none';
     const set = (el, msg) => el.textContent = msg;
 
-    // ---------- file upload ----------
+    const presetSel = document.getElementById('preset');
+    const zsLabels = document.getElementById('zs-labels');
+    const includeStopwordsCk = document.getElementById('include-stopwords');
+    presetSel.addEventListener('change', () => visible(zsLabels, presetSel.value === '__custom_zero_shot__'));
+
+    // File upload
     const trigger = document.getElementById('trigger-file-select');
     const fileInput = document.getElementById('file-upload-input');
     const fileInfo  = document.getElementById('file-info');
 
     trigger.addEventListener('click', () => fileInput.click());
-
     fileInput.addEventListener('change', async (event) => {
       const file = event.target.files[0];
       if (!file) return;
       try {
         trigger.disabled = true;
         set(fileInfo, `Uploading: ${file.name} ...`);
+
+        const params = new URLSearchParams();
+        const preset = presetSel.value || '';
+        const includeStop = includeStopwordsCk.checked ? '1' : '0';
+        params.set('include_stopwords', includeStop);
+
+        if (preset && preset !== '__custom_zero_shot__') params.set('preset', preset);
+        if (preset === '__custom_zero_shot__') {
+          params.set('task','zero-shot-classification');
+          const labels = zsLabels.value.trim();
+          if (!labels) throw new Error('Please provide zero-shot labels.');
+          params.set('labels', labels);
+        }
+
         const fd = new FormData();
         fd.append('file', file);
-        const res = await fetch('/predict/file', { method: 'POST', body: fd });
-        const name = await downloadResponse(res, (file.name.replace(/\\.[^.]+$/, '') || 'output') + '_scored');
+        const res = await fetch('/predict/file?' + params.toString(), { method: 'POST', body: fd });
+        const name = await downloadResponse(res, (file.name.replace(/\.[^.]+$/, '') || 'output') + '_scored');
         set(fileInfo, `Downloaded: ${name}`);
       } catch (err) {
         console.error(err); set(fileInfo, `Error: ${err.message || err}`);
       } finally {
-        trigger.disabled = false;
-        fileInput.value = '';
+        trigger.disabled = false; fileInput.value = '';
       }
     });
 
-    // ---------- crawl UI toggle ----------
+    // Crawl toggle
     const crawlCk = document.getElementById('crawl-checkbox');
     const crawlOpts = document.getElementById('crawl-opts');
-    crawlCk.addEventListener('change', () => {
-      crawlOpts.style.display = crawlCk.checked ? 'grid' : 'none';
-    });
+    crawlCk.addEventListener('change', () => visible(crawlOpts, crawlCk.checked));
 
-    // ---------- url processing ----------
+    // URL processing
     const urlInput = document.getElementById('url-input');
     const renderCk = document.getElementById('render-checkbox');
     const cookiesIn = document.getElementById('cookies-input');
     const urlBtn   = document.getElementById('process-url');
     const urlInfo  = document.getElementById('url-info');
-
     const maxPagesIn = document.getElementById('max-pages');
     const maxDepthIn = document.getElementById('max-depth');
     const delayMsIn  = document.getElementById('delay-ms');
@@ -145,6 +187,7 @@
       const url = urlInput.value.trim();
       if (!url) { set(urlInfo, 'Please enter a URL.'); return; }
 
+      const preset = presetSel.value || undefined;
       const body = {
         url,
         render: renderCk.checked,
@@ -154,22 +197,25 @@
         max_depth: parseInt(maxDepthIn.value || '2', 10),
         same_host_only: !!sameHostCk.checked,
         delay_ms: parseInt(delayMsIn.value || '300', 10),
+        include_stopwords: includeStopwordsCk.checked
       };
+
+      if (preset && preset !== '__custom_zero_shot__') body.preset = preset;
+      if (preset === '__custom_zero_shot__') {
+        body.task = 'zero-shot-classification';
+        const labels = zsLabels.value.trim();
+        if (!labels) { set(urlInfo, 'Please provide zero-shot labels.'); return; }
+        body.labels = labels.split(',').map(s => s.trim()).filter(Boolean);
+      }
 
       try {
         urlBtn.disabled = true;
-        set(urlInfo, body.crawl ? 'Crawling site … (this may take a bit)' : 'Processing URL …');
+        set(urlInfo, body.crawl ? 'Crawling site …' : 'Processing URL …');
         const res = await fetch('/predict/url', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body)
         });
-
-        // If backend ever returns 401 with an authorize_url, open & retry (optional)
-        if (res.status === 401) {
-          try { const p = await res.json(); if (p.authorize_url) window.open(p.authorize_url, '_blank'); } catch {}
-        }
-
         const tail = (() => {
           try { return (new URL(url)).pathname.split('/').pop() || (new URL(url)).hostname + '_scored'; }
           catch { return 'output_scored'; }
