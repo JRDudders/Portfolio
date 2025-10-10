@@ -1,200 +1,375 @@
-# nlp.py — model presets + unified runner (sentiment, zero-shot, NER) with chunking
+# nlp.py
 from __future__ import annotations
-import os, re
+"""
+Unified NLP dispatcher for the FastAPI service.
+
+Supports:
+- Transformers (HF): sentiment/text-classification, zero-shot, NER (token-classification)
+- spaCy tasks: NER, POS/DEP/LEMMA, sentence segmentation
+- Stanza tasks: POS/DEP/LEMMA, sentence segmentation
+- Sentence-Transformers: embeddings (+ BERTopic via sbert_tasks)
+- Topic modeling (NMF / KMeans) via topics.py
+
+Design:
+- PRESETS: name -> (task, model_id, kwargs)
+- build_hf_pipeline(): LRU-cached HF pipelines
+- run_task(): single entry point (texts: list[str]) -> list[dict] (or list[list[dict]] for NER)
+
+Notes:
+- Long text is chunked for *classification* tasks to avoid max-length issues, then averaged.
+- NER is NOT chunked to preserve spans.
+"""
+
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
-from transformers import pipeline
 
-# Defaults (env-tunable)
-MODEL_ID = os.getenv("MODEL_ID", "cardiffnlp/twitter-roberta-base-sentiment-latest")
-MODEL_TASK = os.getenv("MODEL_TASK", "text-classification")  # "text-classification" | "token-classification" | "zero-shot-classification"
-BATCH_SIZE = int(os.getenv("BATCH_SIZE", "64"))
-MAX_LEN = int(os.getenv("MAX_LEN", "256"))
+import os
+import math
+import re
 
-# Optional NLTK sentence splitter; we still run without it
-try:
-    from nltk.tokenize import sent_tokenize
-    _HAS_NLTK = True
-except Exception:
-    sent_tokenize = None
-    _HAS_NLTK = False
+# ------------------------ Defaults & Presets -------------------------------- #
 
-# Presets you can select via ?preset=... or JSON {"preset": "..."}
-MODEL_PRESETS: Dict[str, Tuple[str, str, Dict]] = {
-    # Sentiment / emotion / toxicity
-    "sentiment-twitter": ("text-classification", "cardiffnlp/twitter-roberta-base-sentiment-latest", {}),
-    "sentiment-sst2":    ("text-classification", "distilbert-base-uncased-finetuned-sst-2-english", {}),
-    "emotion":           ("text-classification", "j-hartmann/emotion-english-distilroberta-base", {}),
-    "offensive-twitter": ("text-classification", "cardiffnlp/twitter-roberta-base-offensive", {}),
-    "toxic-roberta":     ("text-classification", "unitary/unbiased-toxic-roberta", {}),
+# Default model/task used by /healthz and when callers omit both
+MODEL_TASK = "text-classification"
+MODEL_ID = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 
-    # NER
-    "ner-conll":         ("token-classification", "dslim/bert-base-NER", {"aggregation_strategy": "simple"}),
-    "ner-multi":         ("token-classification", "Davlan/bert-base-multilingual-cased-ner-hrl", {"aggregation_strategy": "simple"}),
-
-    # Zero-shot “topic-ish”
-    "zeroshot-bart":     ("zero-shot-classification", "facebook/bart-large-mnli", {}),
-    "zeroshot-xnli":     ("zero-shot-classification", "joeddav/xlm-roberta-large-xnli", {}),
-}
-
-# Fallback taxonomy for zero-shot when auto-labeling finds little
-DEFAULT_ZS_LABELS = [
-    "politics","technology","business","finance","science","health","sports",
-    "entertainment","education","environment","world","usa","opinion","culture",
-    "travel","food","art","music","gaming","real estate","autos"
+# Reasonable default label set for zero-shot if the caller provides none
+DEFAULT_ZS_LABELS: List[str] = [
+    "politics", "economy", "health", "science", "technology",
+    "sports", "entertainment", "climate", "crime", "education",
+    "misinformation", "opinion",
 ]
 
-# Cache of pipelines by (task, model_id)
-_PIPES: Dict[Tuple[str, str], Any] = {}
+# Max tokens for single pass; we chunk roughly by words (not tokenizer-perfect),
+# but good enough to avoid 512/1024 overflow issues in common encoders.
+_CLASSIFY_MAX_WORDS = int(os.getenv("CLASSIFY_MAX_WORDS", "320"))  # ~ <= 512 tokens ballpark
 
-def get_pipe(task: Optional[str] = None, model_id: Optional[str] = None, **kwargs):
-    task = task or MODEL_TASK
-    model_id = model_id or MODEL_ID
-    key = (task, model_id)
-    if key not in _PIPES:
-        # put batch_size in the constructor; not in the call
-        _PIPES[key] = pipeline(task, model=model_id, batch_size=BATCH_SIZE, **kwargs)
-    return _PIPES[key]
 
-def preprocess_text(s: str) -> str:
-    # Tweet-style normalization; safe for generic text classification
-    out = []
-    for t in s.split(" "):
-        t = "@user" if t.startswith("@") and len(t) > 1 else t
-        t = "http" if t.startswith("http") else t
-        out.append(t)
-    return " ".join(out)
+# ------------------------ External Task Modules ----------------------------- #
 
-def preprocess_for_task(s: str, task: str) -> str:
-    # For NER, keep raw text to preserve offsets
-    return s if task == "token-classification" else preprocess_text(s)
+# Optional modules are imported lazily inside dispatch to avoid import cost at app start.
+# Just keep the names here for type hints / readability.
 
-# Chunking controls
-CHAR_LEN_THRESHOLD = int(os.getenv("CHAR_LEN_THRESHOLD", "1500"))     # when to start chunking long paragraphs
-TARGET_CHUNK_CHARS = int(os.getenv("TARGET_CHUNK_CHARS", "800"))      # size target per chunk
+# spaCy tasks
+# - spacy_tasks.spacy_ner(texts)
+# - spacy_tasks.spacy_pos_dep_lemma(texts)
+# - spacy_tasks.spacy_sentences(texts)
 
-def _sentences(text: str) -> List[str]:
-    if _HAS_NLTK and sent_tokenize:
-        try:
-            sents = sent_tokenize(text)
-            if sents:
-                return sents
-        except Exception:
-            pass
-    # fallback: regex split on sentence-ish boundaries
-    parts = re.split(r"(?<=[.!?])\s+|\n{2,}", text)
-    return [p for p in parts if p.strip()]
+# Stanza tasks
+# - stanza_tasks.stanza_pos_dep(texts, lang="en")
+# - stanza_tasks.stanza_sentences(texts, lang="en")
 
-def _chunk_by_sentences(text: str, target_chars: int = TARGET_CHUNK_CHARS) -> List[str]:
-    sents = _sentences(text)
-    chunks: List[str] = []
-    cur: List[str] = []
-    n = 0
-    for s in sents:
-        if n + len(s) > target_chars and cur:
-            chunks.append(" ".join(cur)); cur = [s]; n = len(s)
-        else:
-            cur.append(s); n += len(s)
-    if cur:
-        chunks.append(" ".join(cur))
-    return chunks or [text]
+# Sentence-Transformers tasks
+# - sbert_tasks.sbert_embeddings(texts, model="all-MiniLM-L6-v2")
+# - sbert_tasks.sbert_topics(texts, model="all-MiniLM-L6-v2")
 
-def _avg_dicts(dicts: List[Dict[str, float]]) -> Dict[str, float]:
-    out: Dict[str, float] = {}
-    cnt = 0
-    for d in dicts:
+# Topics (tf-idf based)
+# - topics.topics_nmf(texts, n_topics=..)
+# - topics.topics_kmeans(texts, n_clusters=. .)
+
+
+# ---------------------------- HF Pipelines ---------------------------------- #
+
+@lru_cache(maxsize=16)
+def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
+    """
+    Cache HF pipeline objects. `key` encodes kwargs that affect pipeline creation.
+    """
+    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
+
+    if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
+        tok = AutoTokenizer.from_pretrained(model_id)
+        mdl = AutoModelForSequenceClassification.from_pretrained(model_id)
+        return pipeline("text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
+                        model=mdl, tokenizer=tok, device=-1)
+
+    if task == "token-classification":
+        tok = AutoTokenizer.from_pretrained(model_id)
+        mdl = AutoModelForTokenClassification.from_pretrained(model_id)
+        # aggregation handled at call-time via kwargs
+        return pipeline("token-classification", model=mdl, tokenizer=tok, device=-1)
+
+    raise ValueError(f"Unsupported HF task: {task}")
+
+
+def _avg_scores(label_sets: List[Dict[str, float]]) -> Dict[str, float]:
+    # Mean of per-chunk probabilities for each label
+    if not label_sets:
+        return {}
+    acc: Dict[str, float] = {}
+    for d in label_sets:
         for k, v in d.items():
-            out[k] = out.get(k, 0.0) + float(v)
-        cnt += 1
-    if cnt:
-        for k in list(out.keys()):
-            out[k] /= cnt
-    return out
+            acc[k] = acc.get(k, 0.0) + float(v)
+    n = float(len(label_sets))
+    return {k: v / n for k, v in acc.items()}
+
+
+def _words(text: str) -> List[str]:
+    # crude whitespace split; avoids tokenizer import here
+    return re.findall(r"\S+", text or "")
+
+
+def _chunks_for_classification(text: str, max_words: int) -> List[str]:
+    ws = _words(text)
+    if len(ws) <= max_words:
+        return [text]
+    # chunk by words; keep boundaries roughly sentence-ish where possible
+    chunks: List[str] = []
+    start = 0
+    while start < len(ws):
+        end = min(len(ws), start + max_words)
+        chunk = " ".join(ws[start:end])
+        chunks.append(chunk)
+        start = end
+    return chunks
+
+
+def _hf_text_classification(
+    texts: List[str],
+    *,
+    model_id: str,
+    multi_label: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Sentiment / general text classification.
+    For long texts, chunk and average label probs over chunks.
+    """
+    task = "text-classification"
+    pipe = _hf_pipeline_cache(task, model_id, key=f"multi={multi_label}")
+
+    results: List[Dict[str, Any]] = []
+    for t in texts:
+        # run by chunks to avoid length errors
+        chunks = _chunks_for_classification(t, _CLASSIFY_MAX_WORDS)
+        # First run to see label space (for fixed-label heads we get one label per class on HF side)
+        out_per_chunk = pipe(chunks, truncation=True, padding=True, top_k=None if multi_label else 2)
+        # Normalize output to dict of label->score for averaging
+        label_sets: List[Dict[str, float]] = []
+        for out in out_per_chunk:
+            if isinstance(out, dict) and "label" in out:
+                # Some pipelines return single best label; ask for top_k next time if needed
+                label_sets.append({out["label"]: float(out["score"])})
+            else:
+                # Usually a list of {label, score}
+                if isinstance(out, list):
+                    label_sets.append({e["label"]: float(e["score"]) for e in out})
+                else:
+                    # unexpected; fallback: wrap
+                    label_sets.append({})
+        avg = _avg_scores(label_sets)
+        # return sorted label scores for transparency
+        results.append({
+            "labels": [k for k, _ in sorted(avg.items(), key=lambda kv: kv[1], reverse=True)],
+            "scores": [float(v) for _, v in sorted(avg.items(), key=lambda kv: kv[1], reverse=True)],
+        })
+    return results
+
+
+def _hf_zero_shot(
+    texts: List[str],
+    *,
+    model_id: str,
+    candidate_labels: Optional[List[str]],
+    multi_label: bool = True,
+    hypothesis_template: str = "This text is about {}.",
+) -> List[Dict[str, Any]]:
+    task = "zero-shot-classification"
+    pipe = _hf_pipeline_cache(task, model_id)
+
+    labels = candidate_labels or DEFAULT_ZS_LABELS
+    # Chunk long docs; run per chunk and average per-label probabilities
+    results: List[Dict[str, Any]] = []
+    for t in texts:
+        chunks = _chunks_for_classification(t, _CLASSIFY_MAX_WORDS)
+        per_label_probs: List[Dict[str, float]] = []
+
+        for ch in chunks:
+            out = pipe(
+                ch,
+                candidate_labels=labels,
+                multi_label=multi_label,
+                hypothesis_template=hypothesis_template,
+            )
+            # HF zero-shot returns dict with 'labels' and 'scores'
+            per_label_probs.append({lbl: float(scr) for lbl, scr in zip(out["labels"], out["scores"])})
+
+        avg = _avg_scores(per_label_probs)
+        ordered = sorted(avg.items(), key=lambda kv: kv[1], reverse=True)
+        results.append({"labels": [k for k, _ in ordered], "scores": [float(v) for _, v in ordered]})
+    return results
+
+
+def _hf_token_classification(
+    texts: List[str],
+    *,
+    model_id: str,
+    aggregation_strategy: str = "simple",
+) -> List[List[Dict[str, Any]]]:
+    """
+    NER etc. Do NOT chunk (to preserve spans).
+    Returns per-text a list of entity dicts from HF pipeline.
+    """
+    task = "token-classification"
+    pipe = _hf_pipeline_cache(task, model_id, key=f"agg={aggregation_strategy}")
+    return pipe(texts, aggregation_strategy=aggregation_strategy, truncation=True)
+
+
+# ----------------------------- PRESETS -------------------------------------- #
+
+PRESETS: Dict[str, Tuple[str, Optional[str], Dict[str, Any]]] = {
+    # Sentiment / general classification
+    "sentiment-twitter": ("text-classification", "cardiffnlp/twitter-roberta-base-sentiment-latest", {}),
+    "sentiment-sst2":    ("text-classification", "distilbert-base-uncased-finetuned-sst-2-english", {}),
+
+    # Zero-shot (English + Multilingual)
+    "zeroshot-bart":     ("zero-shot-classification", "facebook/bart-large-mnli", {}),
+    "zeroshot-mdeberta": ("zero-shot-classification", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli", {}),
+
+    # NER (HF)
+    "ner-conll":         ("token-classification", "dslim/bert-base-NER", {"aggregation_strategy": "simple"}),
+    "ner-bertbase":      ("token-classification", "dslim/bert-base-NER", {"aggregation_strategy": "simple"}),
+
+    # spaCy
+    "spacy-ner":         ("spacy-ner", None, {}),
+    "spacy-posdep":      ("spacy-posdep", None, {}),
+    "spacy-sents":       ("spacy-sents", None, {}),
+
+    # Stanza
+    "stanza-posdep":     ("stanza-posdep", "en", {}),
+    "stanza-sents":      ("stanza-sents", "en", {}),
+
+    # Sentence-Transformers
+    "sbert-embed":       ("sbert-embed", "all-MiniLM-L6-v2", {}),
+    "bertopic":          ("bertopic", "all-MiniLM-L6-v2", {}),
+
+    # Topics (tf-idf based)
+    "topics-nmf":        ("topics-nmf", None, {"n_topics": 10}),
+    "topics-kmeans":     ("topics-kmeans", None, {"n_clusters": 10}),
+}
+
+
+# -------------------------- Public API Helpers ------------------------------ #
+
+def preprocess_text(text: str) -> str:
+    """
+    Light normalization consistent with earlier examples.
+    - Collapse @handles and http links
+    """
+    if not text:
+        return ""
+    new = []
+    for tok in text.split():
+        t = "@user" if tok.startswith("@") and len(tok) > 1 else tok
+        t = "http" if t.startswith("http") else t
+        new.append(t)
+    return " ".join(new)
+
+
+def preprocess_for_task(text: str, task: str) -> str:
+    if task in {"token-classification", "spacy-ner"}:
+        # keep raw (span offsets matter)
+        return text
+    return preprocess_text(text)
+
 
 def run_task(
     texts: List[str],
     *,
     task: Optional[str] = None,
-    model_id: Optional[str] = None,
     preset: Optional[str] = None,
-    labels: Optional[List[str]] = None,  # for zero-shot
-) -> List[Dict[str, Any]]:
+    labels: Optional[List[str]] = None,
+) -> List[Any]:
     """
-    Uniform output:
-    - text/zero-shot: {"scores": {label: p}, "top": {"label": lab, "score": p}}
-    - token-classification (NER): {"entities": [{text,label,start,end,score}, ...]}
+    Unified entry point.
+    Returns:
+      - text/zero-shot classification: list[{"labels":[...], "scores":[...]}]
+      - token-classification (NER):   list[list[ent-dict]]
+      - spaCy/Stanza POS/DEP/LEMMA:   list[dict]
+      - SBERT embeddings:             list[{"text":..,"embedding":[...]}]
+      - BERTopic:                      dict wrapped in a one-element list
+      - Topics (NMF/KMeans):          dict wrapped in a one-element list
     """
-    if preset:
-        task, model_id, extra = MODEL_PRESETS[preset]
-    else:
-        task = task or MODEL_TASK
-        model_id = model_id or MODEL_ID
-        extra = {}
+    if not isinstance(texts, list):
+        raise TypeError("texts must be a list[str]")
 
-    if task in (None, "text-classification"):
-        pipe = get_pipe("text-classification", model_id, **extra)
-        out: List[Dict[str, Any]] = []
-        for txt in texts:
-            parts = _chunk_by_sentences(txt, TARGET_CHUNK_CHARS) if len(txt) > CHAR_LEN_THRESHOLD else [txt]
-            preds = pipe(
-                parts,
-                truncation=True,
-                padding=True,
-                top_k=None,
-                return_all_scores=True,
-                max_length=MAX_LEN,
-            )
-            if isinstance(preds, dict):
-                preds = [preds]
-            m_list = [{d["label"]: float(d["score"]) for d in scores} for scores in preds]
-            agg = _avg_dicts(m_list) if m_list else {}
-            lab, sc = max(agg.items(), key=lambda kv: kv[1]) if agg else ("", 0.0)
-            out.append({"scores": agg, "top": {"label": lab, "score": sc}})
-        return out
+    # Resolve preset to (task, model_id, kwargs)
+    kwargs: Dict[str, Any] = {}
+    model_id: Optional[str] = None
+    if preset:
+        if preset not in PRESETS:
+            raise KeyError(f"Unknown preset: {preset}")
+        task_from_preset, model_id, preset_kwargs = PRESETS[preset]
+        task = task or task_from_preset
+        kwargs.update(preset_kwargs)
+
+    # Default task/model if still missing
+    task = task or MODEL_TASK
+    model_id = model_id or (MODEL_ID if task in {"text-classification", "zero-shot-classification", "token-classification"} else None)
+
+    # ---------------- HF transformers ----------------
+    if task in {"text-classification", "sentiment-analysis"}:
+        return _hf_text_classification(texts, model_id=model_id)  # type: ignore[arg-type]
 
     if task == "zero-shot-classification":
-        if not labels:
-            raise ValueError("zero-shot-classification requires 'labels'.")
-        pipe = get_pipe("zero-shot-classification", model_id, **extra)
-        model_max = int(getattr(pipe.tokenizer, "model_max_length", 512) or 512)
-        max_len = min(MAX_LEN, model_max)
-
-        out: List[Dict[str, Any]] = []
-        for txt in texts:
-            parts = _chunk_by_sentences(txt, TARGET_CHUNK_CHARS) if len(txt) > CHAR_LEN_THRESHOLD else [txt]
-            part_scores: List[Dict[str, float]] = []
-            for chunk in parts:
-                r = pipe(
-                    chunk,
-                    candidate_labels=labels,
-                    multi_label=True,
-                    truncation=True,
-                    padding=True,
-                    max_length=max_len,
-                )
-                if isinstance(r, dict):
-                    r = [r]
-                for rr in r:
-                    part_scores.append(dict(zip(rr["labels"], [float(x) for x in rr["scores"]])))
-            agg = _avg_dicts(part_scores) if part_scores else {}
-            lab, sc = max(agg.items(), key=lambda kv: kv[1]) if agg else ("", 0.0)
-            out.append({"scores": agg, "top": {"label": lab, "score": sc}})
-        return out
+        return _hf_zero_shot(texts, model_id=model_id, candidate_labels=labels)  # type: ignore[arg-type]
 
     if task == "token-classification":
-        pipe = get_pipe("token-classification", model_id, **extra)
-        out: List[Dict[str, Any]] = []
-        for txt in texts:
-            ents = pipe(txt)
-            items = []
-            for e in ents:
-                items.append({
-                    "text": e.get("word") or e.get("entity_group") or "",
-                    "label": e.get("entity_group") or e.get("entity") or "",
-                    "start": int(e.get("start", 0)),
-                    "end": int(e.get("end", 0)),
-                    "score": float(e.get("score", 0.0)),
-                })
-            out.append({"entities": items})
-        return out
+        agg = kwargs.get("aggregation_strategy", "simple")
+        return _hf_token_classification(texts, model_id=model_id, aggregation_strategy=agg)  # type: ignore[arg-type]
 
-    raise ValueError(f"Unsupported task: {task}")
+    # ---------------- spaCy --------------------------
+    if task == "spacy-ner":
+        from spacy_tasks import spacy_ner
+        return spacy_ner(texts)
+
+    if task in {"spacy-posdep", "spacy-pos", "spacy-lemma", "spacy-dep"}:
+        from spacy_tasks import spacy_pos_dep_lemma
+        return spacy_pos_dep_lemma(texts)
+
+    if task == "spacy-sents":
+        from spacy_tasks import spacy_sentences
+        return spacy_sentences(texts)
+
+    # ---------------- Stanza -------------------------
+    if task == "stanza-posdep":
+        from stanza_tasks import stanza_pos_dep
+        lang = (kwargs.get("lang") or "en")
+        return stanza_pos_dep(texts, lang=lang)
+
+    if task == "stanza-sents":
+        from stanza_tasks import stanza_sentences
+        lang = (kwargs.get("lang") or "en")
+        return stanza_sentences(texts, lang=lang)
+
+    # ---------------- Sentence-Transformers ----------
+    if task == "sbert-embed":
+        from sbert_tasks import sbert_embeddings
+        model = (kwargs.get("model") or "all-MiniLM-L6-v2")
+        return sbert_embeddings(texts, model)
+
+    if task == "bertopic":
+        from sbert_tasks import sbert_topics
+        model = (kwargs.get("model") or "all-MiniLM-L6-v2")
+        return [sbert_topics(texts, model)]
+
+    # ---------------- Topics (tf-idf) ----------------
+    if task == "topics-nmf":
+        from topics import topics_nmf
+        return [topics_nmf(texts, **kwargs)]
+
+    if task == "topics-kmeans":
+        from topics import topics_kmeans
+        return [topics_kmeans(texts, **kwargs)]
+
+    raise ValueError(f"Unknown task: {task}")
+
+
+__all__ = [
+    "MODEL_TASK",
+    "MODEL_ID",
+    "DEFAULT_ZS_LABELS",
+    "PRESETS",
+    "preprocess_text",
+    "preprocess_for_task",
+    "run_task",
+]

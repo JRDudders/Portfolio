@@ -1,27 +1,37 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    HF_HOME=/root/.cache/huggingface \
+    TRANSFORMERS_NO_ADVISORY_WARNINGS=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Base OS deps + Chromium & Chromedriver for Selenium
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl wget git build-essential ca-certificates \
-    chromium chromium-driver \
-    libglib2.0-0 libnss3 libx11-6 libxcomposite1 libxrandr2 libxi6 \
-    libatk1.0-0 libatk-bridge2.0-0 libxdamage1 libgbm1 libgtk-3-0 \
+# System deps (curl for healthcheck; playwright will bring its own libs in install step)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+      curl ca-certificates git \
+      build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY req.txt /app/req.txt
+RUN python -m pip install --upgrade pip && \
+    pip install -r /app/req.txt
 
-# Python deps
-RUN pip install --upgrade pip && pip install -r /app/req.txt
+# --- Python deps ---
+# Keep req.txt cache-friendly
+COPY req.txt /app/req.txt
+RUN python -m pip install --upgrade pip && \
+    pip install -r /app/req.txt
 
-# Playwright Chromium (primary renderer)
-RUN python -m playwright install --with-deps chromium
+# --- Optional browsers (Playwright) ---
+# If you won’t use URL rendering, you can comment this out to slim the image.
+# This installs Chromium and its system dependencies inside the image.
+RUN playwright install --with-deps chromium || true
 
-# NLTK corpora (stopwords + punkt)
+# --- NLTK corpora (stopwords + punkt) ---
 RUN python - <<'PY'
 import nltk
 nltk.download('stopwords', quiet=True)
@@ -31,12 +41,29 @@ try: nltk.download('punkt_tab', quiet=True)
 except Exception: pass
 PY
 
-# App
+# --- spaCy English model (CPU-friendly) ---
+RUN python -m spacy download en_core_web_sm
+
+# --- (Optional) Pre-warm Stanza English pipeline to avoid first-run download ---
+RUN python - <<'PY'
+try:
+    import stanza
+    stanza.download('en', processors='tokenize,pos,lemma,depparse', verbose=False)
+except Exception:
+    pass
+PY
+
+# App code
 COPY . /app
 
+# Port & runtime env
 EXPOSE 8080
-ENV HOST=0.0.0.0 PORT=8080 \
-    RENDER_BACKENDS=playwright,selenium \
-    SELENIUM_ENGINE=chrome
+ENV HOST=0.0.0.0 \
+    PORT=8080
 
-CMD ["uvicorn","app:app","--host","0.0.0.0","--port","8080","--lifespan","on"]
+# Simple healthcheck against FastAPI /healthz
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:${PORT}/healthz || exit 1
+
+# Run the API
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--lifespan", "on"]
