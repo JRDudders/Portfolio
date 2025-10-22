@@ -62,7 +62,37 @@ The script will automatically:
 
 ---
 
-## 🚀 Quick Start (After Fixing Issues)
+## 🚀 Quick Start
+
+### ⚠️ Windows Users - DLL Access Denied Error
+
+If you get `[WinError 5] Access is denied` on Windows, **use one of these:**
+
+**Option 1: Automated installer (Easiest)**
+```bash
+# Right-click Command Prompt -> "Run as administrator"
+cd "path\to\Sentiment Docker Test"
+.\install_windows.bat
+```
+
+**Option 2: Quick manual fix**
+```bash
+# Close all Python processes first!
+taskkill /F /IM python.exe /T
+
+# Install with --user flag (no admin needed)
+pip install --user torch==2.3.0 transformers==4.41.2
+
+# Start server
+python run_local.py
+```
+
+**Option 3: Complete guide**
+See **[WINDOWS_INSTALL.md](WINDOWS_INSTALL.md)** for detailed Windows solutions.
+
+---
+
+### All Platforms - Standard Installation
 
 ```bash
 # 1. Check for compatibility issues
