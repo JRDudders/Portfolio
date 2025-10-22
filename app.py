@@ -137,54 +137,51 @@ def batched(xs, n):
         yield xs[i:i+n], i, min(i+n, len(xs))
 
 def main():
+    """
+    Optimized batch sentiment analysis using pre-loaded pipeline.
+    Uses the global PIPE to avoid duplicate model loading.
+    """
+    global PIPE
+    if PIPE is None:
+        raise HTTPException(status_code=500, detail="Pipeline not initialized")
+
     # 1) Load data (TweetEval sentiment/test)
     ds = load_dataset("cardiffnlp/tweet_eval", SUBSET, split=SPLIT)
     texts = ds["text"][:N]
     proc_texts = [preprocess(t) for t in texts]
 
-    # 2) Load model/tokenizer/config
-    tok = AutoTokenizer.from_pretrained(MODEL, use_fast=True)
-    cfg = AutoConfig.from_pretrained(MODEL)
-    model = AutoModelForSequenceClassification.from_pretrained(MODEL)
-    model.eval()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
-
-    # 3) Batched inference → probabilities
-    all_probs = []
-    with torch.no_grad():
+    # 2) Use the pre-loaded pipeline for efficient inference
+    try:
+        # Process in batches for better memory management
+        predictions = []
         for batch, lo, hi in batched(proc_texts, BATCH_SIZE):
-            inputs = tok(
-                batch,
-                return_tensors="pt",
-                padding=True,
-                truncation=True,
-                max_length=MAX_LEN,
-            ).to(device)
-            logits = model(**inputs).logits
-            probs = torch.softmax(logits, dim=-1).cpu().tolist()
-            all_probs.extend(probs)
+            batch_results = PIPE(batch, truncation=True, max_length=MAX_LEN)
 
-    # 4) Build JSON: one entry per tweet with label→score mapping
-    id2label = {int(k): v for k, v in cfg.id2label.items()}
-    predictions = []
-    for t_orig, p in zip(texts, all_probs):
-        scores = {id2label[i]: float(p[i]) for i in range(len(p))}
-        predictions.append({"text": t_orig, "scores": scores})
+            # Convert pipeline output to the expected format
+            for t_orig, result in zip(texts[lo:hi], batch_results):
+                if isinstance(result, list):
+                    # Multiple labels returned
+                    scores = {r["label"]: float(r["score"]) for r in result}
+                else:
+                    # Single label returned
+                    scores = {result["label"]: float(result["score"])}
+                predictions.append({"text": t_orig, "scores": scores})
 
-    result = {
-        "dataset": "cardiffnlp/tweet_eval:sentiment:test",
-        "model": MODEL,
-        "count": len(predictions),
-        "predictions": predictions,
-    }
+        result = {
+            "dataset": "cardiffnlp/tweet_eval:sentiment:test",
+            "model": MODEL_ID,
+            "count": len(predictions),
+            "predictions": predictions,
+        }
 
-    # 5) Print JSON to stdout and also save to file
-    print(json.dumps(result, ensure_ascii=False, indent=2))
-    with open("tweeteval_sentiment_100.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
-    return result
+        # 3) Save to file
+        output_path = "tweeteval_sentiment_100.json"
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {e}")
 
 if __name__ == "__main__":
     main()

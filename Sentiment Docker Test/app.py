@@ -292,6 +292,53 @@ async def predict_url(body: UrlBody = Body(...)):
     return _make_download("url-output.json", payload, "application/json")
 
 
+# ---- Batch sentiment analysis ---------------------------------------------- #
+class BatchTextRequest(T.TypedDict, total=False):
+    texts: T.List[str]
+    preset: str
+    labels: T.List[str] | None
+    preprocess: bool
+
+@app.post("/predict/batch")
+async def predict_batch(body: BatchTextRequest = Body(...)):
+    """
+    Efficiently process multiple texts for sentiment analysis or other NLP tasks.
+    Optimized for batch processing with automatic preprocessing.
+    """
+    texts = body.get("texts")
+    if not texts or not isinstance(texts, list):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'texts' array")
+
+    preset = body.get("preset", "sentiment-twitter")
+    labels = body.get("labels")
+    do_preprocess = body.get("preprocess", True)
+
+    try:
+        # Preprocess if requested
+        task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
+        if do_preprocess:
+            processed_texts = [preprocess_for_task(t, task or "") for t in texts]
+        else:
+            processed_texts = texts
+
+        # Use default labels for zero-shot if not provided
+        lbls = labels or (DEFAULT_ZS_LABELS if (preset and "zeroshot" in preset) else None)
+
+        # Run batch inference
+        results = run_task(processed_texts, preset=preset, labels=lbls)
+
+        # Format response
+        response = {
+            "preset": preset,
+            "count": len(texts),
+            "results": results,
+        }
+
+        return JSONResponse(content=response)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Batch processing failed: {e}")
+
+
 # ---- Graph metrics --------------------------------------------------------- #
 @app.post("/graph/metrics")
 async def graph_metrics(
@@ -303,6 +350,7 @@ async def graph_metrics(
     pagerank_tol: float = Query(1e-6),
     triangles_limit: int = Query(20000),
 ):
+    """Compute multiple graph metrics in one call."""
     try:
         b = await file.read()
         kind = "csv" if (file.filename or "").lower().endswith(".csv") else "json"
@@ -320,3 +368,121 @@ async def graph_metrics(
         return _make_download("graph-metrics.json", _as_json_bytes(res))
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Graph metrics failed: {e}")
+
+
+@app.post("/graph/degrees")
+async def graph_degrees(
+    file: UploadFile = File(..., description="Edge list CSV/JSON"),
+):
+    """Compute in-degree, out-degree, and total degree for all nodes."""
+    try:
+        from graph_tasks import degrees
+        b = await file.read()
+        kind = "csv" if (file.filename or "").lower().endswith(".csv") else "json"
+        g = load_graph_from_bytes(b, kind=kind)
+        df = degrees(g)
+        result = {
+            "n_nodes": g.n,
+            "n_edges": int(g.edges.shape[0]),
+            "degrees": df.to_dict(orient="records")
+        }
+        return _make_download("degrees.json", _as_json_bytes(result))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Degree computation failed: {e}")
+
+
+@app.post("/graph/pagerank")
+async def graph_pagerank(
+    file: UploadFile = File(..., description="Edge list CSV/JSON"),
+    alpha: float = Query(0.85, description="Damping factor (0.0-1.0)"),
+    iters: int = Query(40, description="Maximum iterations"),
+    tol: float = Query(1e-6, description="Convergence tolerance"),
+):
+    """Compute PageRank scores for all nodes."""
+    try:
+        from graph_tasks import pagerank
+        b = await file.read()
+        kind = "csv" if (file.filename or "").lower().endswith(".csv") else "json"
+        g = load_graph_from_bytes(b, kind=kind)
+        df = pagerank(g, alpha=alpha, iters=iters, tol=tol)
+        result = {
+            "n_nodes": g.n,
+            "n_edges": int(g.edges.shape[0]),
+            "pagerank": df.to_dict(orient="records"),
+            "parameters": {"alpha": alpha, "iters": iters, "tol": tol}
+        }
+        return _make_download("pagerank.json", _as_json_bytes(result))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"PageRank computation failed: {e}")
+
+
+@app.post("/graph/bfs")
+async def graph_bfs(
+    file: UploadFile = File(..., description="Edge list CSV/JSON"),
+    source: str = Query(..., description="Source node ID for BFS"),
+):
+    """Compute breadth-first search distances from a source node."""
+    try:
+        from graph_tasks import bfs
+        b = await file.read()
+        kind = "csv" if (file.filename or "").lower().endswith(".csv") else "json"
+        g = load_graph_from_bytes(b, kind=kind)
+        df = bfs(g, source)
+        result = {
+            "n_nodes": g.n,
+            "n_edges": int(g.edges.shape[0]),
+            "source_node": source,
+            "distances": df.to_dict(orient="records")
+        }
+        return _make_download("bfs.json", _as_json_bytes(result))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"Source node not found: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"BFS computation failed: {e}")
+
+
+@app.post("/graph/triangles")
+async def graph_triangles(
+    file: UploadFile = File(..., description="Edge list CSV/JSON (undirected graph)"),
+    max_nodes: int = Query(20000, description="Skip if graph has more nodes than this"),
+):
+    """Count triangles in an undirected graph."""
+    try:
+        from graph_tasks import triangles_undirected
+        b = await file.read()
+        kind = "csv" if (file.filename or "").lower().endswith(".csv") else "json"
+        g = load_graph_from_bytes(b, kind=kind)
+        tri_result = triangles_undirected(g, max_nodes=max_nodes)
+        result = {
+            "n_nodes": g.n,
+            "n_edges": int(g.edges.shape[0]),
+            **tri_result
+        }
+        return _make_download("triangles.json", _as_json_bytes(result))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Triangle counting failed: {e}")
+
+
+@app.post("/graph/load")
+async def graph_load(
+    file: UploadFile = File(..., description="Edge list CSV/JSON"),
+):
+    """Load and validate a graph, returning basic statistics."""
+    try:
+        b = await file.read()
+        kind = "csv" if (file.filename or "").lower().endswith(".csv") else "json"
+        g = load_graph_from_bytes(b, kind=kind)
+
+        # Collect sample nodes
+        sample_nodes = g.idx_to_id[:min(10, len(g.idx_to_id))]
+
+        result = {
+            "n_nodes": g.n,
+            "n_edges": int(g.edges.shape[0]),
+            "sample_nodes": sample_nodes,
+            "has_graphblas": g.gb_matrix is not None,
+            "edge_columns": list(g.edges.columns),
+        }
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Graph loading failed: {e}")
