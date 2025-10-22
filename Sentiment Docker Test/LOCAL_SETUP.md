@@ -1,18 +1,53 @@
-# Local Development Setup - Conda Environment Fix
+# Local Development Setup - Troubleshooting Guide
 
-## The Problem
+## Common Issues & Quick Fixes
 
-When running the API locally in a Conda environment, you may encounter this error:
+### ⚠️ Issue 1: PyTorch/Transformers Compatibility Error (MOST COMMON)
 
+**Error:**
+```
+cannot import name 'skip_code' from 'torch._C._dynamo.eval_frame'
+```
+or
+```
+Failed to import transformers.pipelines
+```
+
+**Cause:** Version mismatch between PyTorch and Transformers.
+
+**Quick Fix:**
+```bash
+# Step 1: Check what's wrong
+python check_compatibility.py
+
+# Step 2: Fix it (choose one method)
+
+# Method A: Use tested compatible versions
+pip install -r requirements-local.txt
+
+# Method B: Manual installation
+pip uninstall torch transformers -y
+pip install torch>=2.2.0,<2.5.0 transformers>=4.40.0,<4.45.0
+
+# Step 3: Verify the fix
+python check_compatibility.py
+
+# Step 4: Start the server
+python run_local.py
+```
+
+---
+
+### ⚠️ Issue 2: Uvicorn/Asyncio Error
+
+**Error:**
 ```
 TypeError: _patch_asyncio.<locals>.run() got an unexpected keyword argument 'loop_factory'
 ```
 
-This is due to Conda's asyncio patching conflicting with uvicorn's use of the `loop_factory` argument.
+**Cause:** Conda's asyncio patching conflicting with uvicorn.
 
-## Quick Fix - Use the Startup Script
-
-**Recommended:** Use the provided startup script which automatically tries multiple solutions:
+**Quick Fix:** The `run_local.py` script handles this automatically!
 
 ```bash
 cd "Sentiment Docker Test"
@@ -27,7 +62,28 @@ The script will automatically:
 
 ---
 
-## Manual Solutions (Pick One)
+## 🚀 Quick Start (After Fixing Issues)
+
+```bash
+# 1. Check for compatibility issues
+python check_compatibility.py
+
+# 2. Install compatible dependencies
+pip install -r requirements-local.txt
+
+# 3. Download NLP models (one-time setup)
+python -m spacy download en_core_web_sm
+
+# 4. Start the server
+python run_local.py
+
+# 5. Test it works
+curl http://localhost:8080/healthz
+```
+
+---
+
+## Manual Solutions for Uvicorn Issue (Pick One)
 
 ### Solution 1: Downgrade uvicorn (Easiest)
 
@@ -169,6 +225,26 @@ export REDDIT_LIMIT=100
 ---
 
 ## Troubleshooting
+
+### Issue: PyTorch/Transformers version mismatch
+
+**Symptoms:**
+- "cannot import name 'skip_code'"
+- "Failed to import transformers.pipelines"
+- Server starts but crashes on first request
+
+**Solution:**
+```bash
+# Diagnose the issue
+python check_compatibility.py
+
+# Fix with compatible versions
+pip install -r requirements-local.txt
+
+# Or manually
+pip uninstall torch transformers tokenizers -y
+pip install torch==2.3.0 transformers==4.41.2
+```
 
 ### Issue: "No module named 'app'"
 
