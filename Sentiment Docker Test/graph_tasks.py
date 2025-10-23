@@ -16,6 +16,13 @@ Edge CSV schema (auto-detected):
 Edge JSON schema:
   Either a list of {"src": "...", "dst": "...", ...} objects
   or a dict with key "edges" -> list of such objects.
+
+Node CSV schema (optional):
+  id, [attribute1, attribute2, ...]
+
+Node JSON schema (optional):
+  Either a list of {"id": "...", "attr1": "...", ...} objects
+  or a dict with key "nodes" -> list of such objects.
 """
 from __future__ import annotations
 
@@ -82,6 +89,40 @@ def load_edges_json(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
     return df
 
 
+def load_nodes_csv(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
+    """Load node list from CSV with attributes. First column must be node ID."""
+    df = pd.read_csv(io.BytesIO(file_bytes))
+    if df.shape[1] < 1:
+        raise ValueError("Node CSV must have at least one column (id)")
+
+    # Rename first column to 'id' if not already
+    cols = df.columns.tolist()
+    if cols[0].lower() not in ["id", "node", "node_id"]:
+        df = df.rename(columns={cols[0]: "id"})
+    else:
+        df = df.rename(columns={cols[0]: "id"})
+
+    df["id"] = df["id"].astype(str)
+    return df
+
+
+def load_nodes_json(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
+    """Load node list from JSON with attributes."""
+    data = json.loads(file_bytes.decode(encoding))
+    if isinstance(data, dict) and "nodes" in data:
+        data = data["nodes"]
+    if not isinstance(data, list):
+        raise ValueError("JSON must be a list of node objects or have key 'nodes'")
+    df = pd.DataFrame(data)
+
+    # Find ID column
+    cols = {c.lower(): c for c in df.columns}
+    id_col = cols.get("id") or cols.get("node") or cols.get("node_id") or list(df.columns)[0]
+    df = df.rename(columns={id_col: "id"})
+    df["id"] = df["id"].astype(str)
+    return df
+
+
 @dataclass
 class GraphData:
     n: int
@@ -91,6 +132,7 @@ class GraphData:
     out_adj: List[List[int]]         # adjacency lists (outgoing)
     in_adj: List[List[int]]          # adjacency lists (incoming)
     gb_matrix: Optional["gb.Matrix"] # GraphBLAS adjacency (BOOL), if available
+    nodes: Optional[pd.DataFrame] = None  # node attributes with 'id' column + custom attributes
 
 
 def encode_nodes(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int], List[str]]:
@@ -111,7 +153,7 @@ def encode_nodes(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int], List[s
     return out, id_to_idx, uniq
 
 
-def build_graph(df_edges: pd.DataFrame, use_weights: bool = False) -> GraphData:
+def build_graph(df_edges: pd.DataFrame, df_nodes: Optional[pd.DataFrame] = None, use_weights: bool = False) -> GraphData:
     df = df_edges.copy()
     df, id_to_idx, idx_to_id = encode_nodes(df)
     n = len(idx_to_id)
@@ -138,6 +180,17 @@ def build_graph(df_edges: pd.DataFrame, use_weights: bool = False) -> GraphData:
         # from_lists: (rows, cols, vals, nrows, ncols, typ)
         gb_matrix = gb.Matrix.from_lists(rows, cols, vals, n, n, gb.types.BOOL)  # type: ignore
 
+    # Process node attributes if provided
+    nodes_df = None
+    if df_nodes is not None:
+        # Ensure nodes have the index column
+        nodes_df = df_nodes.copy()
+        nodes_df["idx"] = nodes_df["id"].map(id_to_idx)
+        # Keep nodes that exist in the graph
+        nodes_df = nodes_df.dropna(subset=["idx"])
+        nodes_df["idx"] = nodes_df["idx"].astype(int)
+        nodes_df = nodes_df.sort_values("idx").reset_index(drop=True)
+
     return GraphData(
         n=n,
         edges=df,
@@ -146,6 +199,7 @@ def build_graph(df_edges: pd.DataFrame, use_weights: bool = False) -> GraphData:
         out_adj=out_adj,
         in_adj=in_adj,
         gb_matrix=gb_matrix,
+        nodes=nodes_df,
     )
 
 
@@ -268,17 +322,52 @@ def triangles_undirected(g: GraphData, max_nodes: int = 20000) -> Dict[str, int]
 
 # ------------------------------ Runner Helpers ----------------------------- #
 
-def load_graph_from_bytes(file_bytes: bytes, kind: str) -> GraphData:
+def merge_node_attributes(result_df: pd.DataFrame, g: GraphData) -> pd.DataFrame:
     """
-    kind ∈ {"csv","json"}
+    Merge node attributes from graph into result DataFrame.
+    Assumes result_df has a 'node' column with node IDs.
+    """
+    if g.nodes is None:
+        return result_df
+    # Join on node ID
+    merged = result_df.merge(g.nodes, left_on="node", right_on="id", how="left")
+    # Drop duplicate id column if present
+    if "id" in merged.columns and "node" in merged.columns:
+        merged = merged.drop(columns=["id"])
+    # Drop idx column if present
+    if "idx" in merged.columns:
+        merged = merged.drop(columns=["idx"])
+    return merged
+
+
+def load_graph_from_bytes(
+    file_bytes: bytes,
+    kind: str,
+    nodes_bytes: Optional[bytes] = None,
+    nodes_kind: Optional[str] = None
+) -> GraphData:
+    """
+    Load graph from edge list with optional node attributes.
+    kind, nodes_kind ∈ {"csv","json"}
     """
     if kind == "csv":
-        df = load_edges_csv(file_bytes)
+        df_edges = load_edges_csv(file_bytes)
     elif kind == "json":
-        df = load_edges_json(file_bytes)
+        df_edges = load_edges_json(file_bytes)
     else:
         raise ValueError("kind must be 'csv' or 'json'")
-    return build_graph(df)
+
+    df_nodes = None
+    if nodes_bytes:
+        nk = nodes_kind or kind  # Default to same format as edges
+        if nk == "csv":
+            df_nodes = load_nodes_csv(nodes_bytes)
+        elif nk == "json":
+            df_nodes = load_nodes_json(nodes_bytes)
+        else:
+            raise ValueError("nodes_kind must be 'csv' or 'json'")
+
+    return build_graph(df_edges, df_nodes=df_nodes)
 
 
 def run_graph_metrics(

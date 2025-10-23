@@ -16,9 +16,6 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY req.txt /app/req.txt
-RUN python -m pip install --upgrade pip && \
-    pip install -r /app/req.txt
 
 # --- Python deps ---
 # Keep req.txt cache-friendly

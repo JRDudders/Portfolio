@@ -43,7 +43,7 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>NLP Service</h1>
+    <h1>NLP & Graph Analytics Service</h1>
 
     <div class="row">
       <!-- FILE UPLOAD -->
@@ -116,6 +116,76 @@
           <button class="btn primary" id="run-url">Run</button>
         </div>
         <div id="status-url" class="status"></div>
+      </div>
+    </div>
+
+    <!-- GRAPH ANALYTICS -->
+    <div class="card" style="margin-top:16px">
+      <h2>Graph Analytics</h2>
+
+      <label>Edge List File (required)</label>
+      <div class="inline">
+        <button class="btn" id="btn-graph-edges">Choose Edges File</button>
+        <span class="file-name" id="graph-edges-name">No file selected</span>
+        <input type="file" id="graph-edges-input" style="display:none" accept=".json,.csv,text/csv,application/json"/>
+      </div>
+
+      <label>Node Attributes File (optional)</label>
+      <div class="inline">
+        <button class="btn" id="btn-graph-nodes">Choose Nodes File</button>
+        <span class="file-name" id="graph-nodes-name">No file selected</span>
+        <input type="file" id="graph-nodes-input" style="display:none" accept=".json,.csv,text/csv,application/json"/>
+      </div>
+
+      <label for="graph-metric">Metric</label>
+      <select id="graph-metric">
+        <option value="load">Load & Visualize</option>
+        <option value="degrees">Degrees (In/Out/Total)</option>
+        <option value="pagerank">PageRank</option>
+        <option value="bfs">BFS (Breadth-First Search)</option>
+        <option value="triangles">Triangle Count</option>
+      </select>
+
+      <div id="graph-params">
+        <!-- PageRank parameters -->
+        <div id="params-pagerank" style="display:none">
+          <label for="pr-alpha">Damping factor (alpha)</label>
+          <input id="pr-alpha" type="number" step="0.01" min="0" max="1" value="0.85"/>
+          <div class="inline">
+            <div style="flex:1">
+              <label for="pr-iters">Max iterations</label>
+              <input id="pr-iters" type="number" min="1" value="40"/>
+            </div>
+            <div style="flex:1;margin-left:8px">
+              <label for="pr-tol">Tolerance</label>
+              <input id="pr-tol" type="number" step="0.000001" value="0.000001"/>
+            </div>
+          </div>
+        </div>
+
+        <!-- BFS parameters -->
+        <div id="params-bfs" style="display:none">
+          <label for="bfs-source">Source node ID</label>
+          <input id="bfs-source" type="text" placeholder="e.g., A, node1, 123"/>
+        </div>
+
+        <!-- Triangle parameters -->
+        <div id="params-triangles" style="display:none">
+          <label for="tri-max">Max nodes (skip if larger)</label>
+          <input id="tri-max" type="number" min="100" value="20000"/>
+        </div>
+      </div>
+
+      <div class="controls">
+        <button class="btn primary" id="run-graph">Run Graph Analysis</button>
+      </div>
+      <div id="status-graph" class="status"></div>
+
+      <!-- Visualization area -->
+      <div id="graph-viz" style="display:none;margin-top:16px">
+        <h3 style="font-size:14px;margin:8px 0">Graph Visualization</h3>
+        <div id="graph-stats" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+        <canvas id="graph-canvas" style="width:100%;height:400px;border:1px solid var(--border);border-radius:10px;background:#0f1117"></canvas>
       </div>
     </div>
   </div>
@@ -252,6 +322,187 @@
         setStatus(statusUrl, 'Error: '+(e?.message||e), 'err');
       }
     };
+
+    // --- Wire up Graph Analytics ---
+    const graphEdgesBtn = document.getElementById('btn-graph-edges');
+    const graphEdgesIn = document.getElementById('graph-edges-input');
+    const graphEdgesName = document.getElementById('graph-edges-name');
+    const graphNodesBtn = document.getElementById('btn-graph-nodes');
+    const graphNodesIn = document.getElementById('graph-nodes-input');
+    const graphNodesName = document.getElementById('graph-nodes-name');
+    const statusGraph = document.getElementById('status-graph');
+    const graphMetric = document.getElementById('graph-metric');
+
+    graphEdgesBtn.onclick = ()=> graphEdgesIn.click();
+    graphEdgesIn.onchange = ()=> graphEdgesName.textContent = graphEdgesIn.files?.[0]?.name || 'No file selected';
+    graphNodesBtn.onclick = ()=> graphNodesIn.click();
+    graphNodesIn.onchange = ()=> graphNodesName.textContent = graphNodesIn.files?.[0]?.name || 'No file selected';
+
+    // Show/hide parameter sections based on metric selection
+    graphMetric.onchange = ()=>{
+      document.getElementById('params-pagerank').style.display = graphMetric.value === 'pagerank' ? 'block' : 'none';
+      document.getElementById('params-bfs').style.display = graphMetric.value === 'bfs' ? 'block' : 'none';
+      document.getElementById('params-triangles').style.display = graphMetric.value === 'triangles' ? 'block' : 'none';
+    };
+
+    // Store graph data for visualization
+    let currentGraphData = null;
+
+    document.getElementById('run-graph').onclick = async ()=>{
+      const edgesFile = graphEdgesIn.files?.[0];
+      if(!edgesFile){ setStatus(statusGraph, 'Choose an edges file first.', 'warn'); return; }
+
+      const nodesFile = graphNodesIn.files?.[0];
+      const metric = graphMetric.value;
+      setStatus(statusGraph, 'Processing…');
+
+      const fd = new FormData();
+      fd.append('edges_file', edgesFile, edgesFile.name);
+      if(nodesFile) fd.append('nodes_file', nodesFile, nodesFile.name);
+
+      try{
+        let endpoint = '/graph/' + metric;
+        let qs = '';
+
+        // Add metric-specific parameters
+        if(metric === 'pagerank'){
+          const alpha = document.getElementById('pr-alpha').value;
+          const iters = document.getElementById('pr-iters').value;
+          const tol = document.getElementById('pr-tol').value;
+          qs = `?alpha=${alpha}&iters=${iters}&tol=${tol}`;
+        } else if(metric === 'bfs'){
+          const source = document.getElementById('bfs-source').value.trim();
+          if(!source){ setStatus(statusGraph, 'Enter a source node for BFS.', 'warn'); return; }
+          qs = `?source=${encodeURIComponent(source)}`;
+        } else if(metric === 'triangles'){
+          const maxNodes = document.getElementById('tri-max').value;
+          qs = `?max_nodes=${maxNodes}`;
+        }
+
+        const res = await fetch(endpoint + qs, { method:'POST', body: fd });
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+
+        // For 'load', we get JSON response to visualize
+        if(metric === 'load'){
+          const data = await res.json();
+          currentGraphData = data;
+          displayGraph(data);
+          setStatus(statusGraph, `Loaded ${data.n_nodes} nodes, ${data.n_edges} edges`, 'ok');
+        } else {
+          // For other metrics, download the result
+          const blob = await res.blob();
+          const disp = res.headers.get('Content-Disposition');
+          const name = filenameFromDisposition(disp) || (metric+'-output-'+Date.now()+'.json');
+          downloadBlob(blob, name);
+          setStatus(statusGraph, 'Done — downloaded '+name, 'ok');
+
+          // If it's JSON, also try to visualize
+          if(blob.type.includes('json')){
+            const text = await blob.text();
+            try{
+              const data = JSON.parse(text);
+              if(data.nodes && data.edges){
+                currentGraphData = data;
+                displayGraph(data);
+              }
+            }catch(e){}
+          }
+        }
+      }catch(e){
+        setStatus(statusGraph, 'Error: '+(e?.message||e), 'err');
+      }
+    };
+
+    // Simple graph visualization using canvas
+    function displayGraph(data){
+      const viz = document.getElementById('graph-viz');
+      const stats = document.getElementById('graph-stats');
+      const canvas = document.getElementById('graph-canvas');
+      const ctx = canvas.getContext('2d');
+
+      // Show visualization
+      viz.style.display = 'block';
+
+      // Update stats
+      let statsText = `${data.n_nodes} nodes, ${data.n_edges} edges`;
+      if(data.has_node_attributes) statsText += ' (with attributes)';
+      stats.textContent = statsText;
+
+      // Set canvas size
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = 400;
+
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // Clear canvas
+      ctx.fillStyle = '#0f1117';
+      ctx.fillRect(0, 0, w, h);
+
+      if(!data.nodes || !data.edges){
+        ctx.fillStyle = '#a6a6a6';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No visualization data available', w/2, h/2);
+        return;
+      }
+
+      // Simple force-directed layout (very basic)
+      const nodes = data.nodes.slice(0, 200); // Limit to 200 nodes for performance
+      const edges = data.edges.filter(e => {
+        return nodes.find(n => n.id === e.source) && nodes.find(n => n.id === e.target);
+      });
+
+      // Initialize positions randomly
+      nodes.forEach((n, i) => {
+        const angle = (i / nodes.length) * 2 * Math.PI;
+        const radius = Math.min(w, h) * 0.35;
+        n.x = w/2 + radius * Math.cos(angle);
+        n.y = h/2 + radius * Math.sin(angle);
+      });
+
+      // Draw edges
+      ctx.strokeStyle = '#21232b';
+      ctx.lineWidth = 1;
+      edges.forEach(e => {
+        const src = nodes.find(n => n.id === e.source);
+        const tgt = nodes.find(n => n.id === e.target);
+        if(src && tgt){
+          ctx.beginPath();
+          ctx.moveTo(src.x, src.y);
+          ctx.lineTo(tgt.x, tgt.y);
+          ctx.stroke();
+        }
+      });
+
+      // Draw nodes
+      nodes.forEach(n => {
+        ctx.fillStyle = '#6aa2ff';
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 4, 0, 2*Math.PI);
+        ctx.fill();
+
+        // Draw label for first 20 nodes
+        if(nodes.indexOf(n) < 20){
+          ctx.fillStyle = '#e6e6e6';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(n.id, n.x, n.y - 8);
+        }
+      });
+
+      // Add note if graph was truncated
+      if(data.nodes.length > 200){
+        ctx.fillStyle = '#a6a6a6';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Showing 200 of ${data.nodes.length} nodes`, 10, h - 10);
+      }
+    }
   </script>
 </body>
 </html>
