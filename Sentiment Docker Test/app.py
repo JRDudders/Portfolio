@@ -212,7 +212,10 @@ async def predict_file(
 
         # Optional preprocessing per task (keeps raw for NER)
         task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
-        texts = [preprocess_for_task(t, task or "") for t in texts]
+
+        # Keep original texts for output, preprocess separately
+        original_texts = texts  # Save original
+        processed_texts = [preprocess_for_task(t, task or "") for t in texts]
 
         # Only parse and use labels for zero-shot tasks
         lbls = None
@@ -221,9 +224,23 @@ async def predict_file(
             if not lbls:  # Use defaults if no labels provided for zero-shot
                 lbls = DEFAULT_ZS_LABELS
 
-        result = run_task(texts, preset=preset, labels=lbls)
+        # Run task on processed texts
+        predictions = run_task(processed_texts, preset=preset, labels=lbls)
 
-        payload = _as_json_bytes({"preset": preset, "results": result})
+        # Merge original texts with predictions
+        if (task == "token-classification") or (preset and "ner" in preset):
+            # NER: keep entities format
+            output = [{"text": t, "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
+        else:
+            # Classification: merge text with scores
+            output = []
+            for t, p in zip(original_texts, predictions):
+                result_dict = {"text": t}
+                if isinstance(p, dict):
+                    result_dict.update(p)  # Add labels, scores, etc.
+                output.append(result_dict)
+
+        payload = _as_json_bytes({"preset": preset, "results": output})
         return _make_download("predictions.json", payload, "application/json")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File processing failed: {e}")
@@ -278,7 +295,10 @@ async def predict_url(body: UrlBody = Body(...)):
     # Extract text & run task
     text = _extract_text_from_html(html, base_url=url)
     task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
-    texts = [preprocess_for_task(text, task or "")]
+
+    # Keep original text for output, preprocess separately
+    original_text = text
+    processed_text = preprocess_for_task(text, task or "")
 
     # Only use labels for zero-shot tasks
     lbls = None
@@ -286,14 +306,23 @@ async def predict_url(body: UrlBody = Body(...)):
         lbls = labels if labels else DEFAULT_ZS_LABELS
 
     try:
-        result = run_task(texts, preset=preset, labels=lbls)
+        predictions = run_task([processed_text], preset=preset, labels=lbls)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"NLP task failed: {e}")
+
+    # Merge original text with predictions
+    if (task == "token-classification") or (preset and "ner" in preset):
+        output = [{"text": original_text, "entities": predictions[0].get("entities", [])}]
+    else:
+        result_dict = {"text": original_text}
+        if predictions and isinstance(predictions[0], dict):
+            result_dict.update(predictions[0])
+        output = [result_dict]
 
     payload = _as_json_bytes({
         "preset": preset,
         "url": url,
-        "results": result,
+        "results": output,
         "length_chars": len(text),
     })
     # We return JSON; your UI will save with this filename (overrides default .html)
@@ -324,6 +353,9 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
     try:
         # Preprocess if requested
         task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
+
+        # Keep original texts for output
+        original_texts = texts
         if do_preprocess:
             processed_texts = [preprocess_for_task(t, task or "") for t in texts]
         else:
@@ -335,13 +367,24 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
             lbls = labels if labels else DEFAULT_ZS_LABELS
 
         # Run batch inference
-        results = run_task(processed_texts, preset=preset, labels=lbls)
+        predictions = run_task(processed_texts, preset=preset, labels=lbls)
+
+        # Merge original texts with predictions
+        if (task == "token-classification") or (preset and "ner" in preset):
+            output = [{"text": t, "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
+        else:
+            output = []
+            for t, p in zip(original_texts, predictions):
+                result_dict = {"text": t}
+                if isinstance(p, dict):
+                    result_dict.update(p)
+                output.append(result_dict)
 
         # Format response
         response = {
             "preset": preset,
             "count": len(texts),
-            "results": results,
+            "results": output,
         }
 
         return JSONResponse(content=response)
