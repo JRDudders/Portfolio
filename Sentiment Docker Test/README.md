@@ -1,270 +1,828 @@
-# Sentiment Processor (FastAPI + Transformers)
+# Sentiment Analysis & Graph Analytics API
 
-A small, production-friendly FastAPI service that:
-- Scores **JSON/CSV** text with a Hugging Face **Transformers** pipeline.
-- Annotates **web pages** (and entire sites, optionally) with per-paragraph sentiment.
-- Handles **JS-heavy pages** via Playwright/Chromium.
-- Is **extensible** via a pluggable **adapter registry** (e.g., Reddit adapter included).
-
-The web UI (`index.html`) supports file upload, URL processing, optional cookies, and crawl controls.
+A production-ready FastAPI service providing:
+- **Sentiment Analysis** with Hugging Face Transformers
+- **Graph Analytics** (PageRank, BFS, triangle counting, etc.)
+- **Multi-format support** (JSON, CSV, HTML, URLs)
+- **Zero-shot classification** for custom labels
+- **Named Entity Recognition (NER)**
+- **Web scraping** with JavaScript rendering support
 
 ---
 
 ## Features
 
-- **Model:** `cardiffnlp/twitter-roberta-base-sentiment-latest` (3-way sentiment)
-- **Inputs:** JSON (list of strings or list of objects with `text`/`tweet`/`content`), CSV (auto-detects text column), HTML, or URL
-- **Outputs:** Same type for JSON/CSV; **annotated HTML** for webpages / crawled sites
-- **JS rendering:** Playwright + Chromium
-- **Crawling:** polite BFS crawl (robots-aware best-effort), depth/page/host limits, delay
-- **Adapters:** Pluggable domain handlers (Generic, Reddit included)
+### NLP & Sentiment Analysis
+- **Default Model:** `cardiffnlp/twitter-roberta-base-sentiment-latest` (3-way sentiment)
+- **Multiple Presets:** sentiment, zero-shot classification, NER, embeddings, topic modeling
+- **Smart Preprocessing:** Handles tweets, URLs, special characters
+- **Batch Processing:** Efficient multi-text analysis
+- **Long Text Support:** Automatic chunking and averaging for texts >512 tokens
+
+### Graph Analytics
+- **PageRank:** Power iteration algorithm with configurable damping
+- **Degree Analysis:** In-degree, out-degree, total degree
+- **BFS:** Breadth-first search from any source node
+- **Triangle Counting:** For undirected graphs
+- **GraphBLAS Support:** Optional sparse matrix acceleration
+
+### Web & Data Processing
+- **File Formats:** JSON, CSV, HTML
+- **URL Processing:** Fetch and analyze web pages
+- **JavaScript Rendering:** Playwright/Selenium for SPA support
+- **Crawling:** Multi-page site analysis with depth/breadth controls
 
 ---
 
-## Repo Layout
+## Quick Start
 
-```
-.
-├─ app.py              # Thin FastAPI app (routes only)
-├─ index.html          # Minimal front-end (file upload, URL, crawl controls)
-├─ nlp.py              # Model init, preprocessing, batched inference
-├─ fetch.py            # requests/Playwright fetchers, Reddit API, crawler
-├─ render.py           # HTML extraction + annotated HTML renderers
-├─ adapters.py         # Pluggable registry (Generic + Reddit)
-├─ apputils.py         # CSV/JSON processors + small helpers
-├─ req.txt             # Python dependencies
-└─ Dockerfile.cpu      # Container build (CPU)
-```
-
----
-
-## Quickstart (Docker)
-
-> Requires Docker Desktop (Windows/macOS) or Docker Engine (Linux).
+### Option 1: Docker (Recommended)
 
 ```bash
-# From repo root
-docker build -f Dockerfile.cpu -t cicerowatch5/pipeline:cpu .
-docker run --rm -p 8080:8080 --name hfpipe cicerowatch5/pipeline:cpu
+# Build the image
+docker build -f Dockerfile.cpu -t sentiment-api:latest .
+
+# Run the container
+docker run --rm -p 8080:8080 sentiment-api:latest
+
+# Open in browser
+# http://localhost:8080
 ```
 
-Open http://localhost:8080 — use the UI to upload a file or process a URL.
+### Option 2: Local Development
 
-**Notes (Windows):**
-- Make sure Docker Desktop is **running** and you’re using a valid context:
-  ```powershell
-  docker context ls
-  docker version      # should show a Server section
-  ```
-- If Playwright errors on missing deps, rebuild once Desktop is healthy.
+**For Windows (Conda users):**
+```bash
+# Use the automated installer
+.\install_windows.bat
+
+# Or use the startup script (handles Conda/uvicorn issues)
+python run_local.py
+```
+
+**For all platforms:**
+```bash
+# Install dependencies
+pip install -r requirements-local.txt
+
+# Download NLP models
+python -m spacy download en_core_web_sm
+
+# Check compatibility
+python check_compatibility.py
+
+# Start the server
+python run_local.py
+
+# Or manually:
+uvicorn app:app --host 0.0.0.0 --port 8080 --reload
+```
+
+**Open:** http://localhost:8080
 
 ---
 
-## Local Dev (without Docker)
+## API Endpoints
 
+### Health Check
+
+#### `GET /healthz`
+Check service status and available presets.
+
+**Response:**
+```json
+{
+  "ok": true,
+  "presets": ["sentiment-twitter", "zeroshot-bart", ...],
+  "playwright": true
+}
+```
+
+---
+
+## Sentiment Analysis & NLP
+
+### `POST /predict/file`
+Process uploaded files (JSON, CSV, or HTML).
+
+**Parameters:**
+- `file` (required): File to process
+- `preset` (optional): Model preset (default: sentiment-twitter)
+- `labels` (optional): Comma-separated labels for zero-shot
+- `include_stopwords` (optional): For label guessing
+
+**Example:**
 ```bash
-python -m venv .venv
-# Windows PowerShell:   .\.venv\Scripts\Activate.ps1
-# macOS/Linux:          source .venv/bin/activate
+curl -X POST "http://localhost:8080/predict/file?preset=sentiment-twitter" \
+  -F "file=@tweets.csv"
+```
 
-pip install --upgrade pip
-pip install -r req.txt
+**Response:** Downloads `predictions.json`
+```json
+{
+  "preset": "sentiment-twitter",
+  "results": [
+    {
+      "text": "I love this!",
+      "labels": ["positive", "neutral", "negative"],
+      "scores": [0.92, 0.05, 0.03]
+    }
+  ]
+}
+```
 
-# First-time Playwright browser install:
-python -m playwright install chromium
+---
 
-# Run the service
-python -m uvicorn app:app --host 0.0.0.0 --port 8080 --lifespan on
+### `POST /predict/url`
+Fetch and analyze a URL.
+
+**Request Body:**
+```json
+{
+  "url": "https://example.com",
+  "preset": "sentiment-twitter",
+  "render": false,
+  "renderer": "auto",
+  "wait_selector": null,
+  "scroll_passes": 8,
+  "render_timeout_ms": 25000,
+  "cookies": "session=abc123",
+  "extra_headers": {"User-Agent": "..."}
+}
+```
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/predict/url" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://news.ycombinator.com", "preset": "sentiment-twitter"}'
+```
+
+**Response:** Downloads `url-output.json`
+
+---
+
+### `POST /predict/batch` (New!)
+Efficiently process multiple texts in one request.
+
+**Request Body:**
+```json
+{
+  "texts": ["I love this!", "This is terrible.", "Neutral statement."],
+  "preset": "sentiment-twitter",
+  "labels": null,
+  "preprocess": true
+}
+```
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/predict/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "texts": ["Great service!", "Not happy."],
+    "preset": "sentiment-twitter"
+  }'
+```
+
+**Response:**
+```json
+{
+  "preset": "sentiment-twitter",
+  "count": 2,
+  "results": [
+    {
+      "text": "Great service!",
+      "labels": ["positive", "neutral", "negative"],
+      "scores": [0.95, 0.03, 0.02]
+    },
+    {
+      "text": "Not happy.",
+      "labels": ["negative", "neutral", "positive"],
+      "scores": [0.87, 0.10, 0.03]
+    }
+  ]
+}
+```
+
+---
+
+## Graph Analytics
+
+### `POST /graph/load` (New!)
+Load and validate a graph file.
+
+**Parameters:**
+- `file` (required): Edge list in CSV or JSON format
+
+**CSV Format:**
+```csv
+src,dst,weight
+Alice,Bob,1.0
+Bob,Charlie,1.5
+```
+
+**JSON Format:**
+```json
+{
+  "edges": [
+    {"src": "Alice", "dst": "Bob"},
+    {"src": "Bob", "dst": "Charlie"}
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "n_nodes": 3,
+  "n_edges": 2,
+  "sample_nodes": ["Alice", "Bob", "Charlie"],
+  "has_graphblas": false,
+  "edge_columns": ["src_idx", "dst_idx"]
+}
+```
+
+---
+
+### `POST /graph/degrees` (New!)
+Compute degree metrics for all nodes.
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/graph/degrees" \
+  -F "file=@network.csv"
+```
+
+**Response:**
+```json
+{
+  "n_nodes": 100,
+  "n_edges": 250,
+  "degrees": [
+    {"node": "Alice", "out_degree": 10, "in_degree": 5, "degree": 15},
+    {"node": "Bob", "out_degree": 8, "in_degree": 7, "degree": 15}
+  ]
+}
+```
+
+---
+
+### `POST /graph/pagerank` (New!)
+Compute PageRank scores.
+
+**Parameters:**
+- `file` (required): Edge list
+- `alpha` (optional): Damping factor (default: 0.85)
+- `iters` (optional): Max iterations (default: 40)
+- `tol` (optional): Convergence tolerance (default: 1e-6)
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/graph/pagerank?alpha=0.85&iters=50" \
+  -F "file=@network.csv"
+```
+
+**Response:**
+```json
+{
+  "n_nodes": 100,
+  "n_edges": 250,
+  "pagerank": [
+    {"node": "Alice", "pr": 0.045},
+    {"node": "Bob", "pr": 0.032}
+  ],
+  "parameters": {"alpha": 0.85, "iters": 50, "tol": 1e-6}
+}
+```
+
+---
+
+### `POST /graph/bfs` (New!)
+Breadth-first search from a source node.
+
+**Parameters:**
+- `file` (required): Edge list
+- `source` (required): Starting node ID
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/graph/bfs?source=Alice" \
+  -F "file=@network.csv"
+```
+
+**Response:**
+```json
+{
+  "n_nodes": 100,
+  "n_edges": 250,
+  "source_node": "Alice",
+  "distances": [
+    {"node": "Alice", "distance": 0},
+    {"node": "Bob", "distance": 1},
+    {"node": "Charlie", "distance": 2},
+    {"node": "Unreachable", "distance": -1}
+  ]
+}
+```
+
+---
+
+### `POST /graph/triangles` (New!)
+Count triangles in an undirected graph.
+
+**Parameters:**
+- `file` (required): Edge list (undirected)
+- `max_nodes` (optional): Skip if >N nodes (default: 20000)
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/graph/triangles?max_nodes=10000" \
+  -F "file=@network.csv"
+```
+
+**Response:**
+```json
+{
+  "n_nodes": 100,
+  "n_edges": 250,
+  "triangles": 42
+}
+```
+
+---
+
+### `POST /graph/metrics`
+Compute multiple graph metrics in one request.
+
+**Parameters:**
+- `file` (required): Edge list
+- `tasks` (required): Comma-separated (e.g., "degrees,pagerank,bfs")
+- `bfs_source` (optional): Required if "bfs" in tasks
+- `pagerank_alpha`, `pagerank_iters`, `pagerank_tol` (optional)
+- `triangles_limit` (optional)
+
+**Example:**
+```bash
+curl -X POST "http://localhost:8080/graph/metrics?tasks=degrees,pagerank" \
+  -F "file=@network.csv"
+```
+
+**Response:**
+```json
+{
+  "n_nodes": 100,
+  "n_edges": 250,
+  "degrees": [...],
+  "pagerank": [...]
+}
+```
+
+---
+
+## Available NLP Presets
+
+### Sentiment Analysis
+- `sentiment-twitter` - Twitter-specific sentiment (cardiffnlp/twitter-roberta-base-sentiment-latest)
+- `sentiment-sst2` - SST-2 sentiment model
+
+### Zero-Shot Classification
+- `zeroshot-bart` - Facebook BART MNLI model
+- `zeroshot-mdeberta` - Multilingual mDeBERTa model
+
+### Named Entity Recognition
+- `ner-conll` - BERT-base NER (CoNLL)
+- `ner-bertbase` - BERT-base NER
+- `spacy-ner` - spaCy NER
+
+### Other Tasks
+- `spacy-posdep` - POS tagging and dependency parsing
+- `spacy-sents` - Sentence segmentation
+- `stanza-posdep` - Stanza POS/DEP
+- `sbert-embed` - Sentence embeddings
+- `bertopic` - Topic modeling with BERTopic
+- `topics-nmf` - NMF topic modeling
+- `topics-kmeans` - K-means topic clustering
+
+---
+
+## Installation & Troubleshooting
+
+### Windows Installation Issues
+
+#### Issue 1: DLL Access Denied
+```
+[WinError 5] Access is denied: 'C:\...\torch\lib\c10.dll'
+```
+
+**Quick Fix:**
+```bash
+# Close all Python processes
+taskkill /F /IM python.exe /T
+
+# Install with --user flag (no admin needed)
+pip install --user torch==2.3.0 transformers==4.41.2
+
+# Start server
+python run_local.py
+```
+
+**Or use the automated installer:**
+```bash
+# Run as Administrator
+.\install_windows.bat
+```
+
+See `WINDOWS_INSTALL.md` for 7 different solution methods.
+
+---
+
+#### Issue 2: PyTorch/Transformers Version Mismatch
+```
+cannot import name 'skip_code' from 'torch._C._dynamo.eval_frame'
+```
+
+**Fix:**
+```bash
+# Check compatibility
+python check_compatibility.py
+
+# Install compatible versions
+pip install -r requirements-local.txt
+
+# Or manually
+pip uninstall torch transformers -y
+pip install torch==2.3.0 transformers==4.41.2
+```
+
+---
+
+#### Issue 3: Uvicorn/Conda AsyncIO Error
+```
+TypeError: run() got an unexpected keyword argument 'loop_factory'
+```
+
+**Fix:** Use the startup script (handles this automatically)
+```bash
+python run_local.py
+```
+
+**Or manually:**
+```bash
+pip install "uvicorn<0.30.0"
+uvicorn app:app --host 0.0.0.0 --port 8080
+```
+
+---
+
+### Common Issues
+
+**Port already in use:**
+```bash
+# Windows
+netstat -ano | findstr :8080
+taskkill /PID <PID> /F
+
+# Linux/Mac
+lsof -ti:8080 | xargs kill
+```
+
+**Missing NLP models:**
+```bash
+python -m spacy download en_core_web_sm
+python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt')"
+```
+
+**GPU/CUDA errors:**
+```bash
+# Force CPU mode
+export CUDA_VISIBLE_DEVICES=""
+python run_local.py
 ```
 
 ---
 
 ## Configuration
 
-Environment variables (optional):
+### Environment Variables
 
-| Var              | Default                                       | Description                                   |
-|------------------|-----------------------------------------------|-----------------------------------------------|
-| `MODEL_ID`       | `cardiffnlp/twitter-roberta-base-sentiment-latest` | HF model repo for pipeline                    |
-| `BATCH_SIZE`     | `64`                                          | Inference batch size                          |
-| `MAX_LEN`        | `256`                                         | Max tokens per input                          |
-| `MAX_HTML_ITEMS` | `300`                                         | Max paragraphs per page                       |
-| `REDDIT_LIMIT`   | `200`                                         | Max posts/comments pulled via Reddit adapter  |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | 8080 | Server port |
+| `MODEL_ID` | cardiffnlp/twitter-roberta-base-sentiment-latest | HF model |
+| `BATCH_SIZE` | 32 | Inference batch size |
+| `MAX_LEN` | 256 | Max tokens per input |
+| `CLASSIFY_MAX_WORDS` | 320 | Chunking threshold |
+| `REDDIT_LIMIT` | 200 | Reddit API limit |
+| `PLAYWRIGHT_AVAILABLE` | auto | Enable/disable Playwright |
+
+**Example:**
+```bash
+export PORT=8000
+export MODEL_ID="distilbert-base-uncased-finetuned-sst-2-english"
+python run_local.py
+```
 
 ---
 
-## Endpoints
+## Input/Output Formats
 
-### `GET /`
-Serves `index.html` if present. Simple UI for upload/URL/crawl.
+### JSON Input
 
-### `GET /healthz`
+**List of strings:**
 ```json
-{"status": "ok", "model": "<MODEL_ID>"}
+["I love this", "This is bad"]
 ```
 
-### `POST /predict/file`
-- **Body:** `multipart/form-data` with `file` (JSON/CSV/HTML).
-- **Response:**  
-  - JSON/CSV → same type with `scores` and `top` label per row/item  
-  - HTML → annotated HTML download
+**List of objects:**
+```json
+[
+  {"text": "Great work!"},
+  {"text": "Could be better."}
+]
+```
 
-### `POST /predict/url`
-- **Body (JSON):**
+### JSON Output
+
+```json
+[
+  {
+    "text": "I love this",
+    "labels": ["positive", "neutral", "negative"],
+    "scores": [0.88, 0.10, 0.02]
+  }
+]
+```
+
+### CSV Input
+
+Must have a `text` column or auto-detected text column:
+```csv
+text,author
+"Great service!",user123
+"Not happy.",user456
+```
+
+### CSV Output
+
+Original columns + new columns:
+```csv
+text,author,score_positive,score_neutral,score_negative,top_label,top_score
+"Great service!",user123,0.88,0.10,0.02,positive,0.88
+```
+
+---
+
+## Web UI Features
+
+The included `index.html` provides:
+
+1. **File Upload**
+   - Drag-and-drop or click to select
+   - Supports JSON, CSV, HTML
+   - Auto-downloads scored results
+
+2. **URL Processing**
+   - Fetch and analyze web pages
+   - JavaScript rendering toggle
+   - Custom cookies and headers
+   - Wait selectors for dynamic content
+
+3. **Advanced Options**
+   - Preset selection
+   - Custom zero-shot labels
+   - Rendering engine choice (Playwright/Selenium)
+   - Scroll passes for lazy-loaded content
+
+**How it works:**
+- Button clicks → JavaScript `fetch()` → HTTP POST to `/predict/*`
+- Python processes → Returns JSON with scores
+- JavaScript downloads results automatically
+
+See `UI_TO_PYTHON_FLOW.md` for the complete technical flow.
+
+---
+
+## Architecture
+
+```
+┌─────────────────┐
+│   index.html    │  Web UI
+│  (Frontend)     │
+└────────┬────────┘
+         │ HTTP POST
+         ▼
+┌─────────────────┐
+│     app.py      │  FastAPI routes
+│   (API Layer)   │
+└────────┬────────┘
+         │
+         ├─────────────────┐
+         │                 │
+         ▼                 ▼
+┌─────────────────┐  ┌──────────────┐
+│     nlp.py      │  │ graph_tasks  │
+│  (NLP Logic)    │  │ (Analytics)  │
+└────────┬────────┘  └──────┬───────┘
+         │                  │
+         ▼                  ▼
+┌─────────────────┐  ┌──────────────┐
+│  Transformers   │  │   NumPy/     │
+│   Pipelines     │  │  Pandas      │
+└─────────────────┘  └──────────────┘
+```
+
+### File Structure
+
+```
+.
+├── app.py                    # FastAPI routes
+├── nlp.py                    # NLP task dispatcher
+├── graph_tasks.py            # Graph analytics
+├── apputils.py               # CSV/JSON processors
+├── fetch.py                  # URL fetching & rendering
+├── render.py                 # HTML annotation
+├── topics.py                 # Topic modeling
+├── index.html                # Web UI
+├── req.txt                   # Docker dependencies
+├── requirements-local.txt    # Local dev dependencies
+├── Dockerfile.cpu            # Container build
+├── run_local.py              # Local startup script
+├── install_windows.bat       # Windows installer
+├── check_compatibility.py    # Dependency checker
+└── README.md                 # This file
+```
+
+---
+
+## Testing
+
+### Test Sentiment Analysis
+```bash
+# Batch endpoint
+curl -X POST "http://localhost:8080/predict/batch" \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["Great!", "Bad."], "preset": "sentiment-twitter"}'
+```
+
+### Test Graph Analytics
+```bash
+# Create test graph
+echo "src,dst
+Alice,Bob
+Bob,Charlie
+Charlie,Alice" > test.csv
+
+# Compute PageRank
+curl -X POST "http://localhost:8080/graph/pagerank" -F "file=@test.csv"
+```
+
+### Test Zero-Shot Classification
+```bash
+curl -X POST "http://localhost:8080/predict/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "texts": ["The stock market crashed today"],
+    "preset": "zeroshot-bart",
+    "labels": ["finance", "sports", "politics"]
+  }'
+```
+
+---
+
+## Performance Tips
+
+1. **Use batch endpoint** for multiple texts (much faster than individual calls)
+2. **First request is slow** (model loading) - subsequent requests are fast
+3. **Long texts are chunked** automatically (>320 words)
+4. **Graph analytics**: For graphs >10k nodes, use individual endpoints instead of `/graph/metrics`
+5. **PageRank**: Adjust `tol` and `iters` based on graph size
+6. **Triangle counting**: Skips graphs >20k nodes by default (configurable)
+
+---
+
+## Recent Fixes & Improvements
+
+### ✅ Fixed: Missing Text in Output (v1.1)
+Original text strings are now included in all sentiment analysis results:
 ```json
 {
-  "url": "https://example.com/article.html",
-  "render": false,
-  "cookies": "opt=1; session=abc...", 
-  "crawl": false,
-  "max_pages": 50,
-  "max_depth": 2,
-  "same_host_only": true,
-  "delay_ms": 300
+  "text": "I love this!",  // ← Now included!
+  "labels": ["positive", ...],
+  "scores": [0.92, ...]
 }
 ```
-- **Behavior:**
-  - If `crawl=false`: processes a single URL
-    - JSON/CSV → same type out
-    - HTML → annotated HTML
-    - If the page is JS-gated, service retries with Playwright (or set `render=true`)
-  - If `crawl=true`: BFS crawl within limits → aggregated **site report** (single annotated HTML)
-- **Response:** downloadable file (content-type set; `Content-Disposition` filename provided)
+
+### ✅ Fixed: Labels Parameter Handling (v1.1)
+- Empty string labels (`""`) now properly converted to `None`
+- Labels only parsed for zero-shot tasks
+- Sentiment/NER tasks no longer receive unnecessary labels parameter
+
+### ✅ Added: Windows Installation Support (v1.1)
+- Automated installer for Windows users
+- Fixes for DLL access denied errors
+- Conda/uvicorn compatibility handling
+- PyTorch/Transformers version checking
+
+### ✅ Added: Comprehensive Graph Analytics (v1.1)
+- Individual endpoints for each graph algorithm
+- Graph validation endpoint
+- Optimized for large graphs
+- Optional GraphBLAS acceleration
 
 ---
 
-## Front-End (index.html)
+## Docker Deployment
 
-- **File upload:** hidden `<input type="file">` + button → `/predict/file`
-- **URL form:** URL + optional **Enable JavaScript** (Playwright), optional **Cookies**
-- **Crawl controls:** checkbox + `max_pages`, `max_depth`, `same_host_only`, `delay_ms`
-- Auto-downloads results and shows status text.
-
-> **Cookies:** Paste a raw `Cookie` header string when a site requires login (e.g., X/Twitter). Cookies are **not stored** and are only used for that request context.
-
----
-
-## Adapters (Pluggable Registry)
-
-`adapters.py` defines a simple registry:
-
-- **GenericAdapter**: default handler for JSON/CSV/HTML (+ optional crawl)
-- **RedditAdapter**: uses Reddit’s `.json` listing/comments to avoid infinite scroll
-
-Add a new adapter by subclassing and decorating:
-
-```python
-@register(domains=("x.com","twitter.com"))
-class TwitterAdapter:
-    async def process(self, url, *, app, render, cookies, crawl, max_pages, max_depth, same_host_only, delay_ms):
-        # likely need cookies + JS render
-        browser = await ensure_browser(app)
-        raw, kind = await fetch_url_bytes_rendered(url, browser, cookies_header=cookies)
-        # parse → paragraphs, classify → HTML
-        paras = html_to_paragraphs(raw)
-        preds = classify_texts([preprocess_text(p) for p in paras])
-        html = render_annotated_html("Twitter", url, paras, preds).encode("utf-8")
-        return AdapterOutput(html, "text/html; charset=utf-8", "twitter_scored.html")
-```
-
-No changes to `app.py` are required — the registry picks it up automatically.
-
----
-
-## Crawler
-
-Implemented in `fetch.py:crawl_site`:
-
-- **BFS** with `max_pages`, `max_depth`, `same_host_only`, `delay_ms`
-- Skips `mailto:` / `javascript:` / non-HTTP(S)
-- Best-effort **robots.txt** (will skip disallowed paths when robots is reachable)
-- Per-page **try/except** (errors are skipped, crawl continues)
-- HTML pages are parsed → paragraphs → scores; JSON/CSV are summarized concisely in site reports
-
-> Tip: Use moderate `max_pages` and a small `delay_ms` to be polite. Some sites will throttle/deny bots.
-
----
-
-## Input & Output Formats
-
-### JSON (input)
-- **List of strings**:
-  ```json
-  ["I love this", "This is bad"]
-  ```
-- **List of objects** (one of the keys must exist): `text` | `tweet` | `content`
-  ```json
-  [{"text":"Great work."},{"text":"Could be better."}]
-  ```
-
-### JSON (output)
-- For list-of-strings input:
-  ```json
-  [
-    {"text":"I love this","scores":{"negative":0.02,"neutral":0.10,"positive":0.88},"top":{"label":"positive","score":0.88}},
-    ...
-  ]
-  ```
-- For list-of-objects:
-  original fields preserved + added `scores` and `top`.
-
-### CSV
-- Auto-detects a text column (prefers `text`/`tweet`/`content`, otherwise first object-dtype column).
-- Adds columns: `score_negative`, `score_neutral`, `score_positive`, `top_label`, `top_score`.
-
-### Annotated HTML
-- Dark neutral cards, **colored left border** and **pill badge** indicating the top label & score.
-- One block per paragraph (HTML) or per item (crawl aggregation).
-
----
-
-## Model Notes
-
-- Default pipeline: `text-classification` (CardiffNLP Twitter RoBERTa).
-- Preprocessing: tweets → replace `@user` and URLs with placeholders.
-- Batch inference (`BATCH_SIZE`) and truncation (`MAX_LEN`) are configurable.
-
-To swap models:
+### Build
 ```bash
-export MODEL_ID=distilbert-base-uncased-finetuned-sst-2-english
+docker build -f Dockerfile.cpu -t sentiment-api:latest .
+```
+
+### Run
+```bash
+docker run -d \
+  --name sentiment-api \
+  -p 8080:8080 \
+  -e MODEL_ID="cardiffnlp/twitter-roberta-base-sentiment-latest" \
+  sentiment-api:latest
+```
+
+### Health Check
+```bash
+docker exec sentiment-api curl http://localhost:8080/healthz
+```
+
+### View Logs
+```bash
+docker logs -f sentiment-api
 ```
 
 ---
 
-## Troubleshooting
+## Security Notes
 
-- **Docker can’t connect / EOF:** Ensure Docker Desktop is running; `docker version` must show a **Server**. Switch context if needed:
-  ```powershell
-  docker context use default
-  wsl --shutdown   # then reopen Docker Desktop, on Windows
-  ```
-- **Playwright errors:** Rebuild with network stable. The Dockerfile runs:
-  ```
-  python -m playwright install --with-deps chromium
-  ```
-  Locally:
-  ```
-  python -m playwright install chromium
-  ```
-- **Twitter/X shows “enable JavaScript / login” page:** That’s an interstitial. Provide a valid `Cookie` header from a logged-in browser, or implement an OAuth adapter. The service supports passing a raw cookie string in `/predict/url`.
-- **Reddit returns few items:** Use the Reddit adapter by calling `/predict/url` on a `reddit.com` URL (we hit the `.json` API and page through).
-- **Package versions:** `req.txt` pins broad minimums; if you change Python versions, re-resolve if pip reports incompatibilities.
+- **Cookies:** Not persisted; only used for specific requests
+- **File Uploads:** Limited to 100MB
+- **URL Fetching:** Respects robots.txt (best effort)
+- **Rate Limiting:** Not included - add if deploying publicly
+- **Authentication:** Not included - add if needed
+
+**For production deployment, consider:**
+- Rate limiting (e.g., FastAPI middleware)
+- Authentication (e.g., API keys, OAuth)
+- Input validation and sanitization
+- HTTPS/TLS termination
+- Resource limits (memory, CPU)
+- Monitoring and logging
 
 ---
 
-## Security
+## API Documentation
 
-- Cookies passed via `/predict/url` are **not persisted** by default; they’re only injected into the Playwright context for that request.
-- If you deploy this, consider:
-  - rate limiting,
-  - domain allowlists,
-  - size/time limits (already included),
-  - TLS termination and secrets management.
+Once the server is running, visit:
+- **Interactive API docs:** http://localhost:8080/docs (Swagger UI)
+- **Alternative docs:** http://localhost:8080/redoc (ReDoc)
+
+These are auto-generated from FastAPI and show all endpoints with examples.
 
 ---
 
 ## License
 
-This repo uses open-source model weights and libraries with their own licenses (Hugging Face Transformers, Playwright, etc.). Review and comply with those licenses in your deployment context.
+This project uses open-source libraries and model weights with their own licenses:
+- Hugging Face Transformers (Apache 2.0)
+- FastAPI (MIT)
+- PyTorch (BSD)
+- spaCy (MIT)
+- Individual model licenses vary (check model cards on Hugging Face)
+
+Review and comply with all relevant licenses for your deployment.
 
 ---
+
+## Contributing
+
+Contributions are welcome! Please:
+1. Test your changes locally
+2. Run `python check_compatibility.py`
+3. Ensure all endpoints work
+4. Update this README if adding features
+
+---
+
+## Support
+
+For issues or questions:
+1. Check the **Troubleshooting** section above
+2. Run `python check_compatibility.py` for dependency issues
+3. Check the auto-generated API docs at `/docs`
+4. Review the specific `*_FIX_SUMMARY.md` files for known issues
+
+---
+
+**Version:** 1.1
+**Last Updated:** 2025
+**Python:** 3.10+
+**PyTorch:** 2.2-2.4
+**Transformers:** 4.40-4.44
