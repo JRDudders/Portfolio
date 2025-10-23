@@ -27,10 +27,11 @@ A production-ready FastAPI service providing:
 - **GraphBLAS Support:** Optional sparse matrix acceleration
 
 ### Web & Data Processing
-- **File Formats:** JSON, CSV, HTML
+- **File Formats:** JSON, CSV, HTML, .edge, .node
 - **URL Processing:** Fetch and analyze web pages
 - **JavaScript Rendering:** Playwright/Selenium for SPA support
 - **Crawling:** Multi-page site analysis with depth/breadth controls
+- **Graph Data:** Native support for .edge/.node formats alongside CSV/JSON
 
 ---
 
@@ -248,10 +249,20 @@ Bob,Charlie,1.5
 ### `POST /graph/degrees` (New!)
 Compute degree metrics for all nodes.
 
+**Parameters:**
+- `edges_file` (required): Edge list (CSV, JSON, or .edge format)
+- `nodes_file` (optional): Node attributes (CSV, JSON, or .node format)
+
 **Example:**
 ```bash
+# With CSV edge list
 curl -X POST "http://localhost:8080/graph/degrees" \
-  -F "file=@network.csv"
+  -F "edges_file=@network.csv"
+
+# With .edge file and optional .node attributes
+curl -X POST "http://localhost:8080/graph/degrees" \
+  -F "edges_file=@graph.edge" \
+  -F "nodes_file=@nodes.node"
 ```
 
 **Response:**
@@ -571,6 +582,82 @@ text,author,score_positive,score_neutral,score_negative,top_label,top_score
 "Great service!",user123,0.88,0.10,0.02,positive,0.88
 ```
 
+### Graph File Formats
+
+#### Edge List Formats
+
+**CSV Format (.csv):**
+```csv
+src,dst,weight
+Alice,Bob,1.0
+Bob,Charlie,2.5
+Charlie,Alice,1.0
+```
+
+**JSON Format (.json):**
+```json
+[
+  {"src": "Alice", "dst": "Bob", "weight": 1.0},
+  {"src": "Bob", "dst": "Charlie", "weight": 2.5},
+  {"src": "Charlie", "dst": "Alice", "weight": 1.0}
+]
+```
+
+Or with wrapper:
+```json
+{
+  "edges": [
+    {"src": "Alice", "dst": "Bob", "weight": 1.0}
+  ]
+}
+```
+
+**.edge Format (space/tab-separated):**
+```
+# Graph edge list
+Alice Bob 1.0
+Bob Charlie 2.5
+Charlie Alice 1.0
+```
+
+#### Node Attributes Formats (Optional)
+
+**CSV Format (.csv):**
+```csv
+id,label,category,value
+Alice,Node A,type1,100
+Bob,Node B,type2,200
+Charlie,Node C,type1,150
+```
+
+**JSON Format (.json):**
+```json
+[
+  {"id": "Alice", "label": "Node A", "category": "type1", "value": 100},
+  {"id": "Bob", "label": "Node B", "category": "type2", "value": 200}
+]
+```
+
+Or with wrapper:
+```json
+{
+  "nodes": [
+    {"id": "Alice", "label": "Node A", "category": "type1"}
+  ]
+}
+```
+
+**.node Format (space/tab-separated):**
+```
+# Graph node attributes
+# Format: id [label] [attr1] [attr2] ...
+Alice NodeA type1 100
+Bob NodeB type2 200
+Charlie NodeC type1 150
+```
+
+**Note:** Node attributes are automatically merged with graph metric results when provided. All graph endpoints accept optional `nodes_file` parameter.
+
 ---
 
 ## Web UI Features
@@ -667,14 +754,30 @@ curl -X POST "http://localhost:8080/predict/batch" \
 
 ### Test Graph Analytics
 ```bash
-# Create test graph
+# Create test graph (CSV format)
 echo "src,dst
 Alice,Bob
 Bob,Charlie
 Charlie,Alice" > test.csv
 
-# Compute PageRank
-curl -X POST "http://localhost:8080/graph/pagerank" -F "file=@test.csv"
+# Or create .edge format
+echo "Alice Bob
+Bob Charlie
+Charlie Alice" > test.edge
+
+# Create optional node attributes (.node format)
+echo "Alice NodeA type1
+Bob NodeB type2
+Charlie NodeC type1" > nodes.node
+
+# Compute PageRank with CSV
+curl -X POST "http://localhost:8080/graph/pagerank" \
+  -F "edges_file=@test.csv"
+
+# Compute PageRank with .edge and .node files
+curl -X POST "http://localhost:8080/graph/pagerank" \
+  -F "edges_file=@test.edge" \
+  -F "nodes_file=@nodes.node"
 ```
 
 ### Test Zero-Shot Classification

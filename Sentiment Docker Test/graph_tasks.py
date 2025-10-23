@@ -17,12 +17,20 @@ Edge JSON schema:
   Either a list of {"src": "...", "dst": "...", ...} objects
   or a dict with key "edges" -> list of such objects.
 
+Edge .edge schema (space/tab-separated):
+  src dst [weight]
+  # Lines starting with # are comments
+
 Node CSV schema (optional):
   id, [attribute1, attribute2, ...]
 
 Node JSON schema (optional):
   Either a list of {"id": "...", "attr1": "...", ...} objects
   or a dict with key "nodes" -> list of such objects.
+
+Node .node schema (space/tab-separated):
+  id [label] [attr1] [attr2] ...
+  # Lines starting with # are comments
 """
 from __future__ import annotations
 
@@ -119,6 +127,92 @@ def load_nodes_json(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
     cols = {c.lower(): c for c in df.columns}
     id_col = cols.get("id") or cols.get("node") or cols.get("node_id") or list(df.columns)[0]
     df = df.rename(columns={id_col: "id"})
+    df["id"] = df["id"].astype(str)
+    return df
+
+
+def load_edges_edge_file(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
+    """
+    Load edge list from .edge format (space/tab-separated).
+    Format: src dst [weight]
+    Lines starting with # are treated as comments.
+    """
+    lines = file_bytes.decode(encoding).splitlines()
+    edges = []
+
+    for line in lines:
+        line = line.strip()
+        # Skip empty lines and comments
+        if not line or line.startswith('#'):
+            continue
+
+        # Split by whitespace
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+
+        edge = {"src": parts[0], "dst": parts[1]}
+        if len(parts) >= 3:
+            try:
+                edge["weight"] = float(parts[2])
+            except ValueError:
+                pass  # Ignore invalid weights
+
+        edges.append(edge)
+
+    if not edges:
+        raise ValueError(".edge file contains no valid edges")
+
+    df = pd.DataFrame(edges)
+    df["src"] = df["src"].astype(str)
+    df["dst"] = df["dst"].astype(str)
+    return df
+
+
+def load_nodes_node_file(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
+    """
+    Load node list from .node format (space/tab-separated).
+    Format: id [label] [attr1] [attr2] ...
+    Lines starting with # are treated as comments.
+    """
+    lines = file_bytes.decode(encoding).splitlines()
+    nodes = []
+    max_cols = 0
+
+    # First pass: determine structure
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split()
+        max_cols = max(max_cols, len(parts))
+
+    # Second pass: parse nodes
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        parts = line.split()
+        if len(parts) < 1:
+            continue
+
+        node = {"id": parts[0]}
+
+        # If there's a second column, treat it as label
+        if len(parts) >= 2:
+            node["label"] = parts[1]
+
+        # Additional columns as attr1, attr2, etc.
+        for i in range(2, len(parts)):
+            node[f"attr{i-1}"] = parts[i]
+
+        nodes.append(node)
+
+    if not nodes:
+        raise ValueError(".node file contains no valid nodes")
+
+    df = pd.DataFrame(nodes)
     df["id"] = df["id"].astype(str)
     return df
 
@@ -348,14 +442,16 @@ def load_graph_from_bytes(
 ) -> GraphData:
     """
     Load graph from edge list with optional node attributes.
-    kind, nodes_kind ∈ {"csv","json"}
+    kind, nodes_kind ∈ {"csv","json","edge","node"}
     """
     if kind == "csv":
         df_edges = load_edges_csv(file_bytes)
     elif kind == "json":
         df_edges = load_edges_json(file_bytes)
+    elif kind == "edge":
+        df_edges = load_edges_edge_file(file_bytes)
     else:
-        raise ValueError("kind must be 'csv' or 'json'")
+        raise ValueError("kind must be 'csv', 'json', or 'edge'")
 
     df_nodes = None
     if nodes_bytes:
@@ -364,8 +460,10 @@ def load_graph_from_bytes(
             df_nodes = load_nodes_csv(nodes_bytes)
         elif nk == "json":
             df_nodes = load_nodes_json(nodes_bytes)
+        elif nk == "node":
+            df_nodes = load_nodes_node_file(nodes_bytes)
         else:
-            raise ValueError("nodes_kind must be 'csv' or 'json'")
+            raise ValueError("nodes_kind must be 'csv', 'json', or 'node'")
 
     return build_graph(df_edges, df_nodes=df_nodes)
 

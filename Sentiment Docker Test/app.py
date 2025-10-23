@@ -55,6 +55,23 @@ def _parse_labels_csv(s: str | None) -> T.List[str] | None:
     labels = [x.strip() for x in s.split(",") if x.strip()]
     return labels if labels else None  # More explicit than 'or'
 
+def _detect_graph_file_kind(filename: str | None) -> str:
+    """Detect graph file type from filename extension."""
+    if not filename:
+        return "csv"  # Default fallback
+
+    filename_lower = filename.lower()
+    if filename_lower.endswith(".csv"):
+        return "csv"
+    elif filename_lower.endswith(".json"):
+        return "json"
+    elif filename_lower.endswith(".edge"):
+        return "edge"
+    elif filename_lower.endswith(".node"):
+        return "node"
+    else:
+        return "csv"  # Default fallback
+
 def _texts_from_json_bytes(b: bytes) -> T.List[str]:
     data = json.loads(b.decode("utf-8"))
     if isinstance(data, list):
@@ -395,8 +412,8 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
 # ---- Graph metrics --------------------------------------------------------- #
 @app.post("/graph/metrics")
 async def graph_metrics(
-    edges_file: UploadFile = File(..., description="Edge list CSV/JSON"),
-    nodes_file: UploadFile | None = File(None, description="Optional node attributes CSV/JSON"),
+    edges_file: UploadFile = File(..., description="Edge list (CSV/JSON/.edge)"),
+    nodes_file: UploadFile | None = File(None, description="Optional node attributes (CSV/JSON/.node)"),
     tasks: str = Query("degrees,pagerank", description="Comma-separated: degrees,pagerank,bfs,triangles"),
     bfs_source: str | None = Query(None),
     pagerank_alpha: float = Query(0.85),
@@ -407,13 +424,13 @@ async def graph_metrics(
     """Compute multiple graph metrics in one call."""
     try:
         b = await edges_file.read()
-        kind = "csv" if (edges_file.filename or "").lower().endswith(".csv") else "json"
+        kind = _detect_graph_file_kind(edges_file.filename)
 
         nodes_bytes = None
         nodes_kind = None
         if nodes_file:
             nodes_bytes = await nodes_file.read()
-            nodes_kind = "csv" if (nodes_file.filename or "").lower().endswith(".csv") else "json"
+            nodes_kind = _detect_graph_file_kind(nodes_file.filename)
 
         g = load_graph_from_bytes(b, kind=kind, nodes_bytes=nodes_bytes, nodes_kind=nodes_kind)
         task_list = [t.strip() for t in tasks.split(",") if t.strip()]
@@ -434,20 +451,20 @@ async def graph_metrics(
 
 @app.post("/graph/degrees")
 async def graph_degrees(
-    edges_file: UploadFile = File(..., description="Edge list CSV/JSON"),
-    nodes_file: UploadFile | None = File(None, description="Optional node attributes CSV/JSON"),
+    edges_file: UploadFile = File(..., description="Edge list (CSV/JSON/.edge)"),
+    nodes_file: UploadFile | None = File(None, description="Optional node attributes (CSV/JSON/.node)"),
 ):
     """Compute in-degree, out-degree, and total degree for all nodes."""
     try:
         from graph_tasks import degrees, merge_node_attributes
         b = await edges_file.read()
-        kind = "csv" if (edges_file.filename or "").lower().endswith(".csv") else "json"
+        kind = _detect_graph_file_kind(edges_file.filename)
 
         nodes_bytes = None
         nodes_kind = None
         if nodes_file:
             nodes_bytes = await nodes_file.read()
-            nodes_kind = "csv" if (nodes_file.filename or "").lower().endswith(".csv") else "json"
+            nodes_kind = _detect_graph_file_kind(nodes_file.filename)
 
         g = load_graph_from_bytes(b, kind=kind, nodes_bytes=nodes_bytes, nodes_kind=nodes_kind)
         df = degrees(g)
@@ -465,8 +482,8 @@ async def graph_degrees(
 
 @app.post("/graph/pagerank")
 async def graph_pagerank(
-    edges_file: UploadFile = File(..., description="Edge list CSV/JSON"),
-    nodes_file: UploadFile | None = File(None, description="Optional node attributes CSV/JSON"),
+    edges_file: UploadFile = File(..., description="Edge list (CSV/JSON/.edge)"),
+    nodes_file: UploadFile | None = File(None, description="Optional node attributes (CSV/JSON/.node)"),
     alpha: float = Query(0.85, description="Damping factor (0.0-1.0)"),
     iters: int = Query(40, description="Maximum iterations"),
     tol: float = Query(1e-6, description="Convergence tolerance"),
@@ -475,13 +492,13 @@ async def graph_pagerank(
     try:
         from graph_tasks import pagerank, merge_node_attributes
         b = await edges_file.read()
-        kind = "csv" if (edges_file.filename or "").lower().endswith(".csv") else "json"
+        kind = _detect_graph_file_kind(edges_file.filename)
 
         nodes_bytes = None
         nodes_kind = None
         if nodes_file:
             nodes_bytes = await nodes_file.read()
-            nodes_kind = "csv" if (nodes_file.filename or "").lower().endswith(".csv") else "json"
+            nodes_kind = _detect_graph_file_kind(nodes_file.filename)
 
         g = load_graph_from_bytes(b, kind=kind, nodes_bytes=nodes_bytes, nodes_kind=nodes_kind)
         df = pagerank(g, alpha=alpha, iters=iters, tol=tol)
@@ -500,21 +517,21 @@ async def graph_pagerank(
 
 @app.post("/graph/bfs")
 async def graph_bfs(
-    edges_file: UploadFile = File(..., description="Edge list CSV/JSON"),
-    nodes_file: UploadFile | None = File(None, description="Optional node attributes CSV/JSON"),
+    edges_file: UploadFile = File(..., description="Edge list (CSV/JSON/.edge)"),
+    nodes_file: UploadFile | None = File(None, description="Optional node attributes (CSV/JSON/.node)"),
     source: str = Query(..., description="Source node ID for BFS"),
 ):
     """Compute breadth-first search distances from a source node."""
     try:
         from graph_tasks import bfs, merge_node_attributes
         b = await edges_file.read()
-        kind = "csv" if (edges_file.filename or "").lower().endswith(".csv") else "json"
+        kind = _detect_graph_file_kind(edges_file.filename)
 
         nodes_bytes = None
         nodes_kind = None
         if nodes_file:
             nodes_bytes = await nodes_file.read()
-            nodes_kind = "csv" if (nodes_file.filename or "").lower().endswith(".csv") else "json"
+            nodes_kind = _detect_graph_file_kind(nodes_file.filename)
 
         g = load_graph_from_bytes(b, kind=kind, nodes_bytes=nodes_bytes, nodes_kind=nodes_kind)
         df = bfs(g, source)
@@ -535,21 +552,21 @@ async def graph_bfs(
 
 @app.post("/graph/triangles")
 async def graph_triangles(
-    edges_file: UploadFile = File(..., description="Edge list CSV/JSON (undirected graph)"),
-    nodes_file: UploadFile | None = File(None, description="Optional node attributes CSV/JSON"),
+    edges_file: UploadFile = File(..., description="Edge list (CSV/JSON/.edge) for undirected graph"),
+    nodes_file: UploadFile | None = File(None, description="Optional node attributes (CSV/JSON/.node)"),
     max_nodes: int = Query(20000, description="Skip if graph has more nodes than this"),
 ):
     """Count triangles in an undirected graph."""
     try:
         from graph_tasks import triangles_undirected
         b = await edges_file.read()
-        kind = "csv" if (edges_file.filename or "").lower().endswith(".csv") else "json"
+        kind = _detect_graph_file_kind(edges_file.filename)
 
         nodes_bytes = None
         nodes_kind = None
         if nodes_file:
             nodes_bytes = await nodes_file.read()
-            nodes_kind = "csv" if (nodes_file.filename or "").lower().endswith(".csv") else "json"
+            nodes_kind = _detect_graph_file_kind(nodes_file.filename)
 
         g = load_graph_from_bytes(b, kind=kind, nodes_bytes=nodes_bytes, nodes_kind=nodes_kind)
         tri_result = triangles_undirected(g, max_nodes=max_nodes)
@@ -566,19 +583,19 @@ async def graph_triangles(
 
 @app.post("/graph/load")
 async def graph_load(
-    edges_file: UploadFile = File(..., description="Edge list CSV/JSON"),
-    nodes_file: UploadFile | None = File(None, description="Optional node attributes CSV/JSON"),
+    edges_file: UploadFile = File(..., description="Edge list (CSV/JSON/.edge)"),
+    nodes_file: UploadFile | None = File(None, description="Optional node attributes (CSV/JSON/.node)"),
 ):
     """Load and validate a graph, returning basic statistics and visualization data."""
     try:
         b = await edges_file.read()
-        kind = "csv" if (edges_file.filename or "").lower().endswith(".csv") else "json"
+        kind = _detect_graph_file_kind(edges_file.filename)
 
         nodes_bytes = None
         nodes_kind = None
         if nodes_file:
             nodes_bytes = await nodes_file.read()
-            nodes_kind = "csv" if (nodes_file.filename or "").lower().endswith(".csv") else "json"
+            nodes_kind = _detect_graph_file_kind(nodes_file.filename)
 
         g = load_graph_from_bytes(b, kind=kind, nodes_bytes=nodes_bytes, nodes_kind=nodes_kind)
 
