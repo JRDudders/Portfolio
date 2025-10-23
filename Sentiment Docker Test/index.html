@@ -481,6 +481,8 @@
 
     // Interactive graph visualization using vis.js
     let currentGraphNetwork = null;
+    let currentGraphPhysicsEnabled = false;
+
     function displayGraph(data){
       const viz = document.getElementById('graph-viz');
       const stats = document.getElementById('graph-stats');
@@ -505,19 +507,26 @@
       const nodeIds = new Set(nodesToShow.map(n => n.id));
       const edgesToShow = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-      // Prepare vis.js data
-      const visNodes = nodesToShow.map(n => ({
-        id: n.id,
-        label: n.id,
-        title: `Node: ${n.id}`, // Tooltip
-        color: {
-          background: '#6aa2ff',
-          border: '#4a82d9',
-          highlight: { background: '#8fb9ff', border: '#6aa2ff' },
-          hover: { background: '#7eadff', border: '#5a92e9' }
-        },
-        font: { color: '#e6e6e6', size: 12 }
-      }));
+      // Prepare vis.js data with name field support
+      const visNodes = nodesToShow.map(n => {
+        // Use 'name' field if available, otherwise use 'id'
+        const displayName = n.name || n.label || n.id;
+        const tooltipLines = [`Node: ${n.id}`];
+        if(n.name) tooltipLines.push(`Name: ${n.name}`);
+
+        return {
+          id: n.id,
+          label: displayName,
+          title: tooltipLines.join('\n'),
+          color: {
+            background: '#6aa2ff',
+            border: '#4a82d9',
+            highlight: { background: '#8fb9ff', border: '#6aa2ff' },
+            hover: { background: '#7eadff', border: '#5a92e9' }
+          },
+          font: { color: '#e6e6e6', size: 12 }
+        };
+      });
 
       const visEdges = edgesToShow.map((e, idx) => ({
         id: idx,
@@ -528,7 +537,7 @@
         smooth: { type: 'continuous' }
       }));
 
-      // Create network
+      // Create network with improved physics
       const graphData = { nodes: new vis.DataSet(visNodes), edges: new vis.DataSet(visEdges) };
       const options = {
         nodes: {
@@ -542,11 +551,15 @@
         },
         physics: {
           enabled: true,
-          stabilization: { iterations: 150 },
+          stabilization: {
+            enabled: true,
+            iterations: 200,
+            updateInterval: 25
+          },
           barnesHut: {
-            gravitationalConstant: -15000,
+            gravitationalConstant: -8000,
             centralGravity: 0.3,
-            springLength: 100,
+            springLength: 120,
             springConstant: 0.04,
             damping: 0.09,
             avoidOverlap: 0.1
@@ -569,16 +582,35 @@
       if(currentGraphNetwork) currentGraphNetwork.destroy();
       currentGraphNetwork = new vis.Network(container, graphData, options);
 
+      // Disable physics after stabilization to prevent writhing
+      currentGraphNetwork.once('stabilizationIterationsDone', () => {
+        currentGraphNetwork.setOptions({ physics: { enabled: false } });
+        currentGraphPhysicsEnabled = false;
+        updatePhysicsButton('graph-physics-toggle', false);
+      });
+
       // Wire up controls
       document.getElementById('graph-fit').onclick = () => currentGraphNetwork.fit();
-      document.getElementById('graph-physics-toggle').onclick = () => {
-        const enabled = currentGraphNetwork.physics.options.enabled;
-        currentGraphNetwork.setOptions({ physics: { enabled: !enabled } });
+
+      const physicsBtn = document.getElementById('graph-physics-toggle');
+      physicsBtn.onclick = () => {
+        currentGraphPhysicsEnabled = !currentGraphPhysicsEnabled;
+        currentGraphNetwork.setOptions({ physics: { enabled: currentGraphPhysicsEnabled } });
+        updatePhysicsButton('graph-physics-toggle', currentGraphPhysicsEnabled);
       };
+      updatePhysicsButton('graph-physics-toggle', true); // Initially enabled during stabilization
 
       // Show truncation note
       if(data.nodes.length > maxNodes){
         stats.textContent += ` (showing ${maxNodes} of ${data.nodes.length} nodes)`;
+      }
+    }
+
+    function updatePhysicsButton(btnId, enabled) {
+      const btn = document.getElementById(btnId);
+      if(btn) {
+        btn.textContent = enabled ? 'Disable Physics' : 'Enable Physics';
+        btn.style.backgroundColor = enabled ? 'var(--warn)' : '';
       }
     }
 
@@ -634,6 +666,8 @@
 
     // Interactive ego network visualization with circle highlighting
     let currentEgoNetwork = null;
+    let currentEgoPhysicsEnabled = false;
+
     function displayEgoNetwork(data){
       const viz = document.getElementById('ego-viz');
       const stats = document.getElementById('ego-stats');
@@ -683,8 +717,11 @@
       const nodeIds = new Set(nodesToShow.map(n => n.id));
       const edgesToShow = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-      // Prepare vis.js data with circle-based coloring
+      // Prepare vis.js data with circle-based coloring and name support
       const visNodes = nodesToShow.map(n => {
+        // Use 'name' field if available, otherwise use 'id'
+        const displayName = n.name || n.label || n.id;
+
         // Determine node color based on circle membership
         let nodeColor = '#6aa2ff';
         let borderColor = '#4a82d9';
@@ -696,11 +733,13 @@
         // Highlight ego node
         let nodeSize = 10;
         let tooltip = `Node: ${n.id}`;
+        if(n.name) tooltip += `\nName: ${n.name}`;
         if(data.ego_id && n.id === data.ego_id){
           nodeColor = '#ff6b6b';
           borderColor = '#d94a4a';
           nodeSize = 20;
           tooltip = `Ego Node: ${n.id}`;
+          if(n.name) tooltip += `\nName: ${n.name}`;
         }
 
         if(n.circles && n.circles.length > 0){
@@ -709,7 +748,7 @@
 
         return {
           id: n.id,
-          label: n.id,
+          label: displayName,
           title: tooltip,
           size: nodeSize,
           color: {
@@ -731,7 +770,7 @@
         smooth: { type: 'continuous' }
       }));
 
-      // Create network
+      // Create network with improved physics
       const graphData = { nodes: new vis.DataSet(visNodes), edges: new vis.DataSet(visEdges) };
       const options = {
         nodes: {
@@ -744,12 +783,16 @@
         },
         physics: {
           enabled: true,
-          stabilization: { iterations: 150 },
+          stabilization: {
+            enabled: true,
+            iterations: 200,
+            updateInterval: 25
+          },
           barnesHut: {
-            gravitationalConstant: -12000,
+            gravitationalConstant: -8000,
             centralGravity: 0.5,
             springLength: 120,
-            springConstant: 0.05,
+            springConstant: 0.04,
             damping: 0.09,
             avoidOverlap: 0.2
           }
@@ -771,12 +814,23 @@
       if(currentEgoNetwork) currentEgoNetwork.destroy();
       currentEgoNetwork = new vis.Network(container, graphData, options);
 
+      // Disable physics after stabilization to prevent writhing
+      currentEgoNetwork.once('stabilizationIterationsDone', () => {
+        currentEgoNetwork.setOptions({ physics: { enabled: false } });
+        currentEgoPhysicsEnabled = false;
+        updatePhysicsButton('ego-physics-toggle', false);
+      });
+
       // Wire up controls
       document.getElementById('ego-fit').onclick = () => currentEgoNetwork.fit();
-      document.getElementById('ego-physics-toggle').onclick = () => {
-        const enabled = currentEgoNetwork.physics.options.enabled;
-        currentEgoNetwork.setOptions({ physics: { enabled: !enabled } });
+
+      const physicsBtn = document.getElementById('ego-physics-toggle');
+      physicsBtn.onclick = () => {
+        currentEgoPhysicsEnabled = !currentEgoPhysicsEnabled;
+        currentEgoNetwork.setOptions({ physics: { enabled: currentEgoPhysicsEnabled } });
+        updatePhysicsButton('ego-physics-toggle', currentEgoPhysicsEnabled);
       };
+      updatePhysicsButton('ego-physics-toggle', true); // Initially enabled during stabilization
 
       // Show truncation note
       if(data.nodes.length > maxNodes){
