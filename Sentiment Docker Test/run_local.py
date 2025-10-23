@@ -124,27 +124,19 @@ if __name__ == "__main__":
         import cudf
         import cugraph
         print(f"✓ cuGraph {cugraph.__version__} and cuDF {cudf.__version__} available")
+        print("✓ GPU graph acceleration enabled")
     except ImportError:
-        print("⚠ cuGraph/cuDF not installed (graph GPU acceleration unavailable)")
-
         if is_windows:
-            print("  ⚠ RAPIDS (cuGraph/cuDF) does NOT support Windows")
-            print("  Solutions:")
-            print("  1. Docker Desktop with WSL2 (recommended):")
-            print("     docker build -f Dockerfile.gpu -t sentiment-gpu .")
-            print("     docker run --gpus all -p 8080:8080 sentiment-gpu")
-            print("  2. Use WSL2 (Windows Subsystem for Linux)")
-            print("  3. CPU fallback (current mode - functional but slower)")
+            print("✓ Graph analytics: NetworkX (CPU-based)")
+            print("  Note: GPU graph acceleration requires Docker/WSL2 on Windows")
+            print("        See WINDOWS_GPU.md for setup instructions")
         elif not py_supported:
-            print(f"  ⚠ Python {py_version.major}.{py_version.minor} not supported by RAPIDS")
-            print(f"  RAPIDS requires Python 3.10, 3.11, or 3.12")
-            print("  Solutions:")
-            print("  1. Use Docker (recommended): ./run_docker_gpu.sh")
-            print("  2. Create environment: conda create -n rapids python=3.12")
-            print("  3. CPU fallback (current mode)")
+            print(f"⚠ Graph analytics: NetworkX (CPU-based)")
+            print(f"  Note: RAPIDS GPU requires Python 3.10-3.12 (you have {py_version.major}.{py_version.minor})")
+            print("        Use Docker for GPU: ./run_docker_gpu.sh")
         else:
-            print("  Install: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
-            print("  Or use: ./run_docker_gpu.sh")
+            print("⚠ Graph analytics: NetworkX (CPU-based)")
+            print("  For GPU: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
     print()
 
     # Try methods in order

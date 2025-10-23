@@ -76,9 +76,14 @@ import os
 import sys
 import platform
 VERBOSE_GPU = os.getenv('VERBOSE_GPU', '1') == '1'
+is_windows = platform.system() == 'Windows'
 
 if VERBOSE_GPU:
-    print("[graph_tasks] GPU Detection Starting...")
+    if is_windows:
+        print("[graph_tasks] Running on Windows - using NetworkX for graph analytics (CPU)")
+        print("[graph_tasks] For GPU acceleration, use Docker or WSL2 (see WINDOWS_GPU.md)")
+    else:
+        print("[graph_tasks] GPU Detection Starting...")
 
 try:
     import cudf  # GPU DataFrame
@@ -90,38 +95,21 @@ try:
 except ImportError as e:
     HAS_GPU = False
     HAS_CUGRAPH = False
-    if VERBOSE_GPU:
-        print(f"[graph_tasks] ✗ cuGraph/cuDF not installed: {e}")
+    if VERBOSE_GPU and not is_windows:
+        # Only show detailed cuDF errors on Linux (where it's expected to work)
+        print(f"[graph_tasks] ✗ cuGraph/cuDF not installed")
 
-        # Detect OS and Python version
-        is_windows = platform.system() == 'Windows'
         py_version = sys.version_info
         py_supported = (3, 10) <= py_version[:2] <= (3, 12)
 
-        if is_windows:
-            print("[graph_tasks]   ⚠ RAPIDS (cuGraph/cuDF) does NOT support Windows")
-            print("[graph_tasks]   Solutions:")
-            print("[graph_tasks]   1. Use Docker Desktop with WSL2 backend:")
-            print("[graph_tasks]      docker build -f Dockerfile.gpu -t sentiment-gpu .")
-            print("[graph_tasks]      docker run --gpus all -p 8080:8080 sentiment-gpu")
-            print("[graph_tasks]   2. Use WSL2 (Windows Subsystem for Linux):")
-            print("[graph_tasks]      Install Ubuntu on WSL2, then install cuGraph there")
-            print("[graph_tasks]   3. Use CPU fallback (current mode)")
-        elif not py_supported:
+        if not py_supported:
             print(f"[graph_tasks]   ⚠ Python {py_version.major}.{py_version.minor} not supported by RAPIDS")
-            print(f"[graph_tasks]   RAPIDS supports Python 3.10, 3.11, or 3.12 only")
-            print(f"[graph_tasks]   Current: Python {py_version.major}.{py_version.minor}.{py_version.micro}")
-            print("[graph_tasks]   Solutions:")
-            print("[graph_tasks]   1. Use Docker (recommended):")
-            print("[graph_tasks]      docker build -f Dockerfile.gpu -t sentiment-gpu .")
-            print("[graph_tasks]      docker run --gpus all -p 8080:8080 sentiment-gpu")
-            print("[graph_tasks]   2. Create conda environment with Python 3.12:")
-            print("[graph_tasks]      conda create -n rapids-env python=3.12")
-            print("[graph_tasks]      conda activate rapids-env")
-            print("[graph_tasks]   3. Use CPU fallback (current mode)")
+            print(f"[graph_tasks]   RAPIDS requires Python 3.10, 3.11, or 3.12")
+            print("[graph_tasks]   Solution: Use Docker (has Python 3.11)")
         else:
-            print("[graph_tasks]   Install with: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
-            print("[graph_tasks]   Or use Docker: docker build -f Dockerfile.gpu -t sentiment-gpu . && docker run --gpus all ...")
+            print("[graph_tasks]   Install: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
+            print("[graph_tasks]   Or use: docker build -f Dockerfile.gpu -t sentiment-gpu .")
+        print("[graph_tasks]   Falling back to NetworkX (CPU)")
 
 if HAS_CUGRAPH:
     try:
@@ -130,21 +118,23 @@ if HAS_CUGRAPH:
         if HAS_GPU:
             print(f"[graph_tasks] ✓ GPU detected: {torch.cuda.get_device_name(0)}")
             print(f"[graph_tasks] ✓ CUDA version: {torch.version.cuda}")
-            print(f"[graph_tasks] ✓ GPU acceleration ENABLED")
+            print(f"[graph_tasks] ✓ GPU GRAPH ACCELERATION ENABLED")
         else:
             if VERBOSE_GPU:
-                print("[graph_tasks] ✗ PyTorch installed but no CUDA GPU detected")
-                print("[graph_tasks]   Check: nvidia-smi (ensure NVIDIA drivers installed)")
-                print("[graph_tasks]   Install PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+                print("[graph_tasks] ✗ cuGraph installed but no CUDA GPU detected")
+                print("[graph_tasks]   Check: nvidia-smi")
     except ImportError:
         HAS_GPU = False
         if VERBOSE_GPU:
-            print("[graph_tasks] ✗ PyTorch not installed")
-            print("[graph_tasks]   Install with: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+            print("[graph_tasks] ✗ PyTorch not installed (cannot detect GPU)")
 
 if not HAS_GPU and VERBOSE_GPU:
-    print("[graph_tasks] ⚠ GPU acceleration DISABLED - using CPU fallback")
-    print("[graph_tasks]   Set VERBOSE_GPU=0 to hide these messages")
+    if is_windows:
+        print("[graph_tasks] ✓ NetworkX ready for graph analytics (works great on CPU)")
+        print("[graph_tasks]   Set VERBOSE_GPU=0 to hide this message")
+    else:
+        print("[graph_tasks] ⚠ GPU graph acceleration disabled - using NetworkX (CPU)")
+        print("[graph_tasks]   Set VERBOSE_GPU=0 to hide these messages")
 
 
 
