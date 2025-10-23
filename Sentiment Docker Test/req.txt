@@ -1,40 +1,45 @@
+# Core API Framework
 fastapi>=0.111
 uvicorn>=0.30
+hypercorn>=0.16.0  # Alternative ASGI server (fallback in run_local.py)
+python-multipart>=0.0.9
 
+# Machine Learning & NLP Core
 transformers>=4.44
 torch>=2.3
 sentencepiece>=0.1.99
+sentence-transformers>=3.0
 
+# Data Processing
 pandas>=2.2
 numpy>=1.26
 scikit-learn>=1.5
 
+# Web Scraping & Content Extraction
 requests>=2.32
-python-multipart>=0.0.9
 beautifulsoup4>=4.12
 lxml>=5.2
 trafilatura>=1.6
 readability-lxml>=0.8.1
-nltk>=3.8.1
 
+# NLP Libraries
+nltk>=3.8.1
 spacy>=3.7
 spacy-lookups-data>=1.0
 stanza>=1.8
 
-sentence-transformers>=3.0
-
-# rendering
+# Browser Automation (for URL rendering)
 playwright>=1.47
 playwright-stealth>=1.0.6
 selenium>=4.23
 undetected-chromedriver>=3.5.5
 
-# GraphBLAS bindings (works on 3.12+)
+# Graph Analytics (CPU-based)
+# Note: For GPU acceleration, see WINDOWS_GPU.md or use Docker
 python-graphblas>=2024.2 ; python_version >= "3.11"
 pygraphblas>=5.1.8.0     ; python_version < "3.11"
 
-
-# topic modeling (optional but enabled by "bertopic" preset)
+# Topic Modeling (optional, enabled by "bertopic" preset)
 umap-learn>=0.5
 hdbscan>=0.8
 bertopic>=0.16
