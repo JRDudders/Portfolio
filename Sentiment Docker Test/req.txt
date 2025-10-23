@@ -35,7 +35,9 @@ selenium>=4.23
 undetected-chromedriver>=3.5.5
 
 # Graph Analytics (CPU-based)
-# Note: For GPU acceleration, see WINDOWS_GPU.md or use Docker
+# NetworkX provides cross-platform graph algorithms (works on Windows/Linux/Mac, all Python versions)
+networkx>=3.0
+# GraphBLAS for advanced sparse matrix operations (optional)
 python-graphblas>=2024.2 ; python_version >= "3.11"
 pygraphblas>=5.1.8.0     ; python_version < "3.11"
 

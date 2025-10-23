@@ -50,6 +50,7 @@ import typing as T
 
 import numpy as np
 import pandas as pd
+import networkx as nx
 
 # Optional GraphBLAS
 HAS_GB = False
@@ -689,6 +690,18 @@ def triangles_gpu(g: GraphData, max_nodes: int = 20000) -> Dict[str, int]:
 
 
 # ---------------------------- CPU Algorithms (Fallback) -------------------- #
+# Uses NetworkX for reliable, cross-platform graph algorithms
+
+def _graphdata_to_networkx(g: GraphData) -> nx.DiGraph:
+    """Convert GraphData to NetworkX DiGraph for algorithm processing."""
+    G = nx.DiGraph()
+    # Add nodes with original IDs
+    G.add_nodes_from(g.idx_to_id)
+    # Add edges using original node IDs
+    edges = [(g.idx_to_id[row.src_idx], g.idx_to_id[row.dst_idx])
+             for row in g.edges.itertuples()]
+    G.add_edges_from(edges)
+    return G
 
 def degrees_cpu(g: GraphData) -> pd.DataFrame:
     """CPU implementation of degrees (original)."""
@@ -719,40 +732,21 @@ def pagerank_cpu(
     tol: float = 1e-6,
 ) -> pd.DataFrame:
     """
-    CPU implementation of PageRank using power iteration on adjacency lists (robust without SciPy).
+    CPU implementation of PageRank using NetworkX (cross-platform, reliable).
     Returns DataFrame with columns: node, pr.
     """
-    n = g.n
-    if n == 0:
+    if g.n == 0:
         return pd.DataFrame(columns=["node", "pr"])
 
-    outdeg = np.fromiter((len(g.out_adj[i]) for i in range(n)), dtype=np.float64, count=n)
-    r = np.full(n, 1.0 / n, dtype=np.float64)
-    teleport = (1.0 - alpha) / n
+    # Convert to NetworkX graph
+    G = _graphdata_to_networkx(g)
 
-    # Precompute in-neighbor lists for faster iteration
-    in_adj = g.in_adj
+    # Compute PageRank using NetworkX
+    pr_dict = nx.pagerank(G, alpha=alpha, max_iter=iters, tol=tol)
 
-    for _ in range(iters):
-        r_new = np.full(n, teleport, dtype=np.float64)
-        for i in range(n):
-            # Distribute rank of in-neighbors
-            val = 0.0
-            for j in in_adj[i]:
-                if outdeg[j] > 0.0:
-                    val += r[j] / outdeg[j]
-            r_new[i] += alpha * val
-        if np.abs(r_new - r).sum() < tol:
-            r = r_new
-            break
-        r = r_new
-
-    # Normalize
-    s = r.sum()
-    if s > 0:
-        r = r / s
-
-    return pd.DataFrame({"node": g.idx_to_id, "pr": r}).sort_values("pr", ascending=False, ignore_index=True)
+    # Convert to DataFrame and sort
+    df = pd.DataFrame(list(pr_dict.items()), columns=["node", "pr"])
+    return df.sort_values("pr", ascending=False, ignore_index=True)
 
 
 def pagerank(
@@ -871,40 +865,25 @@ def eigenvector_gpu(g: GraphData, max_iter: int = 100, tol: float = 1e-6) -> pd.
 
 def eigenvector_cpu(g: GraphData, max_iter: int = 100, tol: float = 1e-6) -> pd.DataFrame:
     """
-    CPU implementation of eigenvector centrality using power iteration.
+    CPU implementation of eigenvector centrality using NetworkX (cross-platform, reliable).
     Returns DataFrame with columns: node, centrality.
     """
-    n = g.n
-    if n == 0:
+    if g.n == 0:
         return pd.DataFrame(columns=["node", "centrality"])
 
-    # Initialize eigenvector
-    x = np.ones(n, dtype=np.float64) / n
+    # Convert to NetworkX graph
+    G = _graphdata_to_networkx(g)
 
-    # Power iteration
-    for _ in range(max_iter):
-        x_new = np.zeros(n, dtype=np.float64)
+    try:
+        # Compute eigenvector centrality using NetworkX
+        ec_dict = nx.eigenvector_centrality(G, max_iter=max_iter, tol=tol)
+    except (nx.PowerIterationFailedConvergence, nx.NetworkXError):
+        # If power iteration fails (disconnected graph, etc.), return zeros
+        ec_dict = {node: 0.0 for node in G.nodes()}
 
-        # Matrix-vector multiplication: x_new = A * x
-        for i in range(n):
-            for j in g.in_adj[i]:  # Incoming edges
-                x_new[i] += x[j]
-
-        # Normalize
-        norm = np.linalg.norm(x_new)
-        if norm > 0:
-            x_new = x_new / norm
-        else:
-            # Graph might be disconnected or have no edges
-            x_new = np.ones(n, dtype=np.float64) / n
-
-        # Check convergence
-        if np.abs(x_new - x).sum() < tol:
-            x = x_new
-            break
-        x = x_new
-
-    return pd.DataFrame({"node": g.idx_to_id, "centrality": x}).sort_values("centrality", ascending=False, ignore_index=True)
+    # Convert to DataFrame and sort
+    df = pd.DataFrame(list(ec_dict.items()), columns=["node", "centrality"])
+    return df.sort_values("centrality", ascending=False, ignore_index=True)
 
 
 def eigenvector_centrality(g: GraphData, max_iter: int = 100, tol: float = 1e-6) -> pd.DataFrame:
@@ -943,59 +922,21 @@ def betweenness_gpu(g: GraphData, normalized: bool = True) -> pd.DataFrame:
 
 def betweenness_cpu(g: GraphData, normalized: bool = True) -> pd.DataFrame:
     """
-    CPU implementation of betweenness centrality using Brandes' algorithm.
+    CPU implementation of betweenness centrality using NetworkX (cross-platform, reliable).
     Returns DataFrame with columns: node, centrality.
     """
-    n = g.n
-    if n == 0:
+    if g.n == 0:
         return pd.DataFrame(columns=["node", "centrality"])
 
-    betweenness = np.zeros(n, dtype=np.float64)
+    # Convert to NetworkX graph
+    G = _graphdata_to_networkx(g)
 
-    # Brandes' algorithm
-    for s in range(n):
-        # Single-source shortest paths
-        stack = []
-        pred = [[] for _ in range(n)]
-        sigma = np.zeros(n, dtype=np.float64)
-        sigma[s] = 1.0
-        dist = np.full(n, -1, dtype=np.int64)
-        dist[s] = 0
+    # Compute betweenness centrality using NetworkX (uses Brandes' algorithm)
+    bc_dict = nx.betweenness_centrality(G, normalized=normalized)
 
-        # BFS
-        queue = [s]
-        head = 0
-        while head < len(queue):
-            v = queue[head]
-            head += 1
-            stack.append(v)
-
-            for w in g.out_adj[v]:
-                # First time visiting w?
-                if dist[w] < 0:
-                    queue.append(w)
-                    dist[w] = dist[v] + 1
-
-                # Shortest path to w via v?
-                if dist[w] == dist[v] + 1:
-                    sigma[w] += sigma[v]
-                    pred[w].append(v)
-
-        # Accumulation
-        delta = np.zeros(n, dtype=np.float64)
-        while stack:
-            w = stack.pop()
-            for v in pred[w]:
-                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
-            if w != s:
-                betweenness[w] += delta[w]
-
-    # Normalization
-    if normalized and n > 2:
-        scale = 1.0 / ((n - 1) * (n - 2))
-        betweenness *= scale
-
-    return pd.DataFrame({"node": g.idx_to_id, "centrality": betweenness}).sort_values("centrality", ascending=False, ignore_index=True)
+    # Convert to DataFrame and sort
+    df = pd.DataFrame(list(bc_dict.items()), columns=["node", "centrality"])
+    return df.sort_values("centrality", ascending=False, ignore_index=True)
 
 
 def betweenness_centrality(g: GraphData, normalized: bool = True) -> pd.DataFrame:
