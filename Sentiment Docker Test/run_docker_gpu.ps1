@@ -101,9 +101,13 @@ Write-Host "📍 API will be available at: http://localhost:8080" -ForegroundCol
 Write-Host "📚 API docs: http://localhost:8080/docs" -ForegroundColor Green
 Write-Host "📊 Interactive UI: http://localhost:8080" -ForegroundColor Green
 Write-Host ""
-Write-Host "Monitor GPU usage in another terminal: nvidia-smi -l 1" -ForegroundColor Yellow
+Write-Host "💡 DEV MODE: Your code is mounted as a volume" -ForegroundColor Yellow
+Write-Host "   Edit .py files → Changes apply immediately (no rebuild needed!)" -ForegroundColor Yellow
+Write-Host "   Only rebuild if you change req.txt or Dockerfile.gpu" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Yellow
+Write-Host "Monitor GPU usage in another terminal: nvidia-smi -l 1" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Gray
 Write-Host ""
 
 # Run container with GPU support
