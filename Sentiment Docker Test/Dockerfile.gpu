@@ -26,6 +26,62 @@ COPY req.txt /app/req.txt
 RUN python -m pip install --upgrade pip && \
     pip install -r /app/req.txt
 
+# --- CUDA Availability Check ---
+# Verify CUDA is available (version agnostic)
+RUN python - <<'PY'
+import sys
+
+print("=" * 60)
+print("CUDA Environment Check")
+print("=" * 60)
+
+# Check nvidia-smi
+try:
+    import subprocess
+    result = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
+    if result.returncode == 0:
+        print("✓ nvidia-smi available")
+        # Print GPU info
+        for line in result.stdout.split('\n')[:15]:  # First 15 lines
+            if line.strip():
+                print(f"  {line}")
+    else:
+        print("⚠ nvidia-smi not found (build-time check, OK if building without GPU)")
+except Exception as e:
+    print(f"⚠ nvidia-smi check failed: {e}")
+    print("  Note: This is OK during build. GPU will be detected at runtime.")
+
+# Check PyTorch CUDA
+try:
+    import torch
+    cuda_available = torch.cuda.is_available()
+    if cuda_available:
+        print(f"✓ PyTorch CUDA available")
+        print(f"  CUDA version: {torch.version.cuda}")
+        print(f"  Device count: {torch.cuda.device_count()}")
+        if torch.cuda.device_count() > 0:
+            print(f"  Device 0: {torch.cuda.get_device_name(0)}")
+    else:
+        print("⚠ PyTorch CUDA not available at build time")
+        print("  Note: GPU will be detected when container runs with --gpus flag")
+except Exception as e:
+    print(f"⚠ PyTorch CUDA check failed: {e}")
+
+# Check cuGraph
+try:
+    import cudf
+    import cugraph
+    print(f"✓ cuGraph available (version {cugraph.__version__})")
+    print(f"✓ cuDF available (version {cudf.__version__})")
+except Exception as e:
+    print(f"✗ cuGraph/cuDF not available: {e}")
+    sys.exit(1)
+
+print("=" * 60)
+print("Build complete. GPU will be available at runtime with --gpus flag")
+print("=" * 60)
+PY
+
 # --- Optional browsers (Playwright) ---
 # If you won't use URL rendering, you can comment this out to slim the image.
 # This installs Chromium and its system dependencies inside the image.
