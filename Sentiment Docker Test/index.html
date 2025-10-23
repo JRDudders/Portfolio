@@ -200,7 +200,15 @@
         <div class="graph-controls">
           <button class="btn" id="graph-fit">Fit to Screen</button>
           <button class="btn" id="graph-physics-toggle">Toggle Physics</button>
-          <span style="font-size:12px;color:var(--muted);margin-left:8px">Drag nodes • Scroll to zoom • Right-click to pan</span>
+          <label style="margin-left:16px">Color by:</label>
+          <select id="graph-centrality-select" style="padding:8px;border-radius:8px;background:#0f1117;color:var(--fg);border:1px solid var(--border)">
+            <option value="none">Default</option>
+            <option value="pagerank">PageRank</option>
+            <option value="betweenness">Betweenness</option>
+            <option value="eigenvector">Eigenvector</option>
+            <option value="degree">Degree</option>
+          </select>
+          <span style="font-size:12px;color:var(--muted);margin-left:8px">Hover to show names • Click to pin</span>
         </div>
       </div>
     </div>
@@ -482,6 +490,9 @@
     // Interactive graph visualization using vis.js
     let currentGraphNetwork = null;
     let currentGraphPhysicsEnabled = false;
+    let currentGraphData = null;
+    let currentGraphNodesData = null;
+    let selectedNodes = new Set();
 
     function displayGraph(data){
       const viz = document.getElementById('graph-viz');
@@ -501,6 +512,10 @@
         return;
       }
 
+      // Store original data for centrality calculations
+      currentGraphData = data;
+      selectedNodes = new Set();
+
       // Limit to 1000 nodes for performance
       const maxNodes = 1000;
       const nodesToShow = data.nodes.slice(0, maxNodes);
@@ -516,8 +531,9 @@
 
         return {
           id: n.id,
-          label: displayName,
+          label: undefined,  // Hide labels by default - will show on hover/click
           title: tooltipLines.join('\n'),
+          displayName: displayName,  // Store for later use
           color: {
             background: '#6aa2ff',
             border: '#4a82d9',
@@ -539,6 +555,8 @@
 
       // Create network with improved physics
       const graphData = { nodes: new vis.DataSet(visNodes), edges: new vis.DataSet(visEdges) };
+      currentGraphNodesData = graphData.nodes;
+
       const options = {
         nodes: {
           shape: 'dot',
@@ -582,6 +600,47 @@
       if(currentGraphNetwork) currentGraphNetwork.destroy();
       currentGraphNetwork = new vis.Network(container, graphData, options);
 
+      // Hover to show label
+      currentGraphNetwork.on('hoverNode', (params) => {
+        const nodeId = params.node;
+        const node = currentGraphNodesData.get(nodeId);
+        if(node && !selectedNodes.has(nodeId)){
+          currentGraphNodesData.update({id: nodeId, label: node.displayName});
+        }
+      });
+
+      // Hide label when hover ends (unless clicked)
+      currentGraphNetwork.on('blurNode', (params) => {
+        const nodeId = params.node;
+        if(!selectedNodes.has(nodeId)){
+          currentGraphNodesData.update({id: nodeId, label: undefined});
+        }
+      });
+
+      // Click to pin label
+      currentGraphNetwork.on('click', (params) => {
+        if(params.nodes.length > 0){
+          const nodeId = params.nodes[0];
+          const node = currentGraphNodesData.get(nodeId);
+
+          if(selectedNodes.has(nodeId)){
+            // Unpin
+            selectedNodes.delete(nodeId);
+            currentGraphNodesData.update({id: nodeId, label: undefined});
+          } else {
+            // Pin
+            selectedNodes.add(nodeId);
+            currentGraphNodesData.update({id: nodeId, label: node.displayName});
+          }
+        } else {
+          // Clicked on canvas - unpin all
+          selectedNodes.forEach(nodeId => {
+            currentGraphNodesData.update({id: nodeId, label: undefined});
+          });
+          selectedNodes.clear();
+        }
+      });
+
       // Disable physics after stabilization to prevent writhing
       currentGraphNetwork.once('stabilizationIterationsDone', () => {
         currentGraphNetwork.setOptions({ physics: { enabled: false } });
@@ -600,6 +659,11 @@
       };
       updatePhysicsButton('graph-physics-toggle', true); // Initially enabled during stabilization
 
+      // Wire up centrality dropdown
+      const centralitySelect = document.getElementById('graph-centrality-select');
+      centralitySelect.value = 'none';
+      centralitySelect.onchange = () => applyCentrality(centralitySelect.value);
+
       // Show truncation note
       if(data.nodes.length > maxNodes){
         stats.textContent += ` (showing ${maxNodes} of ${data.nodes.length} nodes)`;
@@ -612,6 +676,89 @@
         btn.textContent = enabled ? 'Disable Physics' : 'Enable Physics';
         btn.style.backgroundColor = enabled ? 'var(--warn)' : '';
       }
+    }
+
+    // Apply centrality-based coloring
+    async function applyCentrality(measure) {
+      if(!currentGraphNodesData || !currentGraphData) return;
+
+      if(measure === 'none'){
+        // Reset to default colors
+        const nodes = currentGraphNodesData.get();
+        nodes.forEach(n => {
+          currentGraphNodesData.update({
+            id: n.id,
+            color: {
+              background: '#6aa2ff',
+              border: '#4a82d9',
+              highlight: { background: '#8fb9ff', border: '#6aa2ff' },
+              hover: { background: '#7eadff', border: '#5a92e9' }
+            }
+          });
+        });
+        return;
+      }
+
+      // Compute centrality (client-side for now)
+      const nodes = currentGraphNodesData.get();
+      let centralityValues = {};
+
+      if(measure === 'degree'){
+        // Simple degree centrality
+        currentGraphData.edges.forEach(e => {
+          centralityValues[e.source] = (centralityValues[e.source] || 0) + 1;
+          centralityValues[e.target] = (centralityValues[e.target] || 0) + 1;
+        });
+      } else {
+        // For PageRank, Betweenness, Eigenvector - would need backend computation
+        // For now, use degree as fallback
+        alert(`${measure} centrality requires backend computation. Using degree centrality for now.`);
+        currentGraphData.edges.forEach(e => {
+          centralityValues[e.source] = (centralityValues[e.source] || 0) + 1;
+          centralityValues[e.target] = (centralityValues[e.target] || 0) + 1;
+        });
+      }
+
+      // Find min/max for normalization
+      const values = Object.values(centralityValues);
+      const minVal = Math.min(...values);
+      const maxVal = Math.max(...values);
+
+      // Color nodes by centrality (blue = low, red = high)
+      nodes.forEach(n => {
+        const value = centralityValues[n.id] || 0;
+        const normalized = maxVal > minVal ? (value - minVal) / (maxVal - minVal) : 0.5;
+
+        // Color gradient: blue (low) -> yellow (mid) -> red (high)
+        let r, g, b;
+        if(normalized < 0.5){
+          // Blue to yellow
+          const t = normalized * 2;
+          r = Math.round(106 + (255 - 106) * t);
+          g = Math.round(162 + (204 - 162) * t);
+          b = Math.round(255 * (1 - t));
+        } else {
+          // Yellow to red
+          const t = (normalized - 0.5) * 2;
+          r = 255;
+          g = Math.round(204 * (1 - t));
+          b = 0;
+        }
+
+        const bgColor = `rgb(${r},${g},${b})`;
+        const borderColor = `rgb(${Math.max(0,r-30)},${Math.max(0,g-30)},${Math.max(0,b-30)})`;
+
+        currentGraphNodesData.update({
+          id: n.id,
+          color: {
+            background: bgColor,
+            border: borderColor,
+            highlight: { background: bgColor, border: '#ffffff' },
+            hover: { background: bgColor, border: '#e6e6e6' }
+          },
+          title: `${n.title}\n${measure}: ${value.toFixed(3)}`
+        });
+      });
     }
 
     // --- Wire up Ego Network Upload ---
