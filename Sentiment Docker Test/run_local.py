@@ -88,6 +88,35 @@ if __name__ == "__main__":
     print("Sentiment Analysis & Graph Analytics API - Local Server")
     print("=" * 60)
 
+    # Check GPU availability
+    print("\n🔍 GPU Status Check:")
+    try:
+        import torch
+        if torch.cuda.is_available():
+            print(f"✓ GPU detected: {torch.cuda.get_device_name(0)}")
+            print(f"✓ CUDA version: {torch.version.cuda}")
+        else:
+            print("⚠ No CUDA GPU detected (using CPU)")
+            print("  For GPU support, ensure:")
+            print("  1. NVIDIA GPU with CUDA support")
+            print("  2. NVIDIA drivers installed (check: nvidia-smi)")
+            print("  3. PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+            print("  Or use: ./run_docker_gpu.sh")
+    except ImportError:
+        print("⚠ PyTorch not installed (GPU detection unavailable)")
+        print("  For GPU support: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+        print("  Or use: ./run_docker_gpu.sh")
+
+    try:
+        import cudf
+        import cugraph
+        print(f"✓ cuGraph {cugraph.__version__} and cuDF {cudf.__version__} available")
+    except ImportError:
+        print("⚠ cuGraph/cuDF not installed (graph GPU acceleration unavailable)")
+        print("  For GPU acceleration: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
+        print("  Or use: ./run_docker_gpu.sh")
+    print()
+
     # Try methods in order
     methods = [
         ("Standard uvicorn", run_with_basic_uvicorn),

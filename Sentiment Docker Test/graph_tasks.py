@@ -69,19 +69,51 @@ HAS_GPU = False
 HAS_CUGRAPH = False
 cugraph = None
 cudf = None
+
+# Verbose GPU detection
+import os
+VERBOSE_GPU = os.getenv('VERBOSE_GPU', '1') == '1'
+
+if VERBOSE_GPU:
+    print("[graph_tasks] GPU Detection Starting...")
+
 try:
     import cudf  # GPU DataFrame
     import cugraph  # GPU graph analytics
-    import torch  # Check CUDA availability
     HAS_CUGRAPH = True
-    HAS_GPU = torch.cuda.is_available()
-    if HAS_GPU:
-        print(f"[graph_tasks] GPU detected: {torch.cuda.get_device_name(0)}")
-        print(f"[graph_tasks] cuGraph version: {cugraph.__version__}")
-except Exception as e:
+    if VERBOSE_GPU:
+        print(f"[graph_tasks] ✓ cuGraph available (version {cugraph.__version__})")
+        print(f"[graph_tasks] ✓ cuDF available (version {cudf.__version__})")
+except ImportError as e:
     HAS_GPU = False
     HAS_CUGRAPH = False
-    # Silent fallback to CPU
+    if VERBOSE_GPU:
+        print(f"[graph_tasks] ✗ cuGraph/cuDF not installed: {e}")
+        print("[graph_tasks]   Install with: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
+        print("[graph_tasks]   Or use Docker: docker build -f Dockerfile.gpu -t sentiment-gpu . && docker run --gpus all ...")
+
+if HAS_CUGRAPH:
+    try:
+        import torch  # Check CUDA availability
+        HAS_GPU = torch.cuda.is_available()
+        if HAS_GPU:
+            print(f"[graph_tasks] ✓ GPU detected: {torch.cuda.get_device_name(0)}")
+            print(f"[graph_tasks] ✓ CUDA version: {torch.version.cuda}")
+            print(f"[graph_tasks] ✓ GPU acceleration ENABLED")
+        else:
+            if VERBOSE_GPU:
+                print("[graph_tasks] ✗ PyTorch installed but no CUDA GPU detected")
+                print("[graph_tasks]   Check: nvidia-smi (ensure NVIDIA drivers installed)")
+                print("[graph_tasks]   Install PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+    except ImportError:
+        HAS_GPU = False
+        if VERBOSE_GPU:
+            print("[graph_tasks] ✗ PyTorch not installed")
+            print("[graph_tasks]   Install with: pip install torch --index-url https://download.pytorch.org/whl/cu121")
+
+if not HAS_GPU and VERBOSE_GPU:
+    print("[graph_tasks] ⚠ GPU acceleration DISABLED - using CPU fallback")
+    print("[graph_tasks]   Set VERBOSE_GPU=0 to hide these messages")
 
 
 
