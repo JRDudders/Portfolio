@@ -49,10 +49,11 @@ def _as_json_bytes(obj: T.Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
 
 def _parse_labels_csv(s: str | None) -> T.List[str] | None:
-    if not s:
+    """Parse comma-separated labels, returning None for empty/whitespace strings."""
+    if not s or not s.strip():  # Explicitly handle empty strings and whitespace
         return None
     labels = [x.strip() for x in s.split(",") if x.strip()]
-    return labels or None
+    return labels if labels else None  # More explicit than 'or'
 
 def _texts_from_json_bytes(b: bytes) -> T.List[str]:
     data = json.loads(b.decode("utf-8"))
@@ -213,9 +214,12 @@ async def predict_file(
         task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
         texts = [preprocess_for_task(t, task or "") for t in texts]
 
-        lbls = _parse_labels_csv(labels)
-        if (not lbls) and preset and "zeroshot" in preset:
-            lbls = DEFAULT_ZS_LABELS
+        # Only parse and use labels for zero-shot tasks
+        lbls = None
+        if preset and "zeroshot" in preset:
+            lbls = _parse_labels_csv(labels)
+            if not lbls:  # Use defaults if no labels provided for zero-shot
+                lbls = DEFAULT_ZS_LABELS
 
         result = run_task(texts, preset=preset, labels=lbls)
 
@@ -275,7 +279,11 @@ async def predict_url(body: UrlBody = Body(...)):
     text = _extract_text_from_html(html, base_url=url)
     task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
     texts = [preprocess_for_task(text, task or "")]
-    lbls = labels or (DEFAULT_ZS_LABELS if (preset and "zeroshot" in preset) else None)
+
+    # Only use labels for zero-shot tasks
+    lbls = None
+    if preset and "zeroshot" in preset:
+        lbls = labels if labels else DEFAULT_ZS_LABELS
 
     try:
         result = run_task(texts, preset=preset, labels=lbls)
@@ -321,8 +329,10 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
         else:
             processed_texts = texts
 
-        # Use default labels for zero-shot if not provided
-        lbls = labels or (DEFAULT_ZS_LABELS if (preset and "zeroshot" in preset) else None)
+        # Only use labels for zero-shot tasks
+        lbls = None
+        if preset and "zeroshot" in preset:
+            lbls = labels if labels else DEFAULT_ZS_LABELS
 
         # Run batch inference
         results = run_task(processed_texts, preset=preset, labels=lbls)
