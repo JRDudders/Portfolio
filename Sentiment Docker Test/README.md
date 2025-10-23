@@ -24,14 +24,18 @@ A production-ready FastAPI service providing:
 - **Degree Analysis:** In-degree, out-degree, total degree
 - **BFS:** Breadth-first search from any source node
 - **Triangle Counting:** For undirected graphs
+- **Social Circles:** Community detection and membership tracking
+- **Node Features:** Support for binary feature vectors with feature names
+- **Ego Networks:** Complete SNAP ego network format support
 - **GraphBLAS Support:** Optional sparse matrix acceleration
 
 ### Web & Data Processing
-- **File Formats:** JSON, CSV, HTML, .edge, .node
+- **File Formats:** JSON, CSV, HTML, .edge, .node, .circles, .feat, .egofeat, .featnames
 - **URL Processing:** Fetch and analyze web pages
 - **JavaScript Rendering:** Playwright/Selenium for SPA support
 - **Crawling:** Multi-page site analysis with depth/breadth controls
-- **Graph Data:** Native support for .edge/.node formats alongside CSV/JSON
+- **Graph Data:** Native support for SNAP ego network formats (Stanford Network Analysis Project)
+- **Multi-File Upload:** Upload entire folders with related graph files at once
 
 ---
 
@@ -391,6 +395,52 @@ curl -X POST "http://localhost:8080/graph/metrics?tasks=degrees,pagerank" \
 
 ---
 
+### `POST /graph/ego-network` (New!)
+Load and visualize complete ego networks from multiple related files.
+
+**Parameters:**
+- `files` (required): Multiple files (.edges, .circles, .feat, .egofeat, .featnames, .node)
+- `ego_id` (optional): Ego node ID (auto-detected from filenames if not provided)
+
+**Supported File Types:**
+- `.edges` / `.edge` - Edge list (required)
+- `.circles` - Social circles/communities
+- `.feat` - Node feature vectors (binary 0/1)
+- `.egofeat` - Ego node features
+- `.featnames` - Feature name mappings
+- `.node` - Node attributes
+
+**Example:**
+```bash
+# Upload entire ego network (e.g., from SNAP Facebook dataset)
+curl -X POST "http://localhost:8080/graph/ego-network" \
+  -F "files=@0.edges" \
+  -F "files=@0.circles" \
+  -F "files=@0.feat" \
+  -F "files=@0.egofeat" \
+  -F "files=@0.featnames"
+```
+
+**Response:**
+```json
+{
+  "n_nodes": 347,
+  "n_edges": 2914,
+  "ego_id": "0",
+  "has_circles": true,
+  "has_features": true,
+  "circles": {
+    "work": ["1", "2", "3"],
+    "friends": ["4", "5", "6"]
+  },
+  "feature_count": 77,
+  "nodes": [...],
+  "edges": [...]
+}
+```
+
+---
+
 ## Available NLP Presets
 
 ### Sentiment Analysis
@@ -657,6 +707,62 @@ Charlie NodeC type1 150
 ```
 
 **Note:** Node attributes are automatically merged with graph metric results when provided. All graph endpoints accept optional `nodes_file` parameter.
+
+#### Ego Network Formats (SNAP-style)
+
+These formats are commonly used in Stanford Network Analysis Project (SNAP) datasets for social network analysis.
+
+**.circles Format (social circles/communities):**
+```
+work 1 2 3 4 5
+friends 6 7 8 9
+family 10 11 12
+```
+
+Or tab-separated:
+```
+work	1 2 3 4 5
+friends	6 7 8 9
+```
+
+**.feat Format (node features - binary 0/1 vectors):**
+```
+0 1 0 1 0 0 1 1 0 1 0
+1 0 1 0 1 0 0 1 1 0 1
+2 1 1 0 0 1 1 0 0 1 0
+```
+First column is node ID, remaining columns are binary feature values.
+
+**.egofeat Format (ego node features):**
+```
+1 0 1 0 0 1 1 0 1 0 1
+```
+Single line containing binary feature vector for the ego (center) node.
+
+**.featnames Format (feature name mappings):**
+```
+education;anonymized feature 0
+gender;anonymized feature 1
+work;anonymized feature 2
+hometown;anonymized feature 3
+```
+
+Or simpler format:
+```
+feature0 anonymous
+feature1 anonymous
+feature2 anonymous
+```
+
+**Complete Ego Network Example:**
+```bash
+# Typical SNAP ego network file structure (e.g., Facebook dataset)
+0.edges       # Edge list for ego network 0
+0.circles     # Social circles
+0.feat        # Feature vectors for all nodes
+0.egofeat     # Feature vector for ego node (node 0)
+0.featnames   # Feature name mappings
+```
 
 ---
 

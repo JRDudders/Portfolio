@@ -188,6 +188,35 @@
         <canvas id="graph-canvas" style="width:100%;height:400px;border:1px solid var(--border);border-radius:10px;background:#0f1117"></canvas>
       </div>
     </div>
+
+    <!-- EGO NETWORK (Multi-File Upload) -->
+    <div class="card" style="margin-top:16px">
+      <h2>Ego Network (Multiple Files)</h2>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Upload multiple related files at once (.edges, .circles, .feat, .egofeat, .featnames, .node)</p>
+
+      <label>Select Multiple Files</label>
+      <div class="inline">
+        <button class="btn" id="btn-ego-files">Choose Files</button>
+        <span class="file-name" id="ego-files-name">No files selected</span>
+        <input type="file" id="ego-files-input" style="display:none" multiple accept=".edges,.edge,.circles,.feat,.egofeat,.featnames,.node"/>
+      </div>
+
+      <label for="ego-id">Ego Node ID (optional)</label>
+      <input id="ego-id" type="text" placeholder="Auto-detected from filename if not specified"/>
+
+      <div class="controls">
+        <button class="btn primary" id="run-ego">Load Ego Network</button>
+      </div>
+      <div id="status-ego" class="status"></div>
+
+      <!-- Ego network visualization -->
+      <div id="ego-viz" style="display:none;margin-top:16px">
+        <h3 style="font-size:14px;margin:8px 0">Ego Network Visualization</h3>
+        <div id="ego-stats" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+        <div id="ego-circles" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+        <canvas id="ego-canvas" style="width:100%;height:400px;border:1px solid var(--border);border-radius:10px;background:#0f1117"></canvas>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -494,6 +523,194 @@
           ctx.fillText(n.id, n.x, n.y - 8);
         }
       });
+
+      // Add note if graph was truncated
+      if(data.nodes.length > 200){
+        ctx.fillStyle = '#a6a6a6';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`Showing 200 of ${data.nodes.length} nodes`, 10, h - 10);
+      }
+    }
+
+    // --- Wire up Ego Network Upload ---
+    const egoFilesBtn = document.getElementById('btn-ego-files');
+    const egoFilesIn = document.getElementById('ego-files-input');
+    const egoFilesName = document.getElementById('ego-files-name');
+    const statusEgo = document.getElementById('status-ego');
+
+    egoFilesBtn.onclick = ()=> egoFilesIn.click();
+    egoFilesIn.onchange = ()=> {
+      const count = egoFilesIn.files?.length || 0;
+      egoFilesName.textContent = count > 0 ? `${count} file(s) selected` : 'No files selected';
+    };
+
+    document.getElementById('run-ego').onclick = async ()=>{
+      const files = egoFilesIn.files;
+      if(!files || files.length === 0){
+        setStatus(statusEgo, 'Choose at least one file.', 'warn');
+        return;
+      }
+
+      const egoId = document.getElementById('ego-id').value.trim() || null;
+      setStatus(statusEgo, 'Processing…');
+
+      const fd = new FormData();
+      // Add all selected files
+      for(let i = 0; i < files.length; i++){
+        fd.append('files', files[i], files[i].name);
+      }
+
+      try{
+        let qs = '';
+        if(egoId) qs = `?ego_id=${encodeURIComponent(egoId)}`;
+
+        const res = await fetch('/graph/ego-network' + qs, {
+          method:'POST',
+          body: fd
+        });
+
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+
+        const data = await res.json();
+        displayEgoNetwork(data);
+        setStatus(statusEgo, `Loaded ${data.n_nodes} nodes, ${data.n_edges} edges`, 'ok');
+      }catch(e){
+        setStatus(statusEgo, 'Error: '+(e?.message||e), 'err');
+      }
+    };
+
+    // Display ego network with circle highlighting
+    function displayEgoNetwork(data){
+      const viz = document.getElementById('ego-viz');
+      const stats = document.getElementById('ego-stats');
+      const circlesDiv = document.getElementById('ego-circles');
+      const canvas = document.getElementById('ego-canvas');
+      const ctx = canvas.getContext('2d');
+
+      // Show visualization
+      viz.style.display = 'block';
+
+      // Update stats
+      let statsText = `${data.n_nodes} nodes, ${data.n_edges} edges`;
+      if(data.ego_id) statsText += ` | Ego: ${data.ego_id}`;
+      if(data.has_circles) statsText += ' | Has circles';
+      if(data.has_features) statsText += ` | ${data.feature_count} features`;
+      stats.textContent = statsText;
+
+      // Show circles info
+      if(data.circles){
+        const circleNames = Object.keys(data.circles);
+        circlesDiv.textContent = `Circles: ${circleNames.join(', ')}`;
+        circlesDiv.style.display = 'block';
+      } else {
+        circlesDiv.style.display = 'none';
+      }
+
+      // Set canvas size
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = 400;
+
+      const w = canvas.width;
+      const h = canvas.height;
+
+      // Clear canvas
+      ctx.fillStyle = '#0f1117';
+      ctx.fillRect(0, 0, w, h);
+
+      if(!data.nodes || !data.edges){
+        ctx.fillStyle = '#a6a6a6';
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('No visualization data available', w/2, h/2);
+        return;
+      }
+
+      // Limit nodes for performance
+      const nodes = data.nodes.slice(0, 200);
+      const edges = data.edges.filter(e => {
+        return nodes.find(n => n.id === e.source) && nodes.find(n => n.id === e.target);
+      });
+
+      // Position nodes in a circle
+      nodes.forEach((n, i) => {
+        const angle = (i / nodes.length) * 2 * Math.PI;
+        const radius = Math.min(w, h) * 0.35;
+        n.x = w/2 + radius * Math.cos(angle);
+        n.y = h/2 + radius * Math.sin(angle);
+      });
+
+      // Draw edges
+      ctx.strokeStyle = '#21232b';
+      ctx.lineWidth = 1;
+      edges.forEach(e => {
+        const src = nodes.find(n => n.id === e.source);
+        const tgt = nodes.find(n => n.id === e.target);
+        if(src && tgt){
+          ctx.beginPath();
+          ctx.moveTo(src.x, src.y);
+          ctx.lineTo(tgt.x, tgt.y);
+          ctx.stroke();
+        }
+      });
+
+      // Assign colors to circles
+      const circleColors = ['#6aa2ff', '#ff6b6b', '#32d296', '#ffcc00', '#a855f7', '#f97316'];
+      const circleColorMap = {};
+      if(data.circles){
+        Object.keys(data.circles).forEach((circle, i) => {
+          circleColorMap[circle] = circleColors[i % circleColors.length];
+        });
+      }
+
+      // Draw nodes with circle-based coloring
+      nodes.forEach(n => {
+        // Determine node color based on circle membership
+        let nodeColor = '#6aa2ff'; // default
+        if(n.circles && n.circles.length > 0){
+          // Use color of first circle
+          nodeColor = circleColorMap[n.circles[0]] || '#6aa2ff';
+        }
+
+        // Highlight ego node if present
+        if(data.ego_id && n.id === data.ego_id){
+          nodeColor = '#ff6b6b';
+          ctx.fillStyle = nodeColor;
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, 8, 0, 2*Math.PI); // Larger for ego
+          ctx.fill();
+        } else {
+          ctx.fillStyle = nodeColor;
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, 4, 0, 2*Math.PI);
+          ctx.fill();
+        }
+
+        // Draw label for first 20 nodes
+        if(nodes.indexOf(n) < 20){
+          ctx.fillStyle = '#e6e6e6';
+          ctx.font = '10px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(n.id, n.x, n.y - 10);
+        }
+      });
+
+      // Add legend if circles exist
+      if(data.circles){
+        let legendY = 20;
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'left';
+        Object.keys(circleColorMap).slice(0, 6).forEach((circle, i) => {
+          ctx.fillStyle = circleColorMap[circle];
+          ctx.fillRect(10, legendY + i * 20, 12, 12);
+          ctx.fillStyle = '#e6e6e6';
+          ctx.fillText(circle, 28, legendY + i * 20 + 10);
+        });
+      }
 
       // Add note if graph was truncated
       if(data.nodes.length > 200){

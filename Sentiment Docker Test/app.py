@@ -640,3 +640,103 @@ async def graph_load(
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Graph loading failed: {e}")
+
+
+@app.post("/graph/ego-network")
+async def graph_ego_network(
+    files: T.List[UploadFile] = File(..., description="Multiple graph files (.edges, .circles, .feat, .egofeat, .featnames, .node)"),
+    ego_id: str | None = Query(None, description="Ego node ID (optional)"),
+):
+    """
+    Load and visualize an ego network from multiple related files.
+    Accepts any combination of: .edges, .circles, .feat, .egofeat, .featnames, .node
+    """
+    try:
+        from graph_tasks import load_ego_network_from_files
+
+        # Read all files and organize by extension
+        files_dict = {}
+        for file in files:
+            filename = file.filename or ""
+            content = await file.read()
+
+            # Determine file type from extension
+            if filename.endswith('.edges') or filename.endswith('.edge'):
+                files_dict['edges'] = content
+            elif filename.endswith('.circles'):
+                files_dict['circles'] = content
+            elif filename.endswith('.feat'):
+                files_dict['feat'] = content
+            elif filename.endswith('.egofeat'):
+                files_dict['egofeat'] = content
+            elif filename.endswith('.featnames'):
+                files_dict['featnames'] = content
+            elif filename.endswith('.node'):
+                files_dict['node'] = content
+
+        # Infer ego_id from filenames if not provided
+        if not ego_id and files:
+            # Try to extract from first filename (e.g., "0.edges" -> ego_id = "0")
+            first_file = files[0].filename or ""
+            ego_id = first_file.split('.')[0] if '.' in first_file else None
+
+        # Load the ego network
+        g = load_ego_network_from_files(files_dict, ego_id=ego_id)
+
+        # Prepare visualization data
+        sample_nodes = g.idx_to_id[:min(10, len(g.idx_to_id))]
+
+        # Prepare node list with all attributes
+        nodes_list = []
+        for idx, node_id in enumerate(g.idx_to_id):
+            node_data = {"id": node_id, "index": idx}
+
+            # Add node attributes if available
+            if g.nodes is not None:
+                node_row = g.nodes[g.nodes["id"] == node_id]
+                if not node_row.empty:
+                    for col in g.nodes.columns:
+                        if col not in ["id", "idx"]:
+                            node_data[col] = node_row.iloc[0][col]
+
+            # Add circle membership if available
+            if g.circles is not None:
+                node_circles = g.circles[g.circles["node"] == node_id]["circle"].tolist()
+                if node_circles:
+                    node_data["circles"] = node_circles
+
+            nodes_list.append(node_data)
+
+        # Prepare edge list for visualization
+        edges_list = []
+        for _, row in g.edges.iterrows():
+            edge_data = {
+                "source": g.idx_to_id[int(row["src_idx"])],
+                "target": g.idx_to_id[int(row["dst_idx"])]
+            }
+            if "weight" in row:
+                edge_data["weight"] = float(row["weight"])
+            edges_list.append(edge_data)
+
+        # Get circle information
+        circles_info = None
+        if g.circles is not None:
+            circles_info = g.circles.groupby("circle")["node"].apply(list).to_dict()
+
+        result = {
+            "n_nodes": g.n,
+            "n_edges": int(g.edges.shape[0]),
+            "sample_nodes": sample_nodes,
+            "ego_id": g.ego_id,
+            "has_circles": g.circles is not None,
+            "has_features": g.features is not None,
+            "has_featnames": g.featnames is not None,
+            "has_ego_features": g.ego_features is not None,
+            "circles": circles_info,
+            "feature_count": len(g.features.columns) - 1 if g.features is not None else 0,
+            "nodes": nodes_list,
+            "edges": edges_list,
+        }
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ego network loading failed: {e}")

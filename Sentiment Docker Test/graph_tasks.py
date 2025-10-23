@@ -31,6 +31,13 @@ Node JSON schema (optional):
 Node .node schema (space/tab-separated):
   id [label] [attr1] [attr2] ...
   # Lines starting with # are comments
+
+Ego Network Formats (SNAP-style):
+  .edges: nodeID1 nodeID2 (space/tab-separated edge list)
+  .circles: circleName node1 node2 node3... (social circles/communities)
+  .feat: nodeID feat1 feat2 feat3... (binary node features 0/1)
+  .egofeat: feat1 feat2 feat3... (single line, ego node features)
+  .featnames: featureID featureName [anonymized] (feature name mappings)
 """
 from __future__ import annotations
 
@@ -217,6 +224,149 @@ def load_nodes_node_file(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataF
     return df
 
 
+def load_circles_file(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
+    """
+    Load social circles from .circles format.
+    Format: circleName\tnode1 node2 node3...
+    or: circleName node1 node2 node3...
+    Returns DataFrame with columns: circle, node
+    """
+    lines = file_bytes.decode(encoding).splitlines()
+    circle_data = []
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        # Try tab-separated first, then space-separated
+        if '\t' in line:
+            parts = line.split('\t', 1)
+            if len(parts) == 2:
+                circle_name = parts[0]
+                nodes = parts[1].split()
+        else:
+            parts = line.split()
+            if len(parts) >= 2:
+                circle_name = parts[0]
+                nodes = parts[1:]
+            else:
+                continue
+
+        # Create one row per node in circle
+        for node in nodes:
+            circle_data.append({"circle": circle_name, "node": node})
+
+    if not circle_data:
+        return pd.DataFrame(columns=["circle", "node"])
+
+    df = pd.DataFrame(circle_data)
+    df["node"] = df["node"].astype(str)
+    return df
+
+
+def load_feat_file(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
+    """
+    Load node features from .feat format.
+    Format: nodeID feat1 feat2 feat3... (binary 0/1 features)
+    Returns DataFrame with columns: id, f0, f1, f2, ...
+    """
+    lines = file_bytes.decode(encoding).splitlines()
+    feat_data = []
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+
+        node_id = parts[0]
+        features = parts[1:]
+
+        # Create feature dict
+        feat_dict = {"id": node_id}
+        for i, feat in enumerate(features):
+            feat_dict[f"f{i}"] = int(feat) if feat.isdigit() else feat
+
+        feat_data.append(feat_dict)
+
+    if not feat_data:
+        raise ValueError(".feat file contains no valid features")
+
+    df = pd.DataFrame(feat_data)
+    df["id"] = df["id"].astype(str)
+    return df
+
+
+def load_egofeat_file(file_bytes: bytes, encoding: str = "utf-8") -> T.List[int]:
+    """
+    Load ego node features from .egofeat format.
+    Format: feat1 feat2 feat3... (single line, binary 0/1 features)
+    Returns list of feature values.
+    """
+    lines = file_bytes.decode(encoding).splitlines()
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        parts = line.split()
+        return [int(f) if f.isdigit() else f for f in parts]
+
+    raise ValueError(".egofeat file contains no valid features")
+
+
+def load_featnames_file(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
+    """
+    Load feature names from .featnames format.
+    Format: featureID featureName [anonymized]
+    or: featureName anonymized
+    Returns DataFrame with columns: feature_id, feature_name, anonymized
+    """
+    lines = file_bytes.decode(encoding).splitlines()
+    featnames_data = []
+
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+
+        parts = line.split()
+        if len(parts) == 0:
+            continue
+
+        # Try to parse: featureID featureName [anonymized]
+        if len(parts) >= 3:
+            feat_dict = {
+                "feature_id": i,
+                "feature_name": parts[0] + " " + parts[1],
+                "anonymized": parts[2] if len(parts) > 2 else ""
+            }
+        elif len(parts) == 2:
+            feat_dict = {
+                "feature_id": i,
+                "feature_name": parts[0],
+                "anonymized": parts[1]
+            }
+        else:
+            feat_dict = {
+                "feature_id": i,
+                "feature_name": parts[0],
+                "anonymized": ""
+            }
+
+        featnames_data.append(feat_dict)
+
+    if not featnames_data:
+        return pd.DataFrame(columns=["feature_id", "feature_name", "anonymized"])
+
+    return pd.DataFrame(featnames_data)
+
+
 @dataclass
 class GraphData:
     n: int
@@ -226,7 +376,12 @@ class GraphData:
     out_adj: List[List[int]]         # adjacency lists (outgoing)
     in_adj: List[List[int]]          # adjacency lists (incoming)
     gb_matrix: Optional["gb.Matrix"] # GraphBLAS adjacency (BOOL), if available
-    nodes: Optional[pd.DataFrame] = None  # node attributes with 'id' column + custom attributes
+    nodes: Optional[pd.DataFrame] = None       # node attributes with 'id' column + custom attributes
+    circles: Optional[pd.DataFrame] = None     # social circles with 'circle' and 'node' columns
+    features: Optional[pd.DataFrame] = None    # node features with 'id' and f0, f1, f2... columns
+    featnames: Optional[pd.DataFrame] = None   # feature names with 'feature_id', 'feature_name', 'anonymized'
+    ego_id: Optional[str] = None               # ego node ID if this is an ego network
+    ego_features: Optional[T.List] = None      # ego node features if available
 
 
 def encode_nodes(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int], List[str]]:
@@ -247,7 +402,16 @@ def encode_nodes(df: pd.DataFrame) -> Tuple[pd.DataFrame, Dict[str, int], List[s
     return out, id_to_idx, uniq
 
 
-def build_graph(df_edges: pd.DataFrame, df_nodes: Optional[pd.DataFrame] = None, use_weights: bool = False) -> GraphData:
+def build_graph(
+    df_edges: pd.DataFrame,
+    df_nodes: Optional[pd.DataFrame] = None,
+    df_circles: Optional[pd.DataFrame] = None,
+    df_features: Optional[pd.DataFrame] = None,
+    df_featnames: Optional[pd.DataFrame] = None,
+    ego_id: Optional[str] = None,
+    ego_features: Optional[T.List] = None,
+    use_weights: bool = False
+) -> GraphData:
     df = df_edges.copy()
     df, id_to_idx, idx_to_id = encode_nodes(df)
     n = len(idx_to_id)
@@ -294,6 +458,11 @@ def build_graph(df_edges: pd.DataFrame, df_nodes: Optional[pd.DataFrame] = None,
         in_adj=in_adj,
         gb_matrix=gb_matrix,
         nodes=nodes_df,
+        circles=df_circles,
+        features=df_features,
+        featnames=df_featnames,
+        ego_id=ego_id,
+        ego_features=ego_features,
     )
 
 
@@ -466,6 +635,102 @@ def load_graph_from_bytes(
             raise ValueError("nodes_kind must be 'csv', 'json', or 'node'")
 
     return build_graph(df_edges, df_nodes=df_nodes)
+
+
+def load_ego_network_from_files(
+    files_dict: Dict[str, bytes],
+    ego_id: Optional[str] = None
+) -> GraphData:
+    """
+    Load a complete ego network from multiple files.
+
+    Expected files_dict keys (all optional except edges):
+    - 'edges' or '.edges': Edge list
+    - 'circles' or '.circles': Social circles
+    - 'feat' or '.feat': Node features
+    - 'egofeat' or '.egofeat': Ego node features
+    - 'featnames' or '.featnames': Feature names
+    - 'node' or '.node': Node attributes
+
+    Args:
+        files_dict: Dictionary mapping file type to bytes content
+        ego_id: Optional ego node ID (can be inferred from filename)
+
+    Returns:
+        GraphData with all available components
+    """
+    # Parse edges (required)
+    edges_bytes = files_dict.get('edges') or files_dict.get('.edges')
+    if not edges_bytes:
+        raise ValueError("Edges file is required")
+
+    df_edges = load_edges_edge_file(edges_bytes)
+
+    # Parse optional components
+    df_circles = None
+    circles_bytes = files_dict.get('circles') or files_dict.get('.circles')
+    if circles_bytes:
+        try:
+            df_circles = load_circles_file(circles_bytes)
+        except Exception:
+            pass
+
+    df_features = None
+    feat_bytes = files_dict.get('feat') or files_dict.get('.feat')
+    if feat_bytes:
+        try:
+            df_features = load_feat_file(feat_bytes)
+        except Exception:
+            pass
+
+    ego_features = None
+    egofeat_bytes = files_dict.get('egofeat') or files_dict.get('.egofeat')
+    if egofeat_bytes:
+        try:
+            ego_features = load_egofeat_file(egofeat_bytes)
+        except Exception:
+            pass
+
+    df_featnames = None
+    featnames_bytes = files_dict.get('featnames') or files_dict.get('.featnames')
+    if featnames_bytes:
+        try:
+            df_featnames = load_featnames_file(featnames_bytes)
+        except Exception:
+            pass
+
+    df_nodes = None
+    node_bytes = files_dict.get('node') or files_dict.get('.node')
+    if node_bytes:
+        try:
+            df_nodes = load_nodes_node_file(node_bytes)
+        except Exception:
+            pass
+
+    # Merge features with featnames if both available
+    if df_features is not None and df_featnames is not None:
+        # Rename feature columns based on featnames
+        for i, row in df_featnames.iterrows():
+            old_col = f"f{i}"
+            if old_col in df_features.columns:
+                new_name = row['feature_name'] if row['feature_name'] else old_col
+                df_features = df_features.rename(columns={old_col: new_name})
+
+    # Merge features into nodes if nodes exist
+    if df_nodes is not None and df_features is not None:
+        df_nodes = df_nodes.merge(df_features, on="id", how="left")
+    elif df_features is not None:
+        df_nodes = df_features
+
+    return build_graph(
+        df_edges,
+        df_nodes=df_nodes,
+        df_circles=df_circles,
+        df_features=df_features,
+        df_featnames=df_featnames,
+        ego_id=ego_id,
+        ego_features=ego_features
+    )
 
 
 def run_graph_metrics(
