@@ -72,6 +72,8 @@ cudf = None
 
 # Verbose GPU detection
 import os
+import sys
+import platform
 VERBOSE_GPU = os.getenv('VERBOSE_GPU', '1') == '1'
 
 if VERBOSE_GPU:
@@ -89,8 +91,36 @@ except ImportError as e:
     HAS_CUGRAPH = False
     if VERBOSE_GPU:
         print(f"[graph_tasks] ✗ cuGraph/cuDF not installed: {e}")
-        print("[graph_tasks]   Install with: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
-        print("[graph_tasks]   Or use Docker: docker build -f Dockerfile.gpu -t sentiment-gpu . && docker run --gpus all ...")
+
+        # Detect OS and Python version
+        is_windows = platform.system() == 'Windows'
+        py_version = sys.version_info
+        py_supported = (3, 10) <= py_version[:2] <= (3, 12)
+
+        if is_windows:
+            print("[graph_tasks]   ⚠ RAPIDS (cuGraph/cuDF) does NOT support Windows")
+            print("[graph_tasks]   Solutions:")
+            print("[graph_tasks]   1. Use Docker Desktop with WSL2 backend:")
+            print("[graph_tasks]      docker build -f Dockerfile.gpu -t sentiment-gpu .")
+            print("[graph_tasks]      docker run --gpus all -p 8080:8080 sentiment-gpu")
+            print("[graph_tasks]   2. Use WSL2 (Windows Subsystem for Linux):")
+            print("[graph_tasks]      Install Ubuntu on WSL2, then install cuGraph there")
+            print("[graph_tasks]   3. Use CPU fallback (current mode)")
+        elif not py_supported:
+            print(f"[graph_tasks]   ⚠ Python {py_version.major}.{py_version.minor} not supported by RAPIDS")
+            print(f"[graph_tasks]   RAPIDS supports Python 3.10, 3.11, or 3.12 only")
+            print(f"[graph_tasks]   Current: Python {py_version.major}.{py_version.minor}.{py_version.micro}")
+            print("[graph_tasks]   Solutions:")
+            print("[graph_tasks]   1. Use Docker (recommended):")
+            print("[graph_tasks]      docker build -f Dockerfile.gpu -t sentiment-gpu .")
+            print("[graph_tasks]      docker run --gpus all -p 8080:8080 sentiment-gpu")
+            print("[graph_tasks]   2. Create conda environment with Python 3.12:")
+            print("[graph_tasks]      conda create -n rapids-env python=3.12")
+            print("[graph_tasks]      conda activate rapids-env")
+            print("[graph_tasks]   3. Use CPU fallback (current mode)")
+        else:
+            print("[graph_tasks]   Install with: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
+            print("[graph_tasks]   Or use Docker: docker build -f Dockerfile.gpu -t sentiment-gpu . && docker run --gpus all ...")
 
 if HAS_CUGRAPH:
     try:

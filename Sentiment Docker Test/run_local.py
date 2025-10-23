@@ -84,12 +84,19 @@ def run_with_patched_asyncio():
 
 
 if __name__ == "__main__":
+    import platform
+
     print("=" * 60)
     print("Sentiment Analysis & Graph Analytics API - Local Server")
     print("=" * 60)
 
     # Check GPU availability
     print("\n🔍 GPU Status Check:")
+
+    is_windows = platform.system() == 'Windows'
+    py_version = sys.version_info
+    py_supported = (3, 10) <= py_version[:2] <= (3, 12)
+
     try:
         import torch
         if torch.cuda.is_available():
@@ -101,11 +108,17 @@ if __name__ == "__main__":
             print("  1. NVIDIA GPU with CUDA support")
             print("  2. NVIDIA drivers installed (check: nvidia-smi)")
             print("  3. PyTorch with CUDA: pip install torch --index-url https://download.pytorch.org/whl/cu121")
-            print("  Or use: ./run_docker_gpu.sh")
+            if is_windows:
+                print("  Or use Docker Desktop: docker build -f Dockerfile.gpu -t sentiment-gpu .")
+            else:
+                print("  Or use: ./run_docker_gpu.sh")
     except ImportError:
         print("⚠ PyTorch not installed (GPU detection unavailable)")
         print("  For GPU support: pip install torch --index-url https://download.pytorch.org/whl/cu121")
-        print("  Or use: ./run_docker_gpu.sh")
+        if is_windows:
+            print("  Or use Docker Desktop: docker build -f Dockerfile.gpu -t sentiment-gpu .")
+        else:
+            print("  Or use: ./run_docker_gpu.sh")
 
     try:
         import cudf
@@ -113,8 +126,25 @@ if __name__ == "__main__":
         print(f"✓ cuGraph {cugraph.__version__} and cuDF {cudf.__version__} available")
     except ImportError:
         print("⚠ cuGraph/cuDF not installed (graph GPU acceleration unavailable)")
-        print("  For GPU acceleration: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
-        print("  Or use: ./run_docker_gpu.sh")
+
+        if is_windows:
+            print("  ⚠ RAPIDS (cuGraph/cuDF) does NOT support Windows")
+            print("  Solutions:")
+            print("  1. Docker Desktop with WSL2 (recommended):")
+            print("     docker build -f Dockerfile.gpu -t sentiment-gpu .")
+            print("     docker run --gpus all -p 8080:8080 sentiment-gpu")
+            print("  2. Use WSL2 (Windows Subsystem for Linux)")
+            print("  3. CPU fallback (current mode - functional but slower)")
+        elif not py_supported:
+            print(f"  ⚠ Python {py_version.major}.{py_version.minor} not supported by RAPIDS")
+            print(f"  RAPIDS requires Python 3.10, 3.11, or 3.12")
+            print("  Solutions:")
+            print("  1. Use Docker (recommended): ./run_docker_gpu.sh")
+            print("  2. Create environment: conda create -n rapids python=3.12")
+            print("  3. CPU fallback (current mode)")
+        else:
+            print("  Install: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
+            print("  Or use: ./run_docker_gpu.sh")
     print()
 
     # Try methods in order
