@@ -72,6 +72,25 @@ def _detect_graph_file_kind(filename: str | None) -> str:
     else:
         return "csv"  # Default fallback
 
+def _convert_to_json_serializable(obj):
+    """Convert numpy/pandas types to JSON-serializable Python native types."""
+    import numpy as np
+
+    if isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: _convert_to_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_to_json_serializable(item) for item in obj]
+    elif pd.isna(obj):
+        return None
+    else:
+        return obj
+
 def _texts_from_json_bytes(b: bytes) -> T.List[str]:
     data = json.loads(b.decode("utf-8"))
     if isinstance(data, list):
@@ -689,7 +708,7 @@ async def graph_ego_network(
         # Prepare node list with all attributes
         nodes_list = []
         for idx, node_id in enumerate(g.idx_to_id):
-            node_data = {"id": node_id, "index": idx}
+            node_data = {"id": str(node_id), "index": int(idx)}
 
             # Add node attributes if available
             if g.nodes is not None:
@@ -697,13 +716,14 @@ async def graph_ego_network(
                 if not node_row.empty:
                     for col in g.nodes.columns:
                         if col not in ["id", "idx"]:
-                            node_data[col] = node_row.iloc[0][col]
+                            val = node_row.iloc[0][col]
+                            node_data[col] = _convert_to_json_serializable(val)
 
             # Add circle membership if available
             if g.circles is not None:
                 node_circles = g.circles[g.circles["node"] == node_id]["circle"].tolist()
                 if node_circles:
-                    node_data["circles"] = node_circles
+                    node_data["circles"] = [str(c) for c in node_circles]
 
             nodes_list.append(node_data)
 
@@ -711,8 +731,8 @@ async def graph_ego_network(
         edges_list = []
         for _, row in g.edges.iterrows():
             edge_data = {
-                "source": g.idx_to_id[int(row["src_idx"])],
-                "target": g.idx_to_id[int(row["dst_idx"])]
+                "source": str(g.idx_to_id[int(row["src_idx"])]),
+                "target": str(g.idx_to_id[int(row["dst_idx"])])
             }
             if "weight" in row:
                 edge_data["weight"] = float(row["weight"])
@@ -721,19 +741,21 @@ async def graph_ego_network(
         # Get circle information
         circles_info = None
         if g.circles is not None:
-            circles_info = g.circles.groupby("circle")["node"].apply(list).to_dict()
+            circles_raw = g.circles.groupby("circle")["node"].apply(list).to_dict()
+            # Convert to JSON-serializable format
+            circles_info = {str(k): [str(node) for node in v] for k, v in circles_raw.items()}
 
         result = {
-            "n_nodes": g.n,
+            "n_nodes": int(g.n),
             "n_edges": int(g.edges.shape[0]),
-            "sample_nodes": sample_nodes,
-            "ego_id": g.ego_id,
+            "sample_nodes": [str(n) for n in sample_nodes],
+            "ego_id": str(g.ego_id) if g.ego_id else None,
             "has_circles": g.circles is not None,
             "has_features": g.features is not None,
             "has_featnames": g.featnames is not None,
             "has_ego_features": g.ego_features is not None,
             "circles": circles_info,
-            "feature_count": len(g.features.columns) - 1 if g.features is not None else 0,
+            "feature_count": int(len(g.features.columns) - 1) if g.features is not None else 0,
             "nodes": nodes_list,
             "edges": edges_list,
         }
