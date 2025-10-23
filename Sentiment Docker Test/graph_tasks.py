@@ -1,5 +1,5 @@
 """
-graph_tasks.py — lightweight graph analytics with optional GraphBLAS
+graph_tasks.py — lightweight graph analytics with optional GPU acceleration
 
 What it does
 ------------
@@ -7,6 +7,7 @@ What it does
 - Builds compact integer node index maps
 - Computes degrees, PageRank, BFS, and (optionally) triangle counts
 - Uses efficient pure-Python/NumPy routines by default
+- If cuGraph (RAPIDS) is available, automatically uses GPU acceleration
 - If pygraphblas is installed, exposes the adjacency as a GraphBLAS matrix
   (you can extend algorithms to use it later)
 
@@ -45,6 +46,7 @@ import io
 import json
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
+import typing as T
 
 import numpy as np
 import pandas as pd
@@ -61,6 +63,25 @@ except Exception:
         HAS_GB = True
     except Exception:
         pass
+
+# Optional GPU acceleration (cuGraph from RAPIDS)
+HAS_GPU = False
+HAS_CUGRAPH = False
+cugraph = None
+cudf = None
+try:
+    import cudf  # GPU DataFrame
+    import cugraph  # GPU graph analytics
+    import torch  # Check CUDA availability
+    HAS_CUGRAPH = True
+    HAS_GPU = torch.cuda.is_available()
+    if HAS_GPU:
+        print(f"[graph_tasks] GPU detected: {torch.cuda.get_device_name(0)}")
+        print(f"[graph_tasks] cuGraph version: {cugraph.__version__}")
+except Exception as e:
+    HAS_GPU = False
+    HAS_CUGRAPH = False
+    # Silent fallback to CPU
 
 
 
@@ -466,9 +487,149 @@ def build_graph(
     )
 
 
-# ------------------------------- Algorithms -------------------------------- #
+# ------------------------------- GPU Helpers ------------------------------- #
 
-def degrees(g: GraphData) -> pd.DataFrame:
+def _to_cugraph(g: GraphData):
+    """Convert GraphData to cuGraph format (GPU DataFrame)."""
+    if not HAS_CUGRAPH:
+        raise RuntimeError("cuGraph not available")
+
+    # Create cuDF DataFrame from edges
+    edge_df = cudf.DataFrame({
+        'src': g.edges['src_idx'].values,
+        'dst': g.edges['dst_idx'].values
+    })
+
+    # Create cuGraph object
+    G = cugraph.Graph(directed=True)
+    G.from_cudf_edgelist(edge_df, source='src', destination='dst')
+
+    return G
+
+
+# ------------------------- GPU-Accelerated Algorithms ---------------------- #
+
+def degrees_gpu(g: GraphData) -> pd.DataFrame:
+    """GPU-accelerated degree computation using cuGraph."""
+    try:
+        G = _to_cugraph(g)
+
+        # Compute in-degree and out-degree using cuGraph
+        in_deg = G.in_degree()
+        out_deg = G.out_degree()
+
+        # Convert to pandas and merge
+        in_deg_pd = in_deg.to_pandas().rename(columns={'degree': 'in_degree'})
+        out_deg_pd = out_deg.to_pandas().rename(columns={'degree': 'out_degree'})
+
+        # Merge on vertex
+        result = in_deg_pd.merge(out_deg_pd, on='vertex', how='outer').fillna(0)
+        result['degree'] = result['in_degree'] + result['out_degree']
+
+        # Map vertex indices to node IDs
+        result['node'] = result['vertex'].apply(lambda x: g.idx_to_id[int(x)] if int(x) < len(g.idx_to_id) else str(x))
+
+        # Select and order columns
+        result = result[['node', 'out_degree', 'in_degree', 'degree']]
+        result['out_degree'] = result['out_degree'].astype(int)
+        result['in_degree'] = result['in_degree'].astype(int)
+        result['degree'] = result['degree'].astype(int)
+        result.sort_values('degree', ascending=False, inplace=True, ignore_index=True)
+
+        return result
+    except Exception as e:
+        print(f"[graph_tasks] GPU degrees failed: {e}, falling back to CPU")
+        return degrees_cpu(g)
+
+
+def pagerank_gpu(
+    g: GraphData,
+    alpha: float = 0.85,
+    iters: int = 40,
+    tol: float = 1e-6,
+) -> pd.DataFrame:
+    """GPU-accelerated PageRank using cuGraph."""
+    try:
+        G = _to_cugraph(g)
+
+        # Compute PageRank on GPU
+        pr_df = cugraph.pagerank(G, alpha=alpha, max_iter=iters, tol=tol)
+
+        # Convert to pandas
+        pr_pd = pr_df.to_pandas()
+
+        # Map vertex indices to node IDs
+        pr_pd['node'] = pr_pd['vertex'].apply(lambda x: g.idx_to_id[int(x)] if int(x) < len(g.idx_to_id) else str(x))
+
+        # Select and order columns
+        result = pr_pd[['node', 'pagerank']].rename(columns={'pagerank': 'pr'})
+        result.sort_values('pr', ascending=False, inplace=True, ignore_index=True)
+
+        return result
+    except Exception as e:
+        print(f"[graph_tasks] GPU pagerank failed: {e}, falling back to CPU")
+        return pagerank_cpu(g, alpha, iters, tol)
+
+
+def bfs_gpu(g: GraphData, source_node: str) -> pd.DataFrame:
+    """GPU-accelerated BFS using cuGraph."""
+    try:
+        if source_node not in g.id_to_idx:
+            raise KeyError(f"Unknown source node: {source_node}")
+
+        G = _to_cugraph(g)
+        source_idx = g.id_to_idx[source_node]
+
+        # Compute BFS on GPU
+        bfs_df = cugraph.bfs(G, start=source_idx)
+
+        # Convert to pandas
+        bfs_pd = bfs_df.to_pandas()
+
+        # Map vertex indices to node IDs
+        bfs_pd['node'] = bfs_pd['vertex'].apply(lambda x: g.idx_to_id[int(x)] if int(x) < len(g.idx_to_id) else str(x))
+
+        # Select columns and handle unreachable nodes
+        result = bfs_pd[['node', 'distance']]
+        result['distance'] = result['distance'].fillna(-1).astype(int)
+
+        return result
+    except Exception as e:
+        print(f"[graph_tasks] GPU bfs failed: {e}, falling back to CPU")
+        return bfs_cpu(g, source_node)
+
+
+def triangles_gpu(g: GraphData, max_nodes: int = 20000) -> Dict[str, int]:
+    """GPU-accelerated triangle counting using cuGraph."""
+    try:
+        if g.n > max_nodes:
+            return {"triangles": -1, "note": f"skipped (n={g.n} > max_nodes={max_nodes})"}
+
+        # cuGraph triangle counting expects undirected graph
+        edge_df = cudf.DataFrame({
+            'src': g.edges['src_idx'].values,
+            'dst': g.edges['dst_idx'].values
+        })
+
+        G = cugraph.Graph(directed=False)
+        G.from_cudf_edgelist(edge_df, source='src', destination='dst')
+
+        # Count triangles on GPU
+        triangle_count = cugraph.triangle_count(G)
+
+        # Sum up all triangles (each triangle counted 3 times, once per vertex)
+        total_triangles = int(triangle_count.to_pandas()['counts'].sum() // 3)
+
+        return {"triangles": total_triangles}
+    except Exception as e:
+        print(f"[graph_tasks] GPU triangles failed: {e}, falling back to CPU")
+        return triangles_cpu(g, max_nodes)
+
+
+# ---------------------------- CPU Algorithms (Fallback) -------------------- #
+
+def degrees_cpu(g: GraphData) -> pd.DataFrame:
+    """CPU implementation of degrees (original)."""
     outdeg = np.fromiter((len(g.out_adj[i]) for i in range(g.n)), dtype=np.int64, count=g.n)
     indeg = np.fromiter((len(g.in_adj[i]) for i in range(g.n)), dtype=np.int64, count=g.n)
     res = pd.DataFrame({
@@ -481,14 +642,22 @@ def degrees(g: GraphData) -> pd.DataFrame:
     return res
 
 
-def pagerank(
+def degrees(g: GraphData) -> pd.DataFrame:
+    """Compute node degrees. Automatically uses GPU if available."""
+    if HAS_GPU and HAS_CUGRAPH:
+        return degrees_gpu(g)
+    else:
+        return degrees_cpu(g)
+
+
+def pagerank_cpu(
     g: GraphData,
     alpha: float = 0.85,
     iters: int = 40,
     tol: float = 1e-6,
 ) -> pd.DataFrame:
     """
-    Power iteration PageRank on adjacency lists (robust without SciPy).
+    CPU implementation of PageRank using power iteration on adjacency lists (robust without SciPy).
     Returns DataFrame with columns: node, pr.
     """
     n = g.n
@@ -524,9 +693,22 @@ def pagerank(
     return pd.DataFrame({"node": g.idx_to_id, "pr": r}).sort_values("pr", ascending=False, ignore_index=True)
 
 
-def bfs(g: GraphData, source_node: str) -> pd.DataFrame:
+def pagerank(
+    g: GraphData,
+    alpha: float = 0.85,
+    iters: int = 40,
+    tol: float = 1e-6,
+) -> pd.DataFrame:
+    """Compute PageRank. Automatically uses GPU if available."""
+    if HAS_GPU and HAS_CUGRAPH:
+        return pagerank_gpu(g, alpha, iters, tol)
+    else:
+        return pagerank_cpu(g, alpha, iters, tol)
+
+
+def bfs_cpu(g: GraphData, source_node: str) -> pd.DataFrame:
     """
-    Breadth-first search distances from a source node (by original id).
+    CPU implementation of breadth-first search distances from a source node (by original id).
     For directed graphs, traversal follows outgoing edges.
     """
     if source_node not in g.id_to_idx:
@@ -546,9 +728,17 @@ def bfs(g: GraphData, source_node: str) -> pd.DataFrame:
     return pd.DataFrame({"node": g.idx_to_id, "distance": dist})
 
 
-def triangles_undirected(g: GraphData, max_nodes: int = 20000) -> Dict[str, int]:
+def bfs(g: GraphData, source_node: str) -> pd.DataFrame:
+    """Compute BFS distances from source node. Automatically uses GPU if available."""
+    if HAS_GPU and HAS_CUGRAPH:
+        return bfs_gpu(g, source_node)
+    else:
+        return bfs_cpu(g, source_node)
+
+
+def triangles_cpu(g: GraphData, max_nodes: int = 20000) -> Dict[str, int]:
     """
-    Counts global triangles on an undirected simple graph via node-ordered set intersections.
+    CPU implementation of triangle counting on an undirected simple graph via node-ordered set intersections.
     Skips if n > max_nodes (to avoid O(m * sqrt(m)) blowups).
     """
     n = g.n
@@ -581,6 +771,14 @@ def triangles_undirected(g: GraphData, max_nodes: int = 20000) -> Dict[str, int]
             tri += len(fu & forward[v])
 
     return {"triangles": tri}
+
+
+def triangles_undirected(g: GraphData, max_nodes: int = 20000) -> Dict[str, int]:
+    """Count triangles in undirected graph. Automatically uses GPU if available."""
+    if HAS_GPU and HAS_CUGRAPH:
+        return triangles_gpu(g, max_nodes)
+    else:
+        return triangles_cpu(g, max_nodes)
 
 
 # ------------------------------ Runner Helpers ----------------------------- #
