@@ -693,31 +693,21 @@
               border: '#4a82d9',
               highlight: { background: '#8fb9ff', border: '#6aa2ff' },
               hover: { background: '#7eadff', border: '#5a92e9' }
-            }
+            },
+            title: n.title.split('\n').slice(0, 2).join('\n')  // Remove centrality from tooltip
           });
         });
         return;
       }
 
-      // Compute centrality (client-side for now)
-      const nodes = currentGraphNodesData.get();
-      let centralityValues = {};
-
-      if(measure === 'degree'){
-        // Simple degree centrality
-        currentGraphData.edges.forEach(e => {
-          centralityValues[e.source] = (centralityValues[e.source] || 0) + 1;
-          centralityValues[e.target] = (centralityValues[e.target] || 0) + 1;
-        });
-      } else {
-        // For PageRank, Betweenness, Eigenvector - would need backend computation
-        // For now, use degree as fallback
-        alert(`${measure} centrality requires backend computation. Using degree centrality for now.`);
-        currentGraphData.edges.forEach(e => {
-          centralityValues[e.source] = (centralityValues[e.source] || 0) + 1;
-          centralityValues[e.target] = (centralityValues[e.target] || 0) + 1;
-        });
+      // Check if centrality data is available from backend
+      if(!currentGraphData.centrality || !currentGraphData.centrality[measure]){
+        alert(`${measure} centrality data not available. Please reload the graph.`);
+        return;
       }
+
+      const nodes = currentGraphNodesData.get();
+      const centralityValues = currentGraphData.centrality[measure];
 
       // Find min/max for normalization
       const values = Object.values(centralityValues);
@@ -748,6 +738,10 @@
         const bgColor = `rgb(${r},${g},${b})`;
         const borderColor = `rgb(${Math.max(0,r-30)},${Math.max(0,g-30)},${Math.max(0,b-30)})`;
 
+        // Update tooltip to include centrality value
+        const baseTooltip = n.title.split('\n').slice(0, 2).join('\n');  // Keep node ID and name
+        const newTooltip = `${baseTooltip}\n${measure}: ${value.toFixed(4)}`;
+
         currentGraphNodesData.update({
           id: n.id,
           color: {
@@ -756,7 +750,7 @@
             highlight: { background: bgColor, border: '#ffffff' },
             hover: { background: bgColor, border: '#e6e6e6' }
           },
-          title: `${n.title}\n${measure}: ${value.toFixed(3)}`
+          title: newTooltip
         });
       });
     }

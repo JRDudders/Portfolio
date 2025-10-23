@@ -781,6 +781,169 @@ def triangles_undirected(g: GraphData, max_nodes: int = 20000) -> Dict[str, int]
         return triangles_cpu(g, max_nodes)
 
 
+# ---------------------------- Eigenvector Centrality ----------------------- #
+
+def eigenvector_gpu(g: GraphData, max_iter: int = 100, tol: float = 1e-6) -> pd.DataFrame:
+    """GPU-accelerated eigenvector centrality using cuGraph."""
+    try:
+        G = _to_cugraph(g)
+
+        # Compute eigenvector centrality on GPU
+        ec_df = cugraph.eigenvector_centrality(G, max_iter=max_iter, tol=tol)
+
+        # Convert to pandas
+        ec_pd = ec_df.to_pandas()
+
+        # Map vertex indices to node IDs
+        ec_pd['node'] = ec_pd['vertex'].apply(lambda x: g.idx_to_id[int(x)] if int(x) < len(g.idx_to_id) else str(x))
+
+        # Select and order columns
+        result = ec_pd[['node', 'eigenvector_centrality']].rename(columns={'eigenvector_centrality': 'centrality'})
+        result.sort_values('centrality', ascending=False, inplace=True, ignore_index=True)
+
+        return result
+    except Exception as e:
+        print(f"[graph_tasks] GPU eigenvector failed: {e}, falling back to CPU")
+        return eigenvector_cpu(g, max_iter, tol)
+
+
+def eigenvector_cpu(g: GraphData, max_iter: int = 100, tol: float = 1e-6) -> pd.DataFrame:
+    """
+    CPU implementation of eigenvector centrality using power iteration.
+    Returns DataFrame with columns: node, centrality.
+    """
+    n = g.n
+    if n == 0:
+        return pd.DataFrame(columns=["node", "centrality"])
+
+    # Initialize eigenvector
+    x = np.ones(n, dtype=np.float64) / n
+
+    # Power iteration
+    for _ in range(max_iter):
+        x_new = np.zeros(n, dtype=np.float64)
+
+        # Matrix-vector multiplication: x_new = A * x
+        for i in range(n):
+            for j in g.in_adj[i]:  # Incoming edges
+                x_new[i] += x[j]
+
+        # Normalize
+        norm = np.linalg.norm(x_new)
+        if norm > 0:
+            x_new = x_new / norm
+        else:
+            # Graph might be disconnected or have no edges
+            x_new = np.ones(n, dtype=np.float64) / n
+
+        # Check convergence
+        if np.abs(x_new - x).sum() < tol:
+            x = x_new
+            break
+        x = x_new
+
+    return pd.DataFrame({"node": g.idx_to_id, "centrality": x}).sort_values("centrality", ascending=False, ignore_index=True)
+
+
+def eigenvector_centrality(g: GraphData, max_iter: int = 100, tol: float = 1e-6) -> pd.DataFrame:
+    """Compute eigenvector centrality. Automatically uses GPU if available."""
+    if HAS_GPU and HAS_CUGRAPH:
+        return eigenvector_gpu(g, max_iter, tol)
+    else:
+        return eigenvector_cpu(g, max_iter, tol)
+
+
+# ---------------------------- Betweenness Centrality ----------------------- #
+
+def betweenness_gpu(g: GraphData, normalized: bool = True) -> pd.DataFrame:
+    """GPU-accelerated betweenness centrality using cuGraph."""
+    try:
+        G = _to_cugraph(g)
+
+        # Compute betweenness centrality on GPU
+        bc_df = cugraph.betweenness_centrality(G, normalized=normalized)
+
+        # Convert to pandas
+        bc_pd = bc_df.to_pandas()
+
+        # Map vertex indices to node IDs
+        bc_pd['node'] = bc_pd['vertex'].apply(lambda x: g.idx_to_id[int(x)] if int(x) < len(g.idx_to_id) else str(x))
+
+        # Select and order columns
+        result = bc_pd[['node', 'betweenness_centrality']].rename(columns={'betweenness_centrality': 'centrality'})
+        result.sort_values('centrality', ascending=False, inplace=True, ignore_index=True)
+
+        return result
+    except Exception as e:
+        print(f"[graph_tasks] GPU betweenness failed: {e}, falling back to CPU")
+        return betweenness_cpu(g, normalized)
+
+
+def betweenness_cpu(g: GraphData, normalized: bool = True) -> pd.DataFrame:
+    """
+    CPU implementation of betweenness centrality using Brandes' algorithm.
+    Returns DataFrame with columns: node, centrality.
+    """
+    n = g.n
+    if n == 0:
+        return pd.DataFrame(columns=["node", "centrality"])
+
+    betweenness = np.zeros(n, dtype=np.float64)
+
+    # Brandes' algorithm
+    for s in range(n):
+        # Single-source shortest paths
+        stack = []
+        pred = [[] for _ in range(n)]
+        sigma = np.zeros(n, dtype=np.float64)
+        sigma[s] = 1.0
+        dist = np.full(n, -1, dtype=np.int64)
+        dist[s] = 0
+
+        # BFS
+        queue = [s]
+        head = 0
+        while head < len(queue):
+            v = queue[head]
+            head += 1
+            stack.append(v)
+
+            for w in g.out_adj[v]:
+                # First time visiting w?
+                if dist[w] < 0:
+                    queue.append(w)
+                    dist[w] = dist[v] + 1
+
+                # Shortest path to w via v?
+                if dist[w] == dist[v] + 1:
+                    sigma[w] += sigma[v]
+                    pred[w].append(v)
+
+        # Accumulation
+        delta = np.zeros(n, dtype=np.float64)
+        while stack:
+            w = stack.pop()
+            for v in pred[w]:
+                delta[v] += (sigma[v] / sigma[w]) * (1.0 + delta[w])
+            if w != s:
+                betweenness[w] += delta[w]
+
+    # Normalization
+    if normalized and n > 2:
+        scale = 1.0 / ((n - 1) * (n - 2))
+        betweenness *= scale
+
+    return pd.DataFrame({"node": g.idx_to_id, "centrality": betweenness}).sort_values("centrality", ascending=False, ignore_index=True)
+
+
+def betweenness_centrality(g: GraphData, normalized: bool = True) -> pd.DataFrame:
+    """Compute betweenness centrality. Automatically uses GPU if available."""
+    if HAS_GPU and HAS_CUGRAPH:
+        return betweenness_gpu(g, normalized)
+    else:
+        return betweenness_cpu(g, normalized)
+
+
 # ------------------------------ Runner Helpers ----------------------------- #
 
 def merge_node_attributes(result_df: pd.DataFrame, g: GraphData) -> pd.DataFrame:

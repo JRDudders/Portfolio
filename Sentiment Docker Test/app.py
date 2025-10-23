@@ -604,9 +604,12 @@ async def graph_triangles(
 async def graph_load(
     edges_file: UploadFile = File(..., description="Edge list (CSV/JSON/.edge)"),
     nodes_file: UploadFile | None = File(None, description="Optional node attributes (CSV/JSON/.node)"),
+    compute_centrality: bool = Query(True, description="Compute centrality measures (PageRank, Betweenness, Eigenvector)"),
 ):
-    """Load and validate a graph, returning basic statistics and visualization data."""
+    """Load and validate a graph, returning basic statistics, visualization data, and centrality measures."""
     try:
+        from graph_tasks import pagerank, betweenness_centrality, eigenvector_centrality
+
         b = await edges_file.read()
         kind = _detect_graph_file_kind(edges_file.filename)
 
@@ -621,6 +624,36 @@ async def graph_load(
         # Collect sample nodes
         sample_nodes = g.idx_to_id[:min(10, len(g.idx_to_id))]
 
+        # Compute centrality measures if requested
+        centrality_data = {}
+        if compute_centrality:
+            try:
+                # PageRank
+                pr_df = pagerank(g)
+                centrality_data['pagerank'] = {row['node']: float(row['pr']) for _, row in pr_df.iterrows()}
+
+                # Betweenness
+                bc_df = betweenness_centrality(g)
+                centrality_data['betweenness'] = {row['node']: float(row['centrality']) for _, row in bc_df.iterrows()}
+
+                # Eigenvector
+                ec_df = eigenvector_centrality(g)
+                centrality_data['eigenvector'] = {row['node']: float(row['centrality']) for _, row in ec_df.iterrows()}
+
+                # Degree (simple count)
+                degree_dict = {}
+                for node_id in g.idx_to_id:
+                    degree_dict[node_id] = 0
+                for _, row in g.edges.iterrows():
+                    src = g.idx_to_id[int(row["src_idx"])]
+                    tgt = g.idx_to_id[int(row["dst_idx"])]
+                    degree_dict[src] = degree_dict.get(src, 0) + 1
+                    degree_dict[tgt] = degree_dict.get(tgt, 0) + 1
+                centrality_data['degree'] = degree_dict
+            except Exception as e:
+                print(f"[app] Centrality computation failed: {e}")
+                centrality_data = {}
+
         # Prepare node list with attributes for visualization
         nodes_list = []
         for idx, node_id in enumerate(g.idx_to_id):
@@ -631,7 +664,7 @@ async def graph_load(
                 if not node_row.empty:
                     for col in g.nodes.columns:
                         if col not in ["id", "idx"]:
-                            node_data[col] = node_row.iloc[0][col]
+                            node_data[col] = _convert_to_json_serializable(node_row.iloc[0][col])
             nodes_list.append(node_data)
 
         # Prepare edge list for visualization
@@ -655,6 +688,7 @@ async def graph_load(
             "node_attributes": list(g.nodes.columns) if g.nodes is not None else [],
             "nodes": nodes_list,
             "edges": edges_list,
+            "centrality": centrality_data if compute_centrality else {},
         }
         return JSONResponse(content=result)
     except Exception as e:
