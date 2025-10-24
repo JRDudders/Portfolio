@@ -828,3 +828,81 @@ async def graph_ego_network(
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ego network loading failed: {e}")
+
+
+# ------------------------------ Audio Anti-Spoofing ------------------------ #
+
+@app.get("/audio/model-status")
+async def audio_model_status():
+    """Check if audio anti-spoofing models are available"""
+    try:
+        from audio_antispoofing import check_models_available
+        status = check_models_available()
+        model_ready = all(status.values())
+        return JSONResponse(content={
+            "model_ready": model_ready,
+            "details": status
+        })
+    except Exception as e:
+        return JSONResponse(content={
+            "model_ready": False,
+            "error": str(e)
+        })
+
+
+@app.post("/audio/download-model")
+async def audio_download_model():
+    """Download required models for audio anti-spoofing"""
+    try:
+        from audio_antispoofing import download_models
+        download_models()
+        return JSONResponse(content={"status": "success", "message": "Models downloaded"})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Model download failed: {e}")
+
+
+@app.post("/audio/analyze")
+async def audio_analyze(file: UploadFile = File(...)):
+    """Analyze audio file for deepfake detection"""
+    import tempfile
+    import shutil
+    from pathlib import Path
+
+    # Validate file type
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in ['.flac', '.wav']:
+        raise HTTPException(status_code=400, detail="Only FLAC and WAV files are supported")
+
+    # Save uploaded file to temp location
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+
+        # Run prediction
+        from audio_antispoofing import predict_audio
+        prediction, confidence, score = predict_audio(tmp_path)
+
+        # Clean up temp file
+        Path(tmp_path).unlink()
+
+        return JSONResponse(content={
+            "prediction": prediction,
+            "confidence": float(confidence),
+            "score": float(score),
+            "filename": file.filename
+        })
+
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=503, detail="Model files not found. Please download models first.")
+    except Exception as e:
+        # Clean up temp file if it exists
+        if 'tmp_path' in locals():
+            try:
+                Path(tmp_path).unlink()
+            except:
+                pass
+        raise HTTPException(status_code=500, detail=f"Audio analysis failed: {e}")

@@ -45,3 +45,8 @@ pygraphblas>=5.1.8.0     ; python_version < "3.11"
 umap-learn>=0.5
 hdbscan>=0.8
 bertopic>=0.16
+
+# Audio Deepfake Detection (Python 3.12 compatible)
+librosa>=0.10.0
+soundfile>=0.12.1
+torchaudio>=2.0.0

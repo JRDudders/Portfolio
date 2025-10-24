@@ -50,12 +50,32 @@
       margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;
     }
     .graph-controls label{margin:0;display:inline;font-size:12px}
+    /* Tab styles */
+    .tabs{display:flex;gap:4px;margin:0 0 20px;border-bottom:1px solid var(--border)}
+    .tab{
+      padding:12px 20px;border:none;background:transparent;color:var(--muted);
+      cursor:pointer;font-size:14px;font-weight:600;border-bottom:2px solid transparent;
+      transition:all 0.2s;
+    }
+    .tab:hover{color:var(--fg);background:rgba(255,255,255,0.03)}
+    .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+    .tab-content{display:none}
+    .tab-content.active{display:block}
   </style>
 </head>
 <body>
   <div class="wrap">
-    <h1>CiceroWatch NLP Tasks</h1>
+    <h1>CiceroWatch</h1>
 
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button class="tab active" data-tab="nlp">NLP Tasks</button>
+      <button class="tab" data-tab="graph">Graph Analytics</button>
+      <button class="tab" data-tab="audio">Audio Deepfake Detection</button>
+    </div>
+
+    <!-- NLP Tab Content -->
+    <div id="tab-nlp" class="tab-content active">
     <div class="row">
       <!-- FILE UPLOAD -->
       <div class="card">
@@ -129,9 +149,11 @@
         <div id="status-url" class="status"></div>
       </div>
     </div>
+    </div><!-- End NLP Tab -->
 
-    <!-- GRAPH ANALYTICS -->
-    <div class="card" style="margin-top:16px">
+    <!-- Graph Analytics Tab Content -->
+    <div id="tab-graph" class="tab-content">
+    <div class="card">
       <h2>Graph Analytics</h2>
 
       <label>Edge List File (required)</label>
@@ -254,6 +276,47 @@
         </div>
       </div>
     </div>
+    </div><!-- End Graph Tab -->
+
+    <!-- Audio Deepfake Detection Tab Content -->
+    <div id="tab-audio" class="tab-content">
+      <div class="card">
+        <h2>Audio Deepfake Detection</h2>
+        <p style="font-size:13px;color:var(--muted);margin:4px 0 16px">
+          Upload audio files to detect if they are genuine or AI-generated/spoofed. Supports FLAC and WAV formats.
+        </p>
+
+        <label>Audio File</label>
+        <div class="inline">
+          <button class="btn" id="btn-audio">Choose Audio File</button>
+          <span class="file-name" id="audio-name">No file selected</span>
+          <input type="file" id="audio-input" style="display:none" accept=".flac,.wav,audio/flac,audio/wav,audio/x-flac,audio/x-wav"/>
+        </div>
+
+        <div class="controls">
+          <button class="btn primary" id="run-audio">Analyze Audio</button>
+        </div>
+        <div id="status-audio" class="status"></div>
+
+        <!-- Results display -->
+        <div id="audio-results" style="display:none;margin-top:16px">
+          <div class="card" style="background:#0f1117;padding:12px">
+            <h3 style="font-size:14px;margin:0 0 10px">Detection Results</h3>
+            <div id="audio-result-content"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Model Status Card -->
+      <div class="card" style="margin-top:16px">
+        <h2>Model Status</h2>
+        <div id="model-status" style="font-size:13px;color:var(--muted)">
+          Checking model availability...
+        </div>
+        <button class="btn" id="download-model" style="display:none;margin-top:10px">Download Pre-trained Model</button>
+      </div>
+    </div><!-- End Audio Tab -->
+
   </div>
 
   <script>
@@ -269,6 +332,20 @@
     } else {
       console.log('✓ vis.js loaded successfully');
     }
+
+    // --- Tab Switching ---
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', function() {
+        // Remove active class from all tabs and content
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+        // Add active class to clicked tab and corresponding content
+        this.classList.add('active');
+        const tabId = 'tab-' + this.getAttribute('data-tab');
+        document.getElementById(tabId).classList.add('active');
+      });
+    });
 
     // --- Presets (mirror nlp.py PRESETS keys) ---
     const PRESETS = [
@@ -1093,6 +1170,116 @@
         });
       });
     }
+
+    // --- Audio Deepfake Detection ---
+    const btnAudio = document.getElementById('btn-audio');
+    const audioInput = document.getElementById('audio-input');
+    const audioName = document.getElementById('audio-name');
+    const runAudio = document.getElementById('run-audio');
+    const statusAudio = document.getElementById('status-audio');
+    const audioResults = document.getElementById('audio-results');
+    const audioResultContent = document.getElementById('audio-result-content');
+    const modelStatus = document.getElementById('model-status');
+    const downloadModelBtn = document.getElementById('download-model');
+
+    btnAudio.addEventListener('click', () => audioInput.click());
+    audioInput.addEventListener('change', () => {
+      const f = audioInput.files[0];
+      audioName.textContent = f ? f.name : 'No file selected';
+    });
+
+    // Check model status on page load
+    fetch('/audio/model-status')
+      .then(r => r.json())
+      .then(data => {
+        if(data.model_ready){
+          modelStatus.textContent = '✓ Model ready';
+          modelStatus.style.color = 'var(--ok)';
+        } else {
+          modelStatus.textContent = '⚠ Model not found. Click below to download.';
+          modelStatus.style.color = 'var(--warn)';
+          downloadModelBtn.style.display = 'inline-block';
+        }
+      })
+      .catch(() => {
+        modelStatus.textContent = '⚠ Unable to check model status';
+        modelStatus.style.color = 'var(--err)';
+      });
+
+    downloadModelBtn.addEventListener('click', async () => {
+      downloadModelBtn.disabled = true;
+      modelStatus.textContent = 'Downloading model... This may take several minutes.';
+      modelStatus.style.color = 'var(--muted)';
+
+      try {
+        const resp = await fetch('/audio/download-model', { method: 'POST' });
+        const data = await resp.json();
+        if(resp.ok){
+          modelStatus.textContent = '✓ Model downloaded successfully';
+          modelStatus.style.color = 'var(--ok)';
+          downloadModelBtn.style.display = 'none';
+        } else {
+          modelStatus.textContent = '✗ Download failed: ' + (data.detail || 'Unknown error');
+          modelStatus.style.color = 'var(--err)';
+          downloadModelBtn.disabled = false;
+        }
+      } catch(e) {
+        modelStatus.textContent = '✗ Download failed: ' + e.message;
+        modelStatus.style.color = 'var(--err)';
+        downloadModelBtn.disabled = false;
+      }
+    });
+
+    runAudio.addEventListener('click', async () => {
+      const file = audioInput.files[0];
+      if(!file){
+        setStatus(statusAudio, 'Please select an audio file', 'err');
+        return;
+      }
+
+      runAudio.disabled = true;
+      setStatus(statusAudio, 'Analyzing audio...', '');
+      audioResults.style.display = 'none';
+
+      const fd = new FormData();
+      fd.append('file', file);
+
+      try {
+        const resp = await fetch('/audio/analyze', { method: 'POST', body: fd });
+        const data = await resp.json();
+
+        if(!resp.ok){
+          setStatus(statusAudio, data.detail || 'Analysis failed', 'err');
+          return;
+        }
+
+        setStatus(statusAudio, 'Analysis complete', 'ok');
+        audioResults.style.display = 'block';
+
+        const prediction = data.prediction === 'bonafide' ? 'Genuine (Real)' : 'Spoofed (Fake)';
+        const confidence = (data.confidence * 100).toFixed(2);
+        const predClass = data.prediction === 'bonafide' ? 'ok' : 'err';
+
+        audioResultContent.innerHTML = `
+          <div style="margin-bottom:12px">
+            <strong>File:</strong> ${file.name}
+          </div>
+          <div style="margin-bottom:12px">
+            <strong>Prediction:</strong> <span style="color:var(--${predClass});font-weight:600">${prediction}</span>
+          </div>
+          <div style="margin-bottom:12px">
+            <strong>Confidence:</strong> ${confidence}%
+          </div>
+          <div style="margin-bottom:12px">
+            <strong>Score:</strong> ${data.score.toFixed(4)}
+          </div>
+        `;
+      } catch(e) {
+        setStatus(statusAudio, 'Error: ' + e.message, 'err');
+      } finally {
+        runAudio.disabled = false;
+      }
+    });
   </script>
 </body>
 </html>

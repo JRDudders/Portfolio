@@ -35,3 +35,8 @@ torch>=2.3.0
 # 2. Using official RAPIDS Docker images as base
 # 3. Verifying CUDA version compatibility: nvidia-smi
 # 4. Checking RAPIDS compatibility matrix: https://rapids.ai/
+
+# Audio Deepfake Detection (GPU-accelerated, Python 3.12 compatible)
+librosa>=0.10.0
+soundfile>=0.12.1
+torchaudio>=2.0.0
