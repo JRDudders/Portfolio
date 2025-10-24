@@ -27,7 +27,12 @@ except ImportError:
 
 # Model paths
 MODEL_DIR = Path("models/audio_antispoofing")
-ANTISPOOFING_MODEL_PATH = MODEL_DIR / "best_model.pth"
+# Try multiple possible filenames
+ANTISPOOFING_MODEL_NAMES = [
+    "Best_LA_model_for_DF.pth",  # Actual filename from Google Drive
+    "best_model.pth",
+    "best_SSL_model_LA.pth"
+]
 
 # HuggingFace model name (XLSR-300M equivalent)
 WAV2VEC_MODEL_NAME = "facebook/wav2vec2-xls-r-300m"
@@ -442,13 +447,22 @@ def load_audio(file_path: str, sr: int = 16000) -> np.ndarray:
     return audio
 
 
+def get_antispoofing_model_path() -> Path:
+    """Find the anti-spoofing model file (tries multiple filenames)"""
+    for name in ANTISPOOFING_MODEL_NAMES:
+        path = MODEL_DIR / name
+        if path.exists():
+            return path
+    return None
+
+
 def check_models_available() -> Dict[str, bool]:
     """Check which models are available"""
     # Wav2vec model will be downloaded from HuggingFace automatically
     # Only need to check for the anti-spoofing fine-tuned model
     return {
         "wav2vec": WAV2VEC_AVAILABLE,  # Transformers library installed
-        "antispoofing": ANTISPOOFING_MODEL_PATH.exists()
+        "antispoofing": get_antispoofing_model_path() is not None
     }
 
 
@@ -459,12 +473,14 @@ def download_models():
     # Wav2vec model downloads automatically from HuggingFace on first use
     print(f"Wav2vec2 model ({WAV2VEC_MODEL_NAME}) will be downloaded from HuggingFace on first use.")
 
-    if not ANTISPOOFING_MODEL_PATH.exists():
+    if not get_antispoofing_model_path():
         print("Anti-spoofing fine-tuned model not found.")
-        print("Note: This model is optional for testing. The system will work with just wav2vec2.")
-        print("For full functionality, download the pre-trained anti-spoofing model from:")
+        print("Note: This model is REQUIRED for the system to work.")
+        print("Download the pre-trained anti-spoofing model from:")
         print("https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB")
-        print(f"And save to: {ANTISPOOFING_MODEL_PATH}")
+        print(f"Save it to {MODEL_DIR} with one of these names:")
+        for name in ANTISPOOFING_MODEL_NAMES:
+            print(f"  - {name}")
 
 
 def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_available() else "cpu") -> Tuple[str, float, float]:
@@ -497,17 +513,23 @@ def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_availab
     print("Loading anti-spoofing model...")
     model = AntispoofingModel(device)
 
-    if ANTISPOOFING_MODEL_PATH.exists():
-        print(f"Loading fine-tuned weights from {ANTISPOOFING_MODEL_PATH}")
-        checkpoint = torch.load(ANTISPOOFING_MODEL_PATH, map_location=device)
+    # Find the model file (tries multiple names)
+    model_path = get_antispoofing_model_path()
+
+    if model_path:
+        print(f"Loading fine-tuned weights from {model_path}")
+        checkpoint = torch.load(model_path, map_location=device)
         model.load_state_dict(checkpoint)
     else:
         raise FileNotFoundError(
-            f"Fine-tuned anti-spoofing model not found at {ANTISPOOFING_MODEL_PATH}\n\n"
+            f"Fine-tuned anti-spoofing model not found in {MODEL_DIR}\n\n"
             "The base wav2vec2 model alone cannot detect deepfakes - it needs the fine-tuned weights.\n\n"
             "Download the pre-trained model from:\n"
             "https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB\n\n"
-            "Save it to: models/audio_antispoofing/best_model.pth\n\n"
+            "Save it as one of these names in models/audio_antispoofing/:\n"
+            f"  - {ANTISPOOFING_MODEL_NAMES[0]}\n"
+            f"  - {ANTISPOOFING_MODEL_NAMES[1]}\n"
+            f"  - {ANTISPOOFING_MODEL_NAMES[2]}\n\n"
             "Without this model, all predictions will be meaningless."
         )
 
