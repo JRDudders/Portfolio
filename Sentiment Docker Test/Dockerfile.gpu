@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 # GPU-accelerated Docker image using RAPIDS for cuGraph
-FROM rapidsai/rapidsai:24.04-cuda12.0-runtime-ubuntu22.04-py3.11
+# Using RAPIDS 24.10 with CUDA 12.5 (or use 'latest' tag for most recent)
+FROM rapidsai/rapidsai:24.10-cuda12.5-runtime-ubuntu22.04-py3.11
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
