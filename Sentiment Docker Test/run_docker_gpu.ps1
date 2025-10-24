@@ -111,10 +111,16 @@ Write-Host "Press Ctrl+C to stop the server" -ForegroundColor Gray
 Write-Host ""
 
 # Run container with GPU support
+# Convert Windows path to Linux path for Docker WSL2 backend
+$currentPath = (Get-Location).Path
+$volumeMount = "${currentPath}:/app"
+
+# If Docker Desktop is using WSL2, paths should work as-is
+# Docker Desktop automatically handles Windows path conversion
 docker run --rm -it `
     --gpus all `
     -p 8080:8080 `
-    -v "${PWD}:/app" `
+    -v "$volumeMount" `
     --name sentiment-gpu-container `
     $imageName
 
