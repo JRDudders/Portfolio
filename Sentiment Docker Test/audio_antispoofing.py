@@ -50,11 +50,12 @@ class SSLModel(nn.Module):
         self.out_dim = 1024  # XLS-R output dimension
 
     def extract_feat(self, input_data):
-        # Put model on correct device
+        # Put model on correct device and set to eval mode for deterministic inference
         if next(self.model.parameters()).device != input_data.device \
            or next(self.model.parameters()).dtype != input_data.dtype:
             self.model.to(input_data.device, dtype=input_data.dtype)
-            self.model.train()
+
+        self.model.eval()  # CRITICAL: Must be in eval mode for deterministic results
 
         # Input should be in shape (batch, length)
         if input_data.ndim == 3:
@@ -481,6 +482,13 @@ def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_availab
             "Install with: pip install transformers\n"
             "Or: pip install -r req.txt"
         )
+
+    # Set deterministic behavior for reproducible results
+    torch.manual_seed(42)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    if device == "cuda":
+        torch.cuda.manual_seed_all(42)
 
     # Load model
     print("Loading anti-spoofing model...")
