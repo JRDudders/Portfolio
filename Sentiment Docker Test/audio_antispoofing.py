@@ -484,11 +484,14 @@ def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_availab
         )
 
     # Set deterministic behavior for reproducible results
-    torch.manual_seed(42)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    if device == "cuda":
-        torch.cuda.manual_seed_all(42)
+    # Note: Only set once at module level, not per prediction
+    if not hasattr(predict_audio, '_deterministic_set'):
+        torch.manual_seed(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        if device == "cuda":
+            torch.cuda.manual_seed_all(42)
+        predict_audio._deterministic_set = True
 
     # Load model
     print("Loading anti-spoofing model...")
@@ -499,8 +502,14 @@ def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_availab
         checkpoint = torch.load(ANTISPOOFING_MODEL_PATH, map_location=device)
         model.load_state_dict(checkpoint)
     else:
-        print("Warning: Fine-tuned anti-spoofing model not found. Using base model only.")
-        print("Download from: https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB")
+        raise FileNotFoundError(
+            f"Fine-tuned anti-spoofing model not found at {ANTISPOOFING_MODEL_PATH}\n\n"
+            "The base wav2vec2 model alone cannot detect deepfakes - it needs the fine-tuned weights.\n\n"
+            "Download the pre-trained model from:\n"
+            "https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB\n\n"
+            "Save it to: models/audio_antispoofing/best_model.pth\n\n"
+            "Without this model, all predictions will be meaningless."
+        )
 
     model.to(device)
     model.eval()
