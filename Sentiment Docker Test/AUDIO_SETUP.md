@@ -23,13 +23,41 @@ That's it! No special Python version needed.
 
 ### 2. Model Downloads
 
-The wav2vec 2.0 model will be downloaded automatically from HuggingFace on first use (~1.2GB).
+**IMPORTANT**: The fine-tuned anti-spoofing model is **REQUIRED**. Without it, the detector will not work.
 
-For better accuracy, optionally download the fine-tuned anti-spoofing model:
-- Download from: https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB
-- Save to: `models/audio_antispoofing/best_model.pth`
+#### Option 1: Using the helper script
 
-The system will work without the fine-tuned model, but accuracy may be lower.
+```bash
+cd "Sentiment Docker Test"
+python download_audio_model.py
+```
+
+This will show you exactly where to download the model and where to save it.
+
+#### Option 2: Manual download
+
+1. **Go to Google Drive**: https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB
+
+2. **Download** one of these files:
+   - `best_SSL_model_LA.pth` (recommended)
+   - Any `.pth` file for the LA (Logical Access) track
+
+3. **Save it to**:
+   ```
+   Sentiment Docker Test/models/audio_antispoofing/best_model.pth
+   ```
+
+4. **Create the directory** if it doesn't exist:
+   ```bash
+   mkdir -p "Sentiment Docker Test/models/audio_antispoofing"
+   ```
+
+5. **Verify the file** is in the right place:
+   ```bash
+   ls -lh "Sentiment Docker Test/models/audio_antispoofing/best_model.pth"
+   ```
+
+The wav2vec 2.0 base model (~1.2GB) will be downloaded automatically from HuggingFace on first use.
 
 ## Usage
 
