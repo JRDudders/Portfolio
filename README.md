@@ -1,6 +1,53 @@
 # Portfolio
 
-This is my first attempt to create a public portfolio showcasing some of my NLP coursework and a few practical solutions I've developed at previous positions. Naive Bayes is an assignment from my Advanced NLP course where we were taksed with building a Multinomial Naive Bayes document classifier. Folder Walker, Extenstion Finder, Pandas Practice, and Folder Mapper Improved were created to solve problems in a previous job. N-Grams, POS Tagger, and Viterbi Tagger are modified assignments from my Intro to NLP course.
+This is my portfolio showcasing NLP coursework and practical solutions I've developed. This repository includes both academic projects and a full-featured web application for NLP, graph analytics, and audio deepfake detection.
+
+## Featured Project: CiceroWatch
+
+**CiceroWatch** is a comprehensive web application that combines three powerful analysis tools:
+
+### 1. NLP Tasks
+- **Sentiment Analysis**: Analyze text sentiment using fine-tuned transformer models (Twitter, SST-2)
+- **Zero-Shot Classification**: Classify text into custom categories without training
+- **Named Entity Recognition (NER)**: Extract entities using HuggingFace, spaCy, or Stanza
+- **Topic Modeling**: Discover topics using BERTopic, NMF, or K-means clustering
+- **Text Embeddings**: Generate sentence embeddings using Sentence-BERT
+- **POS Tagging & Dependency Parsing**: Linguistic analysis with spaCy and Stanza
+
+### 2. Graph Analytics
+- **Network Analysis**: Compute PageRank, betweenness, eigenvector centrality
+- **Graph Algorithms**: BFS, triangle counting, degree analysis
+- **Interactive Visualization**: Explore networks with vis.js
+- **Ego Networks**: Analyze social network circles and features
+- **GPU Acceleration**: Optional RAPIDS cuGraph support for large graphs
+
+### 3. Audio Deepfake Detection
+- **AI-Generated Audio Detection**: Identify spoofed or AI-generated audio using wav2vec 2.0
+- **SSL Anti-Spoofing**: State-of-the-art model combining wav2vec 2.0 XLS-R (300M) with AASIST backend
+- **Supported Formats**: FLAC and WAV audio files
+- **Python 3.12 Compatible**: Uses HuggingFace transformers (no fairseq required)
+
+### Getting Started
+
+```bash
+cd "Sentiment Docker Test"
+pip install -r req.txt
+python run_local.py
+```
+
+Open `http://localhost:8080` in your browser and explore the three tabs: NLP Tasks, Graph Analytics, and Audio Deepfake Detection.
+
+See [AUDIO_SETUP.md](Sentiment%20Docker%20Test/AUDIO_SETUP.md) for detailed audio detection setup.
+
+---
+
+## Academic Projects
+
+This portfolio also includes coursework from my NLP studies:
+
+- **Naive Bayes**: Multinomial Naive Bayes document classifier (Advanced NLP)
+- **N-Grams, POS Tagger, Viterbi Tagger**: Modified assignments from Intro to NLP
+- **Folder Walker, Extension Finder, Pandas Practice, Folder Mapper**: Practical solutions from previous positions
 
 
 Please see my current reading list for areas where I'm trying to develop my knowledge in my spare time:
