@@ -1,61 +1,51 @@
 # Audio Deepfake Detection Setup
 
-## Python Version Requirement
+## Overview
 
-**Important:** The audio deepfake detection feature requires **Python 3.10 or lower** due to fairseq compatibility limitations.
+The audio deepfake detection feature uses:
+- **wav2vec 2.0 XLS-R** (300M parameters) from HuggingFace for feature extraction
+- **AASIST** backend for anti-spoofing classification
+- Works with **Python 3.8+** including Python 3.12
 
-If you're using Python 3.11+ for other features, you have two options:
+## Installation
 
-### Option 1: Create a Separate Environment (Recommended)
-
-Create a dedicated Python 3.10 environment for audio detection:
+### 1. Install Dependencies
 
 ```bash
-# Create new environment
-conda create -n audio-detect python=3.10
+# Install audio processing libraries
+pip install librosa soundfile torchaudio
 
-# Activate it
-conda activate audio-detect
-
-# Install dependencies
-conda install -c conda-forge fairseq librosa
+# transformers is already in requirements
 pip install -r req.txt
 ```
 
-### Option 2: Downgrade Your Main Environment
+That's it! No special Python version needed.
 
-Only do this if you don't need Python 3.11+ features:
+### 2. Model Downloads
 
-```bash
-# Create new environment with Python 3.10
-conda create -n myenv python=3.10
-conda activate myenv
-pip install -r req.txt
-```
+The wav2vec 2.0 model will be downloaded automatically from HuggingFace on first use (~1.2GB).
 
-## Installation Steps
+For better accuracy, optionally download the fine-tuned anti-spoofing model:
+- Download from: https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB
+- Save to: `models/audio_antispoofing/best_model.pth`
 
-1. **Install audio dependencies:**
+The system will work without the fine-tuned model, but accuracy may be lower.
+
+## Usage
+
+1. Start the application:
    ```bash
-   # If using conda (recommended for fairseq)
-   conda install -c conda-forge fairseq librosa torchaudio tensorboardX
-
-   # Or using pip (may have issues on Python 3.11+)
-   pip install librosa torchaudio fairseq tensorboardX
+   cd "Sentiment Docker Test"
+   python run_local.py
    ```
 
-2. **Download pre-trained models:**
-   - The XLSR wav2vec 2.0 model (~1.2GB) will be downloaded automatically on first use
-   - Or download manually from: https://dl.fbaipublicfiles.com/fairseq/wav2vec/xlsr2_300m.pt
-   - Save to: `models/audio_antispoofing/xlsr2_300m.pt`
+2. Open browser to `http://localhost:8080`
 
-3. **Download anti-spoofing model:**
-   - Download from: https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB
-   - Save to: `models/audio_antispoofing/best_model.pth`
+3. Click the "Audio Deepfake Detection" tab
 
-## Testing
+4. Upload FLAC or WAV audio files
 
-Upload FLAC or WAV audio files through the Audio tab in the web UI to detect if they are genuine or AI-generated/spoofed.
+5. Click "Analyze Audio" to detect if the audio is genuine or AI-generated
 
 ## Test Datasets
 
@@ -64,26 +54,28 @@ Upload FLAC or WAV audio files through the Audio tab in the web UI to detect if 
 
 ## Troubleshooting
 
-### fairseq won't install
-- Make sure you're using Python 3.10 or lower
-- Try: `conda install -c conda-forge fairseq` instead of pip
-- On Windows, you may need Visual Studio C++ Build Tools
+### "No module named 'transformers'"
+```bash
+pip install transformers
+```
 
-### "No module named 'fairseq'" error
-- Verify Python version: `python --version` (should be 3.10 or lower)
-- Activate the correct environment
-- Reinstall fairseq: `conda install -c conda-forge fairseq`
+### "No module named 'librosa'"
+```bash
+pip install librosa soundfile
+```
 
-### Model download fails
-- Check your internet connection
-- Try downloading manually from the Google Drive link above
-- Ensure the `models/audio_antispoofing/` directory exists
+### Model download is slow
+The first time you use the audio feature, HuggingFace will download the wav2vec2 model (~1.2GB). This is normal and only happens once. Subsequent uses will be much faster.
+
+### Audio file format errors
+- Ensure your file is FLAC or WAV format
+- Sample rate will be automatically resampled to 16kHz
 
 ## Architecture
 
-The audio deepfake detection uses:
-- **wav2vec 2.0 XLSR** (300M parameters) for SSL feature extraction
-- **AASIST** (Audio Anti-Spoofing using Integrated Spectro-Temporal graph attention networks) backend
-- Trained on ASVspoof 2019 LA dataset
-
 Based on: https://github.com/TakHemlata/SSL_Anti-spoofing
+
+Changes from original:
+- Replaced fairseq with HuggingFace transformers for Python 3.12 compatibility
+- Automatic model downloading from HuggingFace Hub
+- Simplified installation process

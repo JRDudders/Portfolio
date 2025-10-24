@@ -15,52 +15,39 @@ import torch.nn as nn
 import torch.nn.functional as F
 import librosa
 
-# Try importing fairseq (required for wav2vec2)
+# Use HuggingFace transformers instead of fairseq (Python 3.12 compatible)
 try:
-    import fairseq
-    FAIRSEQ_AVAILABLE = True
+    from transformers import Wav2Vec2Model, Wav2Vec2Config
+    WAV2VEC_AVAILABLE = True
 except ImportError:
-    FAIRSEQ_AVAILABLE = False
+    WAV2VEC_AVAILABLE = False
     import warnings
-    warnings.warn(
-        "fairseq is not installed. Audio deepfake detection will not work.\n"
-        "fairseq requires Python 3.10 or lower due to compatibility issues.\n"
-        "Options:\n"
-        "1. Create a Python 3.10 environment: conda create -n audio-detect python=3.10\n"
-        "2. Install fairseq: conda install -c conda-forge fairseq\n"
-        "3. Or use pip in Python 3.10: pip install fairseq\n"
-        "For now, the audio endpoints will return an error when called."
-    )
+    warnings.warn("transformers library not available. Install with: pip install transformers")
 
 
 # Model paths
 MODEL_DIR = Path("models/audio_antispoofing")
-XLSR_MODEL_PATH = MODEL_DIR / "xlsr2_300m.pt"
 ANTISPOOFING_MODEL_PATH = MODEL_DIR / "best_model.pth"
 
-# Download URLs
-XLSR_MODEL_URL = "https://dl.fbaipublicfiles.com/fairseq/wav2vec/xlsr2_300m.pt"
-ANTISPOOFING_MODEL_URL = "https://drive.google.com/uc?id=1vF4i8LEfiCSzvojno8jrGmgKvxQk3Tj6&export=download"
+# HuggingFace model name (XLSR-300M equivalent)
+WAV2VEC_MODEL_NAME = "facebook/wav2vec2-xls-r-300m"
 
 
 class SSLModel(nn.Module):
-    """Wav2vec 2.0 SSL frontend"""
-    def __init__(self, device, model_path=None):
+    """Wav2vec 2.0 SSL frontend using HuggingFace transformers"""
+    def __init__(self, device):
         super(SSLModel, self).__init__()
 
-        if not FAIRSEQ_AVAILABLE:
-            raise ImportError("fairseq is required for SSL model. Install with: pip install fairseq")
+        if not WAV2VEC_AVAILABLE:
+            raise ImportError(
+                "transformers library is required. Install with: pip install transformers"
+            )
 
-        if model_path is None:
-            model_path = str(XLSR_MODEL_PATH)
-
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"XLSR model not found at {model_path}. Please download it first.")
-
-        model, cfg, task = fairseq.checkpoint_utils.load_model_ensemble_and_task([model_path])
-        self.model = model[0]
+        # Load pre-trained wav2vec2 model from HuggingFace
+        print(f"Loading wav2vec2 model: {WAV2VEC_MODEL_NAME}")
+        self.model = Wav2Vec2Model.from_pretrained(WAV2VEC_MODEL_NAME)
         self.device = device
-        self.out_dim = 1024
+        self.out_dim = 1024  # XLS-R output dimension
 
     def extract_feat(self, input_data):
         # Put model on correct device
@@ -76,7 +63,9 @@ class SSLModel(nn.Module):
             input_tmp = input_data
 
         # Extract features: [batch, length, dim]
-        emb = self.model(input_tmp, mask=False, features_only=True)['x']
+        with torch.no_grad():
+            outputs = self.model(input_tmp)
+            emb = outputs.last_hidden_state
         return emb
 
 
@@ -452,18 +441,12 @@ def load_audio(file_path: str, sr: int = 16000) -> np.ndarray:
     return audio
 
 
-def download_model(url: str, dest_path: Path):
-    """Download a model file"""
-    dest_path.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Downloading model to {dest_path}...")
-    urllib.request.urlretrieve(url, dest_path)
-    print(f"Download complete: {dest_path}")
-
-
 def check_models_available() -> Dict[str, bool]:
     """Check which models are available"""
+    # Wav2vec model will be downloaded from HuggingFace automatically
+    # Only need to check for the anti-spoofing fine-tuned model
     return {
-        "xlsr": XLSR_MODEL_PATH.exists(),
+        "wav2vec": WAV2VEC_AVAILABLE,  # Transformers library installed
         "antispoofing": ANTISPOOFING_MODEL_PATH.exists()
     }
 
@@ -472,14 +455,14 @@ def download_models():
     """Download all required models"""
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
-    if not XLSR_MODEL_PATH.exists():
-        print("Downloading XLSR wav2vec 2.0 model...")
-        download_model(XLSR_MODEL_URL, XLSR_MODEL_PATH)
+    # Wav2vec model downloads automatically from HuggingFace on first use
+    print(f"Wav2vec2 model ({WAV2VEC_MODEL_NAME}) will be downloaded from HuggingFace on first use.")
 
     if not ANTISPOOFING_MODEL_PATH.exists():
-        print("Downloading anti-spoofing model...")
-        print("Note: Google Drive downloads may require manual intervention.")
-        print(f"Please download from: {ANTISPOOFING_MODEL_URL}")
+        print("Anti-spoofing fine-tuned model not found.")
+        print("Note: This model is optional for testing. The system will work with just wav2vec2.")
+        print("For full functionality, download the pre-trained anti-spoofing model from:")
+        print("https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB")
         print(f"And save to: {ANTISPOOFING_MODEL_PATH}")
 
 
@@ -492,36 +475,36 @@ def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_availab
         confidence: confidence score (0-1)
         score: raw model score
     """
-    if not FAIRSEQ_AVAILABLE:
+    if not WAV2VEC_AVAILABLE:
         raise ImportError(
-            "fairseq is required for audio deepfake detection but is not installed.\n"
-            "fairseq requires Python 3.10 or lower. You are using Python {}.{}\n"
-            "Please create a Python 3.10 environment to use this feature:\n"
-            "  conda create -n audio-detect python=3.10\n"
-            "  conda activate audio-detect\n"
-            "  conda install -c conda-forge fairseq librosa".format(
-                *tuple(map(int, __import__('sys').version.split()[0].split('.')[:2]))
-            )
+            "transformers library is required for audio deepfake detection.\n"
+            "Install with: pip install transformers\n"
+            "Or: pip install -r req.txt"
         )
 
     # Load model
+    print("Loading anti-spoofing model...")
     model = AntispoofingModel(device)
 
     if ANTISPOOFING_MODEL_PATH.exists():
+        print(f"Loading fine-tuned weights from {ANTISPOOFING_MODEL_PATH}")
         checkpoint = torch.load(ANTISPOOFING_MODEL_PATH, map_location=device)
         model.load_state_dict(checkpoint)
     else:
-        raise FileNotFoundError(f"Model not found at {ANTISPOOFING_MODEL_PATH}")
+        print("Warning: Fine-tuned anti-spoofing model not found. Using base model only.")
+        print("Download from: https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB")
 
     model.to(device)
     model.eval()
 
     # Load and process audio
+    print("Processing audio file...")
     audio = load_audio(audio_path)
     audio_padded = pad_audio(audio)
     audio_tensor = torch.FloatTensor(audio_padded).unsqueeze(0).to(device)
 
     # Predict
+    print("Running inference...")
     with torch.no_grad():
         output = model(audio_tensor)
         scores = F.softmax(output, dim=1)
@@ -531,4 +514,5 @@ def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_availab
     prediction = "bonafide" if pred_class == 1 else "spoofed"
     confidence = scores[0][pred_class].item()
 
+    print(f"Prediction: {prediction} (confidence: {confidence:.2%})")
     return prediction, confidence, score

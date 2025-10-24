@@ -35,11 +35,10 @@ nltk>=3.8.0
 # Optional: Alternative ASGI server (more Conda-friendly)
 hypercorn>=0.16.0
 
-# Audio Deepfake Detection
+# Audio Deepfake Detection (Python 3.12 compatible)
 librosa>=0.10.0
+soundfile>=0.12.1
 torchaudio>=2.0.0
-fairseq>=0.12.2
-tensorboardX>=2.5
 
 # For development
 # jupyter>=1.0.0
