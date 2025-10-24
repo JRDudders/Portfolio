@@ -779,6 +779,37 @@ async def graph_ego_network(
             # Convert to JSON-serializable format
             circles_info = {str(k): [str(node) for node in v] for k, v in circles_raw.items()}
 
+        # Compute centrality measures
+        centrality_data = {}
+        try:
+            from graph_tasks import pagerank, betweenness_centrality, eigenvector_centrality
+
+            # PageRank
+            pr_df = pagerank(g)
+            centrality_data['pagerank'] = {row['node']: float(row['pr']) for _, row in pr_df.iterrows()}
+
+            # Betweenness
+            bc_df = betweenness_centrality(g)
+            centrality_data['betweenness'] = {row['node']: float(row['centrality']) for _, row in bc_df.iterrows()}
+
+            # Eigenvector
+            ec_df = eigenvector_centrality(g)
+            centrality_data['eigenvector'] = {row['node']: float(row['centrality']) for _, row in ec_df.iterrows()}
+
+            # Degree (simple count)
+            degree_dict = {}
+            for node_id in g.idx_to_id:
+                degree_dict[str(node_id)] = 0
+            for _, row in g.edges.iterrows():
+                src = str(g.idx_to_id[int(row["src_idx"])])
+                tgt = str(g.idx_to_id[int(row["dst_idx"])])
+                degree_dict[src] = degree_dict.get(src, 0) + 1
+                degree_dict[tgt] = degree_dict.get(tgt, 0) + 1
+            centrality_data['degree'] = degree_dict
+        except Exception as e:
+            print(f"[app] Ego network centrality computation failed: {e}")
+            centrality_data = {}
+
         result = {
             "n_nodes": int(g.n),
             "n_edges": int(g.edges.shape[0]),
@@ -792,6 +823,7 @@ async def graph_ego_network(
             "feature_count": int(len(g.features.columns) - 1) if g.features is not None else 0,
             "nodes": nodes_list,
             "edges": edges_list,
+            "centrality": centrality_data,
         }
         return JSONResponse(content=result)
     except Exception as e:

@@ -242,6 +242,14 @@
         <div class="graph-controls">
           <button class="btn" id="ego-fit">Fit to Screen</button>
           <button class="btn" id="ego-physics-toggle">Toggle Physics</button>
+          <label style="margin-left:16px">Color by:</label>
+          <select id="ego-centrality-select" style="padding:8px;border-radius:8px;background:#0f1117;color:var(--fg);border:1px solid var(--border)">
+            <option value="none">Default</option>
+            <option value="pagerank">PageRank</option>
+            <option value="betweenness">Betweenness</option>
+            <option value="eigenvector">Eigenvector</option>
+            <option value="degree">Degree</option>
+          </select>
           <span style="font-size:12px;color:var(--muted);margin-left:8px">Drag nodes • Scroll to zoom • Right-click to pan</span>
         </div>
       </div>
@@ -808,8 +816,12 @@
     // Interactive ego network visualization with circle highlighting
     let currentEgoNetwork = null;
     let currentEgoPhysicsEnabled = false;
+    let currentEgoData = null;
+    let currentEgoNodesData = null;
 
     function displayEgoNetwork(data){
+      // Store data for centrality calculations
+      currentEgoData = data;
       const viz = document.getElementById('ego-viz');
       const stats = document.getElementById('ego-stats');
       const circlesDiv = document.getElementById('ego-circles');
@@ -912,7 +924,8 @@
       }));
 
       // Create network with improved physics
-      const graphData = { nodes: new vis.DataSet(visNodes), edges: new vis.DataSet(visEdges) };
+      currentEgoNodesData = new vis.DataSet(visNodes);
+      const graphData = { nodes: currentEgoNodesData, edges: new vis.DataSet(visEdges) };
       const options = {
         nodes: {
           shape: 'dot',
@@ -977,6 +990,108 @@
       if(data.nodes.length > maxNodes){
         stats.textContent += ` (showing ${maxNodes} of ${data.nodes.length} nodes)`;
       }
+
+      // Wire up centrality dropdown
+      const centralitySelect = document.getElementById('ego-centrality-select');
+      centralitySelect.onchange = (e) => applyEgoCentrality(e.target.value);
+    }
+
+    // Apply centrality coloring to ego network
+    async function applyEgoCentrality(measure) {
+      if(!currentEgoNodesData || !currentEgoData) return;
+
+      if(measure === 'none'){
+        // Reset to default circle-based colors
+        const nodes = currentEgoNodesData.get();
+        const circleColors = ['#6aa2ff', '#ff6b6b', '#32d296', '#ffcc00', '#a855f7', '#f97316'];
+        const circleColorMap = {};
+        if(currentEgoData.circles){
+          Object.keys(currentEgoData.circles).forEach((circle, i) => {
+            circleColorMap[circle] = circleColors[i % circleColors.length];
+          });
+        }
+
+        nodes.forEach(n => {
+          let nodeColor = '#6aa2ff';
+          let borderColor = '#4a82d9';
+
+          // Get original node data to check circle membership
+          const originalNode = currentEgoData.nodes.find(node => node.id === n.id);
+          if(originalNode && originalNode.circles && originalNode.circles.length > 0){
+            nodeColor = circleColorMap[originalNode.circles[0]] || '#6aa2ff';
+            borderColor = nodeColor;
+          }
+
+          // Highlight ego node
+          if(currentEgoData.ego_id && n.id === currentEgoData.ego_id){
+            nodeColor = '#ff6b6b';
+            borderColor = '#d94a4a';
+          }
+
+          currentEgoNodesData.update({
+            id: n.id,
+            color: {
+              background: nodeColor,
+              border: borderColor,
+              highlight: { background: nodeColor, border: '#ffffff' },
+              hover: { background: nodeColor, border: '#e6e6e6' }
+            },
+            title: n.title.split('\n').slice(0, 3).join('\n')
+          });
+        });
+        return;
+      }
+
+      // Check if centrality data is available from backend
+      if(!currentEgoData.centrality || !currentEgoData.centrality[measure]){
+        alert(`${measure} centrality data not available. Please reload the ego network.`);
+        return;
+      }
+
+      const nodes = currentEgoNodesData.get();
+      const centralityValues = currentEgoData.centrality[measure];
+
+      // Find min/max for normalization
+      const values = Object.values(centralityValues);
+      const minVal = Math.min(...values);
+      const maxVal = Math.max(...values);
+
+      // Color nodes by centrality (blue = low, red = high)
+      nodes.forEach(n => {
+        const value = centralityValues[n.id] || 0;
+        const normalized = maxVal > minVal ? (value - minVal) / (maxVal - minVal) : 0.5;
+
+        // Color gradient: blue (low) -> yellow (mid) -> red (high)
+        let r, g, b;
+        if(normalized < 0.5){
+          const t = normalized * 2;
+          r = Math.round(106 + (255 - 106) * t);
+          g = Math.round(162 + (204 - 162) * t);
+          b = Math.round(255 * (1 - t));
+        } else {
+          const t = (normalized - 0.5) * 2;
+          r = 255;
+          g = Math.round(204 * (1 - t));
+          b = 0;
+        }
+
+        const bgColor = `rgb(${r},${g},${b})`;
+        const borderColor = `rgb(${Math.max(0,r-30)},${Math.max(0,g-30)},${Math.max(0,b-30)})`;
+
+        const baseTooltip = n.title.split('\n').slice(0, 3).join('\n');
+        const newTooltip = `${baseTooltip}\n${measure}: ${value.toFixed(4)}`;
+
+        currentEgoNodesData.update({
+          id: n.id,
+          color: {
+            background: bgColor,
+            border: borderColor,
+            highlight: { background: bgColor, border: '#ffffff' },
+            hover: { background: bgColor, border: '#e6e6e6' }
+          },
+          title: newTooltip
+        });
+      });
     }
   </script>
 </body>
