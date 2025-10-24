@@ -1,0 +1,26 @@
+# Ensure shell scripts always have LF line endings
+*.sh text eol=lf
+
+# Python files should use LF
+*.py text eol=lf
+
+# PowerShell scripts can use CRLF (Windows native)
+*.ps1 text eol=crlf
+
+# Markdown and text files
+*.md text eol=lf
+*.txt text eol=lf
+
+# JSON, YAML, TOML
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+
+# HTML, CSS, JS
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+
+# Dockerfiles
+Dockerfile* text eol=lf
