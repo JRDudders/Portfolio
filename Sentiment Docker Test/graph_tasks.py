@@ -506,11 +506,33 @@ def build_graph(
     # Optional GraphBLAS matrix
     gb_matrix = None
     if HAS_GB:
-        rows = df["src_idx"].to_numpy(dtype=np.int64)
-        cols = df["dst_idx"].to_numpy(dtype=np.int64)
-        vals = np.ones(len(df), dtype=np.bool_)
-        # from_lists: (rows, cols, vals, nrows, ncols, typ)
-        gb_matrix = gb.Matrix.from_lists(rows, cols, vals, n, n, gb.types.BOOL)  # type: ignore
+        try:
+            rows = df["src_idx"].to_numpy(dtype=np.int64)
+            cols = df["dst_idx"].to_numpy(dtype=np.int64)
+            vals = np.ones(len(df), dtype=np.bool_)
+
+            # Try newer API first (python-graphblas >= 2023.x)
+            try:
+                # Newer API: Matrix.from_coo (requires scipy)
+                try:
+                    from scipy.sparse import coo_matrix
+                    coo = coo_matrix((vals, (rows, cols)), shape=(n, n))
+                    gb_matrix = gb.Matrix.from_coo(coo)
+                except ImportError:
+                    # scipy not installed, skip GraphBLAS
+                    gb_matrix = None
+            except (AttributeError, TypeError):
+                # Older API: Matrix.from_lists (deprecated in newer versions)
+                try:
+                    gb_matrix = gb.Matrix.from_lists(rows, cols, vals, n, n, gb.types.BOOL)  # type: ignore
+                except (AttributeError, TypeError):
+                    # Neither API works - GraphBLAS version incompatible
+                    gb_matrix = None
+        except Exception as e:
+            # GraphBLAS is optional - if it fails, just continue without it
+            if VERBOSE_GPU:
+                print(f"[graph_tasks] GraphBLAS matrix creation failed: {e}")
+            gb_matrix = None
 
     # Process node attributes if provided
     nodes_df = None
