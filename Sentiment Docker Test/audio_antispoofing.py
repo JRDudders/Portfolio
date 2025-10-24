@@ -21,7 +21,16 @@ try:
     FAIRSEQ_AVAILABLE = True
 except ImportError:
     FAIRSEQ_AVAILABLE = False
-    print("Warning: fairseq not available. Audio deepfake detection will not work.")
+    import warnings
+    warnings.warn(
+        "fairseq is not installed. Audio deepfake detection will not work.\n"
+        "fairseq requires Python 3.10 or lower due to compatibility issues.\n"
+        "Options:\n"
+        "1. Create a Python 3.10 environment: conda create -n audio-detect python=3.10\n"
+        "2. Install fairseq: conda install -c conda-forge fairseq\n"
+        "3. Or use pip in Python 3.10: pip install fairseq\n"
+        "For now, the audio endpoints will return an error when called."
+    )
 
 
 # Model paths
@@ -483,6 +492,18 @@ def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_availab
         confidence: confidence score (0-1)
         score: raw model score
     """
+    if not FAIRSEQ_AVAILABLE:
+        raise ImportError(
+            "fairseq is required for audio deepfake detection but is not installed.\n"
+            "fairseq requires Python 3.10 or lower. You are using Python {}.{}\n"
+            "Please create a Python 3.10 environment to use this feature:\n"
+            "  conda create -n audio-detect python=3.10\n"
+            "  conda activate audio-detect\n"
+            "  conda install -c conda-forge fairseq librosa".format(
+                *tuple(map(int, __import__('sys').version.split()[0].split('.')[:2]))
+            )
+        )
+
     # Load model
     model = AntispoofingModel(device)
 
