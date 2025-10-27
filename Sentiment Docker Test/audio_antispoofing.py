@@ -519,7 +519,30 @@ def predict_audio(audio_path: str, device: str = "cuda" if torch.cuda.is_availab
     if model_path:
         print(f"Loading fine-tuned weights from {model_path}")
         checkpoint = torch.load(model_path, map_location=device)
-        model.load_state_dict(checkpoint)
+
+        # The checkpoint was trained with fairseq's wav2vec, but we're using HuggingFace
+        # We need to skip the SSL model weights and only load the AASIST backend
+        model_dict = model.state_dict()
+
+        # Filter out ssl_model weights (they're incompatible)
+        pretrained_dict = {k: v for k, v in checkpoint.items()
+                          if k in model_dict and 'ssl_model.model' not in k}
+
+        print(f"   Loading {len(pretrained_dict)}/{len(checkpoint)} parameters (skipping incompatible ssl_model)")
+
+        # Update model with compatible weights
+        model_dict.update(pretrained_dict)
+        model.load_state_dict(model_dict)
+
+        # Check what was loaded
+        loaded_keys = set(pretrained_dict.keys())
+        total_keys = set(model_dict.keys())
+        ssl_keys = {k for k in total_keys if 'ssl_model' in k}
+        backend_keys = total_keys - ssl_keys
+        loaded_backend = loaded_keys & backend_keys
+
+        print(f"   Loaded {len(loaded_backend)}/{len(backend_keys)} backend parameters")
+        print(f"   Using pre-trained HuggingFace wav2vec for SSL frontend")
     else:
         raise FileNotFoundError(
             f"Fine-tuned anti-spoofing model not found in {MODEL_DIR}\n\n"
