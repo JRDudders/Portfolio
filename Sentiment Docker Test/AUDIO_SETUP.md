@@ -2,62 +2,23 @@
 
 ## Overview
 
-The audio deepfake detection feature uses:
-- **wav2vec 2.0 XLS-R** (300M parameters) from HuggingFace for feature extraction
-- **AASIST** backend for anti-spoofing classification
-- Works with **Python 3.8+** including Python 3.12
+The audio deepfake detection feature uses **wav2vec2-large-anti-deepfake** from HuggingFace:
+- Model: [nii-yamagishilab/wav2vec-large-anti-deepfake](https://huggingface.co/nii-yamagishilab/wav2vec-large-anti-deepfake)
+- Pre-trained wav2vec 2.0 Large model fine-tuned for anti-spoofing
+- Works with Python 3.8+ including Python 3.12
+- No manual model downloads required!
 
 ## Installation
 
-### 1. Install Dependencies
-
 ```bash
-# Install audio processing libraries
-pip install librosa soundfile torchaudio
+# Install audio dependencies
+pip install librosa soundfile
 
 # transformers is already in requirements
 pip install -r req.txt
 ```
 
-That's it! No special Python version needed.
-
-### 2. Model Downloads
-
-**IMPORTANT**: The fine-tuned anti-spoofing model is **REQUIRED**. Without it, the detector will not work.
-
-#### Option 1: Using the helper script
-
-```bash
-cd "Sentiment Docker Test"
-python download_audio_model.py
-```
-
-This will show you exactly where to download the model and where to save it.
-
-#### Option 2: Manual download
-
-1. **Go to Google Drive**: https://drive.google.com/drive/folders/1c4ywztEVlYVijfwbGLl9OEa1SNtFKppB
-
-2. **Download** one of these files:
-   - `best_SSL_model_LA.pth` (recommended)
-   - Any `.pth` file for the LA (Logical Access) track
-
-3. **Save it to**:
-   ```
-   Sentiment Docker Test/models/audio_antispoofing/best_model.pth
-   ```
-
-4. **Create the directory** if it doesn't exist:
-   ```bash
-   mkdir -p "Sentiment Docker Test/models/audio_antispoofing"
-   ```
-
-5. **Verify the file** is in the right place:
-   ```bash
-   ls -lh "Sentiment Docker Test/models/audio_antispoofing/best_model.pth"
-   ```
-
-The wav2vec 2.0 base model (~1.2GB) will be downloaded automatically from HuggingFace on first use.
+That's it! The model downloads automatically from HuggingFace on first use (~1.2GB).
 
 ## Usage
 
@@ -93,17 +54,30 @@ pip install librosa soundfile
 ```
 
 ### Model download is slow
-The first time you use the audio feature, HuggingFace will download the wav2vec2 model (~1.2GB). This is normal and only happens once. Subsequent uses will be much faster.
+The first time you use the audio feature, HuggingFace will download the model (~1.2GB). This is normal and only happens once. Subsequent uses will be much faster.
 
 ### Audio file format errors
 - Ensure your file is FLAC or WAV format
 - Sample rate will be automatically resampled to 16kHz
 
-## Architecture
+## Model Information
 
-Based on: https://github.com/TakHemlata/SSL_Anti-spoofing
+**Model**: nii-yamagishilab/wav2vec2-large-anti-deepfake
+**Paper**: "Utterance-level Aggregation For Speaker Recognition In The Wild" (ICASSP 2019)
+**Trained on**: Multiple anti-spoofing datasets
+**Architecture**: wav2vec 2.0 Large (300M parameters) + classification head
 
-Changes from original:
-- Replaced fairseq with HuggingFace transformers for Python 3.12 compatibility
-- Automatic model downloading from HuggingFace Hub
-- Simplified installation process
+This model is specifically trained to detect:
+- Text-to-speech (TTS) synthesis
+- Voice conversion
+- Audio deepfakes
+- Other spoofing attacks
+
+## Performance
+
+The model is trained on ASVspoof and other datasets, achieving strong performance on:
+- Logical Access (LA) attacks
+- Physical Access (PA) attacks
+- Audio deepfake detection
+
+For exact metrics, see the [model card](https://huggingface.co/nii-yamagishilab/wav2vec-large-anti-deepfake).
