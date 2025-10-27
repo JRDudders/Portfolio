@@ -1,212 +1,302 @@
 """
 Graph Analytics Processing Module
 
-Contains business logic for graph analytics tasks:
-- Text similarity
-- Clustering
-- Network graph generation
-- Community detection
+Contains business logic for graph analytics tasks by wrapping the existing graph_tasks.py module.
 """
 
-from typing import List, Dict, Any, Optional
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
-import networkx as nx
+from typing import Dict, Any, Optional, List
+import pandas as pd
+
+# Import the actual graph analytics implementation
+from graph_tasks import (
+    load_graph_from_bytes,
+    load_ego_network_from_files,
+    run_graph_metrics,
+    degrees,
+    pagerank,
+    bfs,
+    triangles_undirected,
+    eigenvector_centrality,
+    betweenness_centrality,
+    merge_node_attributes,
+    GraphData
+)
 
 
-def compute_similarity_matrix(texts: List[str], method: str = "cosine") -> List[List[float]]:
+def load_graph(
+    edges_bytes: bytes,
+    edges_kind: str = "csv",
+    nodes_bytes: Optional[bytes] = None,
+    nodes_kind: Optional[str] = None
+) -> GraphData:
     """
-    Compute similarity matrix for texts
+    Load graph from edge list with optional node attributes
 
     Args:
-        texts: List of text strings
-        method: Similarity method ("cosine", "jaccard")
+        edges_bytes: Edge list file bytes
+        edges_kind: File format ("csv", "json", "edge")
+        nodes_bytes: Optional node attributes file bytes
+        nodes_kind: Optional node file format
 
     Returns:
-        Similarity matrix as list of lists
+        GraphData object
     """
-    if method == "cosine":
-        # Use TF-IDF + cosine similarity
-        vectorizer = TfidfVectorizer()
-        tfidf_matrix = vectorizer.fit_transform(texts)
-        similarity_matrix = cosine_similarity(tfidf_matrix)
-        return similarity_matrix.tolist()
-
-    elif method == "jaccard":
-        # Simple jaccard similarity
-        n = len(texts)
-        similarity_matrix = np.zeros((n, n))
-
-        # Tokenize texts
-        tokenized = [set(text.lower().split()) for text in texts]
-
-        for i in range(n):
-            for j in range(n):
-                if i == j:
-                    similarity_matrix[i][j] = 1.0
-                else:
-                    intersection = len(tokenized[i] & tokenized[j])
-                    union = len(tokenized[i] | tokenized[j])
-                    similarity_matrix[i][j] = intersection / union if union > 0 else 0.0
-
-        return similarity_matrix.tolist()
-
-    else:
-        raise ValueError(f"Unknown similarity method: {method}")
+    return load_graph_from_bytes(
+        edges_bytes,
+        kind=edges_kind,
+        nodes_bytes=nodes_bytes,
+        nodes_kind=nodes_kind
+    )
 
 
-def perform_clustering(
-    texts: List[str],
-    num_clusters: Optional[int] = None,
-    method: str = "kmeans"
+def load_ego_network(files_dict: Dict[str, bytes], ego_id: Optional[str] = None) -> GraphData:
+    """
+    Load ego network from multiple files
+
+    Args:
+        files_dict: Dictionary mapping file type to bytes (edges, circles, feat, etc.)
+        ego_id: Optional ego node ID
+
+    Returns:
+        GraphData object with ego network components
+    """
+    return load_ego_network_from_files(files_dict, ego_id=ego_id)
+
+
+def compute_metrics(
+    graph: GraphData,
+    tasks: List[str],
+    pagerank_alpha: float = 0.85,
+    pagerank_iters: int = 40,
+    pagerank_tol: float = 1e-6,
+    bfs_source: Optional[str] = None,
+    triangles_limit: int = 20000
 ) -> Dict[str, Any]:
     """
-    Cluster texts using specified method
+    Compute multiple graph metrics in one call
 
     Args:
-        texts: List of text strings
-        num_clusters: Number of clusters (optional for some methods)
-        method: Clustering method ("kmeans", "hierarchical", "dbscan")
+        graph: GraphData object
+        tasks: List of tasks ("degrees", "pagerank", "bfs", "triangles")
+        pagerank_alpha: PageRank damping factor
+        pagerank_iters: PageRank iterations
+        pagerank_tol: PageRank tolerance
+        bfs_source: Source node for BFS
+        triangles_limit: Max nodes for triangle counting
 
     Returns:
-        Dictionary with clustering results
+        Dictionary with metric results
     """
-    # Vectorize texts
-    vectorizer = TfidfVectorizer()
-    X = vectorizer.fit_transform(texts)
-
-    if method == "kmeans":
-        if num_clusters is None:
-            num_clusters = min(5, len(texts))
-
-        model = KMeans(n_clusters=num_clusters, random_state=42)
-        labels = model.fit_predict(X)
-
-        return {
-            "method": "kmeans",
-            "num_clusters": num_clusters,
-            "labels": labels.tolist(),
-            "cluster_sizes": [int(np.sum(labels == i)) for i in range(num_clusters)]
-        }
-
-    elif method == "hierarchical":
-        if num_clusters is None:
-            num_clusters = min(5, len(texts))
-
-        model = AgglomerativeClustering(n_clusters=num_clusters)
-        labels = model.fit_predict(X.toarray())
-
-        return {
-            "method": "hierarchical",
-            "num_clusters": num_clusters,
-            "labels": labels.tolist(),
-            "cluster_sizes": [int(np.sum(labels == i)) for i in range(num_clusters)]
-        }
-
-    elif method == "dbscan":
-        model = DBSCAN(eps=0.5, min_samples=2, metric='cosine')
-        labels = model.fit_predict(X.toarray())
-
-        num_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-
-        return {
-            "method": "dbscan",
-            "num_clusters": num_clusters,
-            "labels": labels.tolist(),
-            "num_noise": int(np.sum(labels == -1)),
-            "cluster_sizes": [int(np.sum(labels == i)) for i in set(labels) if i != -1]
-        }
-
-    else:
-        raise ValueError(f"Unknown clustering method: {method}")
+    return run_graph_metrics(
+        graph,
+        tasks=tasks,
+        pagerank_alpha=pagerank_alpha,
+        pagerank_iters=pagerank_iters,
+        pagerank_tol=pagerank_tol,
+        bfs_source=bfs_source,
+        triangles_limit=triangles_limit
+    )
 
 
-def build_network_graph(texts: List[str], threshold: float = 0.5) -> Dict[str, Any]:
+def compute_degrees(graph: GraphData, include_node_attrs: bool = True) -> Dict[str, Any]:
     """
-    Build network graph from text similarities
+    Compute node degrees
 
     Args:
-        texts: List of text strings
-        threshold: Similarity threshold for creating edges
+        graph: GraphData object
+        include_node_attrs: Whether to include node attributes in result
 
     Returns:
-        Dictionary with network graph data
+        Dictionary with degree results
     """
-    # Compute similarity matrix
-    similarity_matrix = np.array(compute_similarity_matrix(texts, method="cosine"))
+    df = degrees(graph)
 
-    # Create graph
-    G = nx.Graph()
+    if include_node_attrs:
+        df = merge_node_attributes(df, graph)
 
-    # Add nodes
-    for i in range(len(texts)):
-        G.add_node(i, text=texts[i][:50])  # Store truncated text
-
-    # Add edges above threshold
-    edges = []
-    for i in range(len(texts)):
-        for j in range(i + 1, len(texts)):
-            if similarity_matrix[i][j] >= threshold:
-                G.add_edge(i, j, weight=float(similarity_matrix[i][j]))
-                edges.append({
-                    "source": i,
-                    "target": j,
-                    "weight": float(similarity_matrix[i][j])
-                })
-
-    # Compute network metrics
     return {
-        "num_nodes": G.number_of_nodes(),
-        "num_edges": G.number_of_edges(),
-        "edges": edges,
-        "density": nx.density(G),
-        "avg_clustering": nx.average_clustering(G) if G.number_of_edges() > 0 else 0.0,
-        "connected_components": nx.number_connected_components(G)
+        "n_nodes": graph.n,
+        "degrees": df.to_dict(orient="records"),
+        "top_degree": df.iloc[0].to_dict() if len(df) > 0 else None
     }
 
 
-def detect_communities(texts: List[str], threshold: float = 0.5) -> Dict[str, Any]:
+def compute_pagerank(
+    graph: GraphData,
+    alpha: float = 0.85,
+    iters: int = 40,
+    tol: float = 1e-6,
+    include_node_attrs: bool = True
+) -> Dict[str, Any]:
     """
-    Detect communities in text network
+    Compute PageRank scores
 
     Args:
-        texts: List of text strings
-        threshold: Similarity threshold for creating edges
+        graph: GraphData object
+        alpha: Damping factor
+        iters: Max iterations
+        tol: Convergence tolerance
+        include_node_attrs: Whether to include node attributes in result
 
     Returns:
-        Dictionary with community detection results
+        Dictionary with PageRank results
     """
-    # Compute similarity matrix
-    similarity_matrix = np.array(compute_similarity_matrix(texts, method="cosine"))
+    df = pagerank(graph, alpha=alpha, iters=iters, tol=tol)
 
-    # Create graph
-    G = nx.Graph()
-
-    # Add nodes
-    for i in range(len(texts)):
-        G.add_node(i)
-
-    # Add edges above threshold
-    for i in range(len(texts)):
-        for j in range(i + 1, len(texts)):
-            if similarity_matrix[i][j] >= threshold:
-                G.add_edge(i, j, weight=float(similarity_matrix[i][j]))
-
-    # Detect communities using Louvain algorithm (via greedy modularity)
-    from networkx.algorithms import community
-
-    if G.number_of_edges() == 0:
-        # No edges - each node is its own community
-        communities_list = [[i] for i in range(len(texts))]
-    else:
-        communities = community.greedy_modularity_communities(G)
-        communities_list = [list(c) for c in communities]
+    if include_node_attrs:
+        df = merge_node_attributes(df, graph)
 
     return {
-        "num_communities": len(communities_list),
-        "communities": communities_list,
-        "community_sizes": [len(c) for c in communities_list],
-        "modularity": community.modularity(G, communities) if G.number_of_edges() > 0 else 0.0
+        "n_nodes": graph.n,
+        "pagerank": df.to_dict(orient="records"),
+        "top_node": df.iloc[0].to_dict() if len(df) > 0 else None
+    }
+
+
+def compute_bfs(
+    graph: GraphData,
+    source_node: str,
+    include_node_attrs: bool = True
+) -> Dict[str, Any]:
+    """
+    Compute BFS distances from source node
+
+    Args:
+        graph: GraphData object
+        source_node: Source node ID
+        include_node_attrs: Whether to include node attributes in result
+
+    Returns:
+        Dictionary with BFS results
+    """
+    df = bfs(graph, source_node)
+
+    if include_node_attrs:
+        df = merge_node_attributes(df, graph)
+
+    # Count reachable nodes
+    reachable = int((df['distance'] >= 0).sum())
+
+    return {
+        "source": source_node,
+        "n_nodes": graph.n,
+        "reachable": reachable,
+        "unreachable": graph.n - reachable,
+        "distances": df.to_dict(orient="records")
+    }
+
+
+def compute_triangles(graph: GraphData, max_nodes: int = 20000) -> Dict[str, Any]:
+    """
+    Count triangles in undirected graph
+
+    Args:
+        graph: GraphData object
+        max_nodes: Skip if graph has more nodes than this
+
+    Returns:
+        Dictionary with triangle count
+    """
+    result = triangles_undirected(graph, max_nodes=max_nodes)
+
+    return {
+        "n_nodes": graph.n,
+        "n_edges": int(graph.edges.shape[0]),
+        **result
+    }
+
+
+def compute_eigenvector_centrality(
+    graph: GraphData,
+    max_iter: int = 100,
+    tol: float = 1e-6,
+    include_node_attrs: bool = True
+) -> Dict[str, Any]:
+    """
+    Compute eigenvector centrality
+
+    Args:
+        graph: GraphData object
+        max_iter: Max iterations
+        tol: Convergence tolerance
+        include_node_attrs: Whether to include node attributes in result
+
+    Returns:
+        Dictionary with eigenvector centrality results
+    """
+    df = eigenvector_centrality(graph, max_iter=max_iter, tol=tol)
+
+    if include_node_attrs:
+        df = merge_node_attributes(df, graph)
+
+    return {
+        "n_nodes": graph.n,
+        "eigenvector_centrality": df.to_dict(orient="records"),
+        "top_node": df.iloc[0].to_dict() if len(df) > 0 else None
+    }
+
+
+def compute_betweenness_centrality(
+    graph: GraphData,
+    normalized: bool = True,
+    include_node_attrs: bool = True
+) -> Dict[str, Any]:
+    """
+    Compute betweenness centrality
+
+    Args:
+        graph: GraphData object
+        normalized: Whether to normalize scores
+        include_node_attrs: Whether to include node attributes in result
+
+    Returns:
+        Dictionary with betweenness centrality results
+    """
+    df = betweenness_centrality(graph, normalized=normalized)
+
+    if include_node_attrs:
+        df = merge_node_attributes(df, graph)
+
+    return {
+        "n_nodes": graph.n,
+        "betweenness_centrality": df.to_dict(orient="records"),
+        "top_node": df.iloc[0].to_dict() if len(df) > 0 else None
+    }
+
+
+def get_graph_info(graph: GraphData) -> Dict[str, Any]:
+    """
+    Get basic graph information
+
+    Args:
+        graph: GraphData object
+
+    Returns:
+        Dictionary with graph statistics
+    """
+    # Sample nodes (first 10)
+    sample_nodes = []
+    for i, node_id in enumerate(graph.idx_to_id[:10]):
+        node_info = {"id": node_id, "index": i}
+
+        # Add attributes if available
+        if graph.nodes is not None:
+            node_row = graph.nodes[graph.nodes['id'] == node_id]
+            if not node_row.empty:
+                for col in graph.nodes.columns:
+                    if col not in ['id', 'idx']:
+                        node_info[col] = node_row.iloc[0][col]
+
+        sample_nodes.append(node_info)
+
+    return {
+        "n_nodes": graph.n,
+        "n_edges": int(graph.edges.shape[0]),
+        "sample_nodes": sample_nodes,
+        "has_graphblas": graph.gb_matrix is not None,
+        "has_node_attributes": graph.nodes is not None,
+        "edge_columns": list(graph.edges.columns),
+        "has_circles": graph.circles is not None,
+        "has_features": graph.features is not None,
+        "ego_id": graph.ego_id
     }
