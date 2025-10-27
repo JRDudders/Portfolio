@@ -3,94 +3,106 @@
 Audio deepfake detection using wav2vec-large-anti-deepfake model.
 Model: https://huggingface.co/nii-yamagishilab/wav2vec-large-anti-deepfake-nda
 
-Based on the official inference code from the model card.
+Supports two modes:
+1. Local inference (requires fairseq - Python 3.10 recommended)
+2. API inference (works with any Python version, no fairseq needed)
 """
 
 import os
 from pathlib import Path
 from typing import Tuple, Dict
+import io
 
 import torch
 import torchaudio
 import numpy as np
+import requests
 
-# Check if fairseq is available
+# Check if fairseq is available for local inference
 try:
     from fairseq.models.wav2vec import Wav2Vec2Model, Wav2Vec2Config
     from huggingface_hub import PyTorchModelHubMixin
     FAIRSEQ_AVAILABLE = True
 except ImportError:
     FAIRSEQ_AVAILABLE = False
+    print("fairseq not available - will use API inference mode")
 
 
 # Model name on HuggingFace
 MODEL_NAME = "nii-yamagishilab/wav2vec-large-anti-deepfake-nda"
+API_URL = f"https://api-inference.huggingface.co/models/{MODEL_NAME}"
 
-# Global model instance (loaded once)
+# Get API key from environment (optional but recommended for rate limits)
+HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+
+# Global model instance (loaded once, only used if fairseq available)
 _model = None
 _device = None
 
 
-# === Wrapper for the SSL model ===
-class SSLModel(torch.nn.Module):
-    def __init__(self):
-        super().__init__()
-        # Model config used to build SSL architecture
-        cfg = Wav2Vec2Config(
-            quantize_targets=True,
-            extractor_mode="layer_norm",
-            layer_norm_first=True,
-            final_dim=768,
-            latent_temp=(2.0, 0.1, 0.999995),
-            encoder_layerdrop=0.0,
-            dropout_input=0.0,
-            dropout_features=0.0,
-            dropout=0.0,
-            attention_dropout=0.0,
-            conv_bias=True,
-            encoder_layers=24,
-            encoder_embed_dim=1024,
-            encoder_ffn_embed_dim=4096,
-            encoder_attention_heads=16,
-            feature_grad_mult=1.0
-        )
-        # Initialize SSL model with random weights
-        self.model = Wav2Vec2Model(cfg)
+# === Local Inference Mode (requires fairseq) ===
 
-    def extract_feat(self, input_data):
-        # If input has shape (B, T, 1), squeeze the last dim
-        if input_data.ndim == 3:
-            input_data = input_data[:, :, 0]
-        # Extract features
-        with torch.no_grad():
-            features = self.model(input_data, mask=False, features_only=True)['x']
-        return features
+if FAIRSEQ_AVAILABLE:
+    # === Wrapper for the SSL model ===
+    class SSLModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            # Model config used to build SSL architecture
+            cfg = Wav2Vec2Config(
+                quantize_targets=True,
+                extractor_mode="layer_norm",
+                layer_norm_first=True,
+                final_dim=768,
+                latent_temp=(2.0, 0.1, 0.999995),
+                encoder_layerdrop=0.0,
+                dropout_input=0.0,
+                dropout_features=0.0,
+                dropout=0.0,
+                attention_dropout=0.0,
+                conv_bias=True,
+                encoder_layers=24,
+                encoder_embed_dim=1024,
+                encoder_ffn_embed_dim=4096,
+                encoder_attention_heads=16,
+                feature_grad_mult=1.0
+            )
+            # Initialize SSL model with random weights
+            self.model = Wav2Vec2Model(cfg)
+
+        def extract_feat(self, input_data):
+            # If input has shape (B, T, 1), squeeze the last dim
+            if input_data.ndim == 3:
+                input_data = input_data[:, :, 0]
+            # Extract features
+            with torch.no_grad():
+                features = self.model(input_data, mask=False, features_only=True)['x']
+            return features
 
 
-# === The actual deepfake detection model using SSL frontend + FC backend ===
-class DeepfakeDetector(torch.nn.Module, PyTorchModelHubMixin):
-    def __init__(self):
-        super().__init__()
-        self.ssl_orig_output_dim = 1024
-        self.num_classes = 2
+    # === The actual deepfake detection model using SSL frontend + FC backend ===
+    class DeepfakeDetector(torch.nn.Module, PyTorchModelHubMixin):
+        def __init__(self):
+            super().__init__()
+            self.ssl_orig_output_dim = 1024
+            self.num_classes = 2
 
-        # Frontend: SSL model
-        self.m_ssl = SSLModel()
+            # Frontend: SSL model
+            self.m_ssl = SSLModel()
 
-        # Backend: Pooling + Classification
-        self.adap_pool1d = torch.nn.AdaptiveAvgPool1d(output_size=1)
-        self.proj_fc = torch.nn.Linear(
-            in_features=self.ssl_orig_output_dim,
-            out_features=self.num_classes,
-        )
+            # Backend: Pooling + Classification
+            self.adap_pool1d = torch.nn.AdaptiveAvgPool1d(output_size=1)
+            self.proj_fc = torch.nn.Linear(
+                in_features=self.ssl_orig_output_dim,
+                out_features=self.num_classes,
+            )
 
-    def forward(self, wav):
-        emb = self.m_ssl.extract_feat(wav)  # [B, T, D]
-        emb = emb.transpose(1, 2)           # [B, D, T]
-        pooled_emb = self.adap_pool1d(emb)  # [B, D, 1]
-        pooled_emb = pooled_emb.squeeze(-1) # [B, D]
-        logits = self.proj_fc(pooled_emb)   # [B, 2]
-        return logits
+        def forward(self, wav):
+            emb = self.m_ssl.extract_feat(wav)  # [B, T, D]
+            emb = emb.transpose(1, 2)           # [B, D, T]
+            pooled_emb = self.adap_pool1d(emb)  # [B, D, 1]
+            pooled_emb = pooled_emb.squeeze(-1) # [B, D]
+            logits = self.proj_fc(pooled_emb)   # [B, 2]
+            return logits
 
 
 def load_wav_and_preprocess(wav_path: str, target_sr: int = 16000) -> torch.Tensor:
@@ -132,24 +144,30 @@ def check_models_available() -> Dict[str, bool]:
     return {
         "fairseq": FAIRSEQ_AVAILABLE,
         "torch": True,
-        "torchaudio": True
+        "torchaudio": True,
+        "api_mode": not FAIRSEQ_AVAILABLE
     }
 
 
 def download_models():
     """
-    Download and initialize the deepfake detection model
+    Download and initialize the deepfake detection model (local mode only)
     """
     global _model, _device
 
     if not FAIRSEQ_AVAILABLE:
-        raise ImportError(
-            "fairseq is required for audio deepfake detection.\n"
-            "Install with: pip install fairseq\n\n"
-            "Note: fairseq may require Python 3.10. If you have Python 3.12:\n"
-            "  1. Try installing anyway (pip install fairseq)\n"
-            "  2. If it fails, you'll need to use Python 3.10 or use the API-based approach"
-        )
+        print("=" * 70)
+        print("API INFERENCE MODE")
+        print("=" * 70)
+        print("fairseq not available - using HuggingFace Inference API instead")
+        print("No model downloads needed!")
+        if not HF_API_KEY:
+            print("\nNote: For better performance and no rate limits,")
+            print("set HUGGINGFACE_API_KEY environment variable:")
+            print("  export HUGGINGFACE_API_KEY='your_token_here'")
+            print("  Get token from: https://huggingface.co/settings/tokens")
+        print("=" * 70)
+        return
 
     print(f"Loading model: {MODEL_NAME}")
     print("This will download the model from HuggingFace on first use (~1.2GB)")
@@ -163,32 +181,135 @@ def download_models():
         _model = DeepfakeDetector.from_pretrained(MODEL_NAME)
         _model.to(_device)
         _model.eval()
-        print("Model loaded successfully!")
+        print("Model loaded successfully! Using local inference mode.")
     except Exception as e:
         print(f"Error loading model: {e}")
         raise
 
 
-def predict_audio(audio_path: str, device: str = None) -> Tuple[str, float, float]:
+def query_api(audio_bytes: bytes, max_retries: int = 3) -> Dict:
     """
-    Predict if audio is bonafide or spoofed using trained deepfake detection model
+    Query HuggingFace Inference API for deepfake detection
 
     Args:
-        audio_path: Path to audio file (WAV or FLAC)
-        device: Device to use (cuda/cpu), auto-detected if None
+        audio_bytes: Audio file as bytes
+        max_retries: Number of retry attempts
 
     Returns:
-        prediction: "bonafide" or "spoofed"
-        confidence: confidence score (0-1)
-        score: spoof score (higher = more likely spoofed)
+        dict with prediction results or error
+    """
+    headers = {}
+    if HF_API_KEY:
+        headers["Authorization"] = f"Bearer {HF_API_KEY}"
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                API_URL,
+                headers=headers,
+                data=audio_bytes,
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 503:
+                # Model is loading, wait and retry
+                if attempt < max_retries - 1:
+                    wait_time = 10 * (attempt + 1)
+                    print(f"Model loading on server, waiting {wait_time}s... (attempt {attempt + 1}/{max_retries})")
+                    import time
+                    time.sleep(wait_time)
+                    continue
+            else:
+                return {"error": f"API error {response.status_code}: {response.text[:200]}"}
+
+        except requests.exceptions.Timeout:
+            if attempt < max_retries - 1:
+                print(f"Request timeout, retrying... (attempt {attempt + 1}/{max_retries})")
+                continue
+            return {"error": "API request timed out"}
+        except Exception as e:
+            return {"error": f"API request failed: {str(e)}"}
+
+    return {"error": "Max retries exceeded"}
+
+
+def predict_audio_api(audio_path: str) -> Tuple[str, float, float]:
+    """
+    Predict using HuggingFace Inference API (no fairseq needed)
+
+    Args:
+        audio_path: Path to audio file
+
+    Returns:
+        prediction, confidence, spoof_score
+    """
+    print("Loading audio file...")
+    wav = load_wav_and_preprocess(audio_path)
+
+    # Convert to WAV bytes for API
+    buffer = io.BytesIO()
+    # Convert back to numpy for soundfile
+    audio_np = wav.squeeze(0).numpy()
+
+    import soundfile as sf
+    sf.write(buffer, audio_np, 16000, format='WAV')
+    audio_bytes = buffer.getvalue()
+
+    print(f"Sending to HuggingFace API... ({len(audio_bytes)/1024:.1f} KB)")
+    result = query_api(audio_bytes)
+
+    if "error" in result:
+        raise Exception(f"API error: {result['error']}")
+
+    # Parse API response
+    # Expected format: [{"label": "LABEL_0", "score": 0.xx}, {"label": "LABEL_1", "score": 0.yy}]
+    # LABEL_0 = fake, LABEL_1 = real
+    if isinstance(result, list) and len(result) >= 2:
+        # Find fake and real probabilities
+        fake_prob = None
+        real_prob = None
+
+        for item in result:
+            if item.get("label") == "LABEL_0":
+                fake_prob = item.get("score", 0.0)
+            elif item.get("label") == "LABEL_1":
+                real_prob = item.get("score", 0.0)
+
+        if fake_prob is None or real_prob is None:
+            raise Exception(f"Unexpected API response format: {result}")
+
+        prediction = "bonafide" if real_prob > fake_prob else "spoofed"
+        confidence = max(real_prob, fake_prob)
+        spoof_score = fake_prob
+
+        print("\n" + "=" * 70)
+        print("DEEPFAKE DETECTION RESULTS (via API)")
+        print("=" * 70)
+        print(f"Real probability:   {real_prob:.4f}")
+        print(f"Fake probability:   {fake_prob:.4f}")
+        print("-" * 70)
+        print(f"Prediction:         {prediction.upper()}")
+        print(f"Confidence:         {confidence:.1%}")
+        print("=" * 70)
+
+        return prediction, confidence, spoof_score
+    else:
+        raise Exception(f"Unexpected API response: {result}")
+
+
+def predict_audio_local(audio_path: str) -> Tuple[str, float, float]:
+    """
+    Predict using local model (requires fairseq)
+
+    Args:
+        audio_path: Path to audio file
+
+    Returns:
+        prediction, confidence, spoof_score
     """
     global _model, _device
-
-    if not FAIRSEQ_AVAILABLE:
-        raise ImportError(
-            "fairseq is required. Install with: pip install fairseq\n"
-            "Note: fairseq may require Python 3.10"
-        )
 
     # Load model if not already loaded
     if _model is None:
@@ -211,10 +332,10 @@ def predict_audio(audio_path: str, device: str = None) -> Tuple[str, float, floa
     # Determine prediction
     prediction = "bonafide" if real_prob > fake_prob else "spoofed"
     confidence = max(real_prob, fake_prob)
-    spoof_score = fake_prob  # Use fake probability as spoof score
+    spoof_score = fake_prob
 
     print("\n" + "=" * 70)
-    print("DEEPFAKE DETECTION RESULTS")
+    print("DEEPFAKE DETECTION RESULTS (local model)")
     print("=" * 70)
     print(f"Real probability:   {real_prob:.4f}")
     print(f"Fake probability:   {fake_prob:.4f}")
@@ -226,7 +347,32 @@ def predict_audio(audio_path: str, device: str = None) -> Tuple[str, float, floa
     return prediction, confidence, spoof_score
 
 
-# For backwards compatibility with old code
+def predict_audio(audio_path: str, device: str = None) -> Tuple[str, float, float]:
+    """
+    Predict if audio is bonafide or spoofed
+
+    Automatically uses:
+    - Local inference if fairseq is available
+    - API inference if fairseq is not available
+
+    Args:
+        audio_path: Path to audio file (WAV or FLAC)
+        device: Device to use (cuda/cpu), auto-detected if None (local mode only)
+
+    Returns:
+        prediction: "bonafide" or "spoofed"
+        confidence: confidence score (0-1)
+        score: spoof score (higher = more likely spoofed)
+    """
+    if FAIRSEQ_AVAILABLE:
+        print("Using local inference mode (fairseq available)")
+        return predict_audio_local(audio_path)
+    else:
+        print("Using API inference mode (fairseq not available)")
+        return predict_audio_api(audio_path)
+
+
+# For backwards compatibility
 def load_audio(file_path: str, sr: int = 16000) -> np.ndarray:
     """
     Load audio file and return as numpy array (for compatibility)
