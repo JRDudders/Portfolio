@@ -16,7 +16,6 @@ RUN apt-get update && apt-get install -y \
     python3.12-dev \
     python3.12-distutils \
     python3-pip \
-    git \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -34,9 +33,10 @@ COPY requirements-nlp.txt .
 RUN pip install torch --index-url https://download.pytorch.org/whl/cu121 && \
     pip install --no-cache-dir -r requirements-nlp.txt
 
-# Copy NLP service code
+# Copy all required Python files
 COPY service_nlp.py .
 COPY nlp_processor.py .
+COPY nlp.py .
 
 # Create temp directory
 RUN mkdir -p /app/temp

@@ -24,9 +24,10 @@ RUN pip install --no-cache-dir \
     pandas>=2.2 \
     scikit-learn>=1.5
 
-# Copy Graph service code
+# Copy all required Python files
 COPY service_graph.py .
 COPY graph_processor.py .
+COPY graph_tasks.py .
 
 # Create temp directory
 RUN mkdir -p /app/temp
