@@ -1,0 +1,16 @@
+# Audio Deepfake Detection Service Dependencies (Python 3.10)
+fastapi>=0.111
+uvicorn>=0.30
+python-multipart>=0.0.9
+
+# Audio processing
+librosa>=0.10.0
+soundfile>=0.12.1
+numpy>=1.26
+
+# PyTorch
+torch>=2.3
+
+# Fairseq for wav2vec model
+fairseq>=0.12.0
+huggingface_hub>=0.20.0

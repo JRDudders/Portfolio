@@ -1,0 +1,28 @@
+# Audio Deepfake Detection Service - Python 3.10 + fairseq
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libsndfile1 \
+    ffmpeg \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements for audio service
+COPY requirements-audio.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements-audio.txt
+
+# Copy audio processing code
+COPY audio_antispoofing.py .
+COPY audio_service.py .
+
+# Expose port
+EXPOSE 8081
+
+# Run the audio service
+CMD ["python", "audio_service.py"]
