@@ -14,8 +14,8 @@ from typing import Tuple, Dict
 import io
 
 import torch
-import torchaudio
 import numpy as np
+import librosa
 import requests
 
 # Check if fairseq is available for local inference
@@ -116,18 +116,11 @@ def load_wav_and_preprocess(wav_path: str, target_sr: int = 16000) -> torch.Tens
     Returns:
         Preprocessed waveform tensor ready for model input
     """
-    # Load audio file
-    wav, sr = torchaudio.load(wav_path)
+    # Load audio file using librosa (handles all formats, no codec issues)
+    wav, sr = librosa.load(wav_path, sr=target_sr, mono=True)
 
-    # Convert to mono if stereo
-    if wav.shape[0] > 1:
-        wav = wav.mean(dim=0)
-    else:
-        wav = wav.squeeze(0)
-
-    # Resample to target sampling rate if needed
-    if sr != target_sr:
-        wav = torchaudio.functional.resample(wav, sr, new_freq=target_sr)
+    # Convert to torch tensor
+    wav = torch.from_numpy(wav).float()
 
     # Normalize waveform
     with torch.no_grad():
@@ -144,7 +137,7 @@ def check_models_available() -> Dict[str, bool]:
     return {
         "fairseq": FAIRSEQ_AVAILABLE,
         "torch": True,
-        "torchaudio": True,
+        "librosa": True,
         "api_mode": not FAIRSEQ_AVAILABLE
     }
 
@@ -377,11 +370,6 @@ def load_audio(file_path: str, sr: int = 16000) -> np.ndarray:
     """
     Load audio file and return as numpy array (for compatibility)
     """
-    wav, _ = torchaudio.load(file_path)
-    if wav.shape[0] > 1:
-        wav = wav.mean(dim=0)
-    else:
-        wav = wav.squeeze(0)
-    if _ != sr:
-        wav = torchaudio.functional.resample(wav, _, new_freq=sr)
-    return wav.numpy()
+    # Use librosa - handles all formats, no codec issues
+    wav, _ = librosa.load(file_path, sr=sr, mono=True)
+    return wav

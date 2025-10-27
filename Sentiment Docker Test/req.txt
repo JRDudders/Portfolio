@@ -49,7 +49,6 @@ bertopic>=0.16
 # Audio Deepfake Detection (core dependencies)
 librosa>=0.10.0
 soundfile>=0.12.1
-torchaudio>=2.0.0
 
 # Audio Deepfake Detection (optional - for local inference)
 # If fairseq install fails, API mode will be used automatically
