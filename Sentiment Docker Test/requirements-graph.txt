@@ -1,0 +1,22 @@
+# Graph Analytics Service Dependencies
+fastapi>=0.111
+uvicorn>=0.30
+python-multipart>=0.0.9
+pydantic>=2.0
+requests>=2.32
+
+# Machine Learning
+transformers>=4.44
+torch>=2.3
+sentence-transformers>=3.0
+
+# Data Processing
+pandas>=2.2
+numpy>=1.26
+scikit-learn>=1.5
+
+# Graph Analytics
+networkx>=3.0
+
+# GraphBLAS (optional, for advanced operations)
+python-graphblas>=2024.2 ; python_version >= "3.11"

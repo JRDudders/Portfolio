@@ -4,11 +4,11 @@ Audio Deepfake Detection Microservice
 This service runs on Python 3.10 with fairseq and provides
 audio deepfake detection via HTTP API.
 
-The main app (Python 3.12) calls this service for audio analysis.
+Independent service for the Audio tab in CiceroWatch.
 """
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import tempfile
 import os
@@ -17,7 +17,20 @@ from pathlib import Path
 # Import audio processing (requires fairseq)
 import audio_antispoofing
 
-app = FastAPI(title="Audio Deepfake Detection Service", version="1.0.0")
+app = FastAPI(
+    title="CiceroWatch Audio Service",
+    description="Audio deepfake detection microservice",
+    version="1.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -97,16 +110,19 @@ async def download_models():
 
 
 if __name__ == "__main__":
+    port = int(os.getenv("SERVICE_PORT", 8003))
+
     print("=" * 70)
-    print("Audio Deepfake Detection Service")
+    print("CiceroWatch Audio Service")
     print("=" * 70)
     print("Python 3.10 + fairseq")
-    print("Listening on: http://0.0.0.0:8081")
+    print(f"Listening on: http://0.0.0.0:{port}")
+    print("Features: Audio Deepfake Detection")
     print("=" * 70)
 
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=8081,
+        port=port,
         log_level="info"
     )
