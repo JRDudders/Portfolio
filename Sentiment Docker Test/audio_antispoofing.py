@@ -232,6 +232,9 @@ def predict_audio_api(audio_path: str) -> Tuple[str, float, float]:
     """
     Predict using HuggingFace Inference API (no fairseq needed)
 
+    Note: The wav2vec-large-anti-deepfake-nda model is not available via free API.
+    This falls back to audio analysis heuristics.
+
     Args:
         audio_path: Path to audio file
 
@@ -250,17 +253,31 @@ def predict_audio_api(audio_path: str) -> Tuple[str, float, float]:
     sf.write(buffer, audio_np, 16000, format='WAV')
     audio_bytes = buffer.getvalue()
 
-    print(f"Sending to HuggingFace API... ({len(audio_bytes)/1024:.1f} KB)")
+    print(f"Attempting HuggingFace API... ({len(audio_bytes)/1024:.1f} KB)")
     result = query_api(audio_bytes)
 
+    # If API fails (which it likely will for this model), use heuristics
     if "error" in result:
-        raise Exception(f"API error: {result['error']}")
+        error_msg = result['error']
+        print(f"\nAPI Error: {error_msg[:100]}...")
 
-    # Parse API response
-    # Expected format: [{"label": "LABEL_0", "score": 0.xx}, {"label": "LABEL_1", "score": 0.yy}]
-    # LABEL_0 = fake, LABEL_1 = real
+        if "401" in error_msg or "404" in error_msg:
+            print("\n" + "=" * 70)
+            print("MODEL NOT AVAILABLE VIA FREE API")
+            print("=" * 70)
+            print("The wav2vec-large-anti-deepfake-nda model requires either:")
+            print("  1. Local inference (fairseq + Python 3.10)")
+            print("  2. HuggingFace Pro account with inference endpoints")
+            print("\nFalling back to audio analysis heuristics...")
+            print("=" * 70)
+
+            # Use improved heuristics as fallback
+            return predict_audio_heuristics(audio_path)
+        else:
+            raise Exception(f"API error: {error_msg}")
+
+    # Parse API response (if it ever works)
     if isinstance(result, list) and len(result) >= 2:
-        # Find fake and real probabilities
         fake_prob = None
         real_prob = None
 
@@ -271,7 +288,7 @@ def predict_audio_api(audio_path: str) -> Tuple[str, float, float]:
                 real_prob = item.get("score", 0.0)
 
         if fake_prob is None or real_prob is None:
-            raise Exception(f"Unexpected API response format: {result}")
+            return predict_audio_heuristics(audio_path)
 
         prediction = "bonafide" if real_prob > fake_prob else "spoofed"
         confidence = max(real_prob, fake_prob)
@@ -289,7 +306,89 @@ def predict_audio_api(audio_path: str) -> Tuple[str, float, float]:
 
         return prediction, confidence, spoof_score
     else:
-        raise Exception(f"Unexpected API response: {result}")
+        return predict_audio_heuristics(audio_path)
+
+
+def predict_audio_heuristics(audio_path: str) -> Tuple[str, float, float]:
+    """
+    Fallback: Analyze audio using signal processing heuristics
+
+    This is NOT machine learning-based deepfake detection.
+    For production, you need fairseq + Python 3.10 for local inference.
+
+    Args:
+        audio_path: Path to audio file
+
+    Returns:
+        prediction, confidence, spoof_score
+    """
+    print("\nAnalyzing audio features...")
+
+    # Load audio using librosa
+    audio, sr = librosa.load(audio_path, sr=16000, mono=True)
+    duration = len(audio) / sr
+
+    # Extract audio features
+    # These are real audio features, but NOT trained for deepfake detection
+    volume_std = np.std(np.abs(audio))
+    mean_energy = np.mean(audio ** 2)
+    zero_crossing_rate = np.mean(librosa.zero_crossings(audio))
+
+    # Spectral features
+    spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=audio, sr=sr))
+    spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=audio, sr=sr))
+    spectral_bandwidth = np.mean(librosa.feature.spectral_bandwidth(y=audio, sr=sr))
+
+    # MFCC features (often used in speech analysis)
+    mfccs = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)
+    mfcc_mean = np.mean(mfccs)
+    mfcc_std = np.std(mfccs)
+
+    # Heuristic scoring (NOT scientifically valid for deepfake detection)
+    spoof_score = 0.5  # Start neutral
+
+    # Very basic checks (these are NOT reliable deepfake indicators!)
+    if volume_std < 0.05:  # Very consistent volume
+        spoof_score += 0.1
+    if volume_std > 0.15:  # Very varied volume
+        spoof_score -= 0.05
+    if zero_crossing_rate > 0.5:
+        spoof_score += 0.08
+    if spectral_centroid < 1000:  # Very low frequencies
+        spoof_score += 0.07
+    if mfcc_std < 10:  # Very consistent MFCCs
+        spoof_score += 0.1
+
+    # Clamp to valid range
+    spoof_score = max(0.0, min(1.0, spoof_score))
+
+    prediction = "spoofed" if spoof_score > 0.5 else "bonafide"
+    confidence = abs(spoof_score - 0.5) * 2
+
+    print("\n" + "=" * 70)
+    print("AUDIO ANALYSIS RESULTS (HEURISTICS - NOT AI)")
+    print("=" * 70)
+    print(f"Duration:              {duration:.2f}s")
+    print(f"Volume std dev:        {volume_std:.4f}")
+    print(f"Mean energy:           {mean_energy:.6f}")
+    print(f"Zero crossing rate:    {zero_crossing_rate:.4f}")
+    print(f"Spectral centroid:     {spectral_centroid:.2f} Hz")
+    print(f"Spectral rolloff:      {spectral_rolloff:.2f} Hz")
+    print(f"Spectral bandwidth:    {spectral_bandwidth:.2f} Hz")
+    print(f"MFCC mean:             {mfcc_mean:.4f}")
+    print(f"MFCC std dev:          {mfcc_std:.4f}")
+    print("-" * 70)
+    print(f"Prediction:            {prediction.upper()}")
+    print(f"Confidence:            {confidence:.1%}")
+    print(f"Spoof score:           {spoof_score:.4f}")
+    print("=" * 70)
+    print("\nWARNING: This uses basic audio features, NOT trained AI.")
+    print("For real deepfake detection:")
+    print("  - Install fairseq with Python 3.10 for local inference")
+    print("  - Or use a commercial deepfake detection API")
+    print("=" * 70)
+
+    return prediction, confidence, spoof_score
 
 
 def predict_audio_local(audio_path: str) -> Tuple[str, float, float]:
