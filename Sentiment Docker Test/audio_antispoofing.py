@@ -1,28 +1,22 @@
 # audio_antispoofing.py
 """
-Audio deepfake detection using HuggingFace Inference API.
-No local model downloads required - all inference happens via API calls.
+Audio deepfake detection - PROOF OF CONCEPT ONLY
+
+Current implementation uses placeholder heuristics for demonstration purposes.
+This is NOT production-ready and should not be used for actual deepfake detection.
+
+For production use, integrate with:
+1. Commercial API (Deepgram, AssemblyAI, Resemble AI)
+2. Self-hosted model with Python 3.10 + fairseq
+3. HuggingFace Pro account with specialized models
 """
 
 import os
 from pathlib import Path
 from typing import Tuple, Dict
-import requests
 
 import numpy as np
 import librosa
-
-
-# HuggingFace Inference API
-INFERENCE_API_URL = "https://api-inference.huggingface.co/models/nii-yamagishilab/wav2vec2-large-960h-lv60-self"
-# Alternative models to try if primary fails
-ALTERNATIVE_MODELS = [
-    "facebook/wav2vec2-base",
-    "facebook/wav2vec2-large-960h"
-]
-
-# Get API key from environment (optional - works without it but may have rate limits)
-HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
 
 
 def load_audio(file_path: str, sr: int = 16000) -> np.ndarray:
@@ -32,139 +26,101 @@ def load_audio(file_path: str, sr: int = 16000) -> np.ndarray:
 
 
 def check_models_available() -> Dict[str, bool]:
-    """Check if API is reachable"""
-    try:
-        response = requests.head(INFERENCE_API_URL, timeout=5)
-        return {"api_available": response.status_code in [200, 401, 403, 503]}
-    except:
-        return {"api_available": False}
+    """
+    Check if audio processing is available
+
+    Note: No models needed for current heuristic-based approach
+    """
+    return {"audio_processing": True}
 
 
 def download_models():
-    """No downloads needed - using API"""
-    print("Audio deepfake detection uses HuggingFace Inference API.")
-    print("No model downloads required!")
-    if not HF_API_KEY:
-        print("\nNote: For better performance and higher rate limits, set HUGGINGFACE_API_KEY environment variable.")
-        print("Get your API key from: https://huggingface.co/settings/tokens")
-
-
-def query_api(audio_bytes: bytes, max_retries: int = 3) -> Dict:
     """
-    Query HuggingFace Inference API for audio classification
+    No model downloads - current implementation uses audio analysis heuristics
 
-    Returns:
-        dict with 'label' and 'score' keys, or error info
+    WARNING: This is a proof-of-concept only!
+    For production deepfake detection, you need a real solution.
     """
-    headers = {}
-    if HF_API_KEY:
-        headers["Authorization"] = f"Bearer {HF_API_KEY}"
-
-    # Try primary model
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(
-                INFERENCE_API_URL,
-                headers=headers,
-                data=audio_bytes,
-                timeout=30
-            )
-
-            if response.status_code == 200:
-                return response.json()
-            elif response.status_code == 503:
-                # Model is loading, wait and retry
-                if attempt < max_retries - 1:
-                    print(f"Model loading, retrying in 10 seconds... (attempt {attempt + 1}/{max_retries})")
-                    import time
-                    time.sleep(10)
-                    continue
-
-            # If we get here, there was an error
-            return {"error": f"API returned status {response.status_code}: {response.text}"}
-
-        except requests.exceptions.Timeout:
-            if attempt < max_retries - 1:
-                print(f"Request timeout, retrying... (attempt {attempt + 1}/{max_retries})")
-                continue
-            return {"error": "API request timed out after multiple retries"}
-        except Exception as e:
-            return {"error": f"API request failed: {str(e)}"}
-
-    return {"error": "Max retries exceeded"}
+    print("=" * 70)
+    print("AUDIO DEEPFAKE DETECTION - PROOF OF CONCEPT")
+    print("=" * 70)
+    print("\nCurrent implementation: Placeholder heuristics (NOT production-ready)")
+    print("\nFor actual deepfake detection, integrate with:")
+    print("  1. Commercial API: Deepgram, AssemblyAI, Resemble AI")
+    print("  2. Self-hosted model: Python 3.10 + fairseq + AASIST")
+    print("  3. HuggingFace Pro: Specialized anti-spoofing models")
+    print("\nNo downloads required for this demo version.")
+    print("=" * 70)
 
 
 def predict_audio(audio_path: str, device: str = None) -> Tuple[str, float, float]:
     """
-    Predict if audio is bonafide or spoofed using HuggingFace Inference API
+    Analyze audio file using placeholder heuristics
 
-    Note: device parameter is ignored (kept for API compatibility)
+    WARNING: This is NOT real deepfake detection! This is a proof-of-concept
+    that demonstrates the UI and file processing pipeline works.
+
+    Args:
+        audio_path: Path to audio file (FLAC or WAV)
+        device: Ignored (kept for API compatibility)
 
     Returns:
         prediction: "bonafide" or "spoofed"
         confidence: confidence score (0-1)
-        score: raw score
+        score: raw score (higher = more likely spoofed)
     """
     print("Loading audio file...")
     audio = load_audio(audio_path)
 
-    # Convert to bytes for API
-    import io
-    import soundfile as sf
-
-    buffer = io.BytesIO()
-    sf.write(buffer, audio, 16000, format='WAV')
-    audio_bytes = buffer.getvalue()
-
-    print(f"Sending audio to HuggingFace Inference API...")
-    print(f"Audio size: {len(audio_bytes) / 1024:.2f} KB")
-
-    # Query the API
-    result = query_api(audio_bytes)
-
-    if "error" in result:
-        raise Exception(result["error"])
-
-    # For now, use a simple heuristic since the base model isn't trained for deepfake detection
-    # This is a placeholder - in production you'd use a proper deepfake detection API
-    print("\nWARNING: Using base wav2vec2 model as placeholder.")
-    print("For production use, consider:")
-    print("  1. HuggingFace Pro account with access to specialized models")
-    print("  2. Commercial deepfake detection API (e.g., Deepgram, AssemblyAI)")
-    print("  3. Self-hosted model with Python 3.10 + fairseq")
-
-    # Placeholder logic - analyze audio features as a heuristic
-    # Real deepfake detection would use a trained model
     duration = len(audio) / 16000
+    print(f"Audio loaded: {duration:.2f}s duration")
 
-    # Simple heuristics (NOT RELIABLE - just for demonstration)
-    # Real deepfakes often have:
-    # - Very consistent volume
-    # - Lack of natural breath sounds
-    # - Unusual spectral characteristics
-
+    # Analyze basic audio features
+    # NOTE: These are NOT reliable deepfake indicators!
+    # Real deepfake detection requires trained neural networks
     volume_std = np.std(np.abs(audio))
     mean_energy = np.mean(audio ** 2)
+    zero_crossing_rate = np.mean(librosa.zero_crossings(audio))
+    spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=audio, sr=16000))
 
-    # Very rough heuristic score (DO NOT USE IN PRODUCTION)
-    # This is just to show the UI works
-    spoof_score = 0.5  # Default: uncertain
+    # Placeholder heuristic (DO NOT USE IN PRODUCTION)
+    # This just shows the UI works - it's essentially random
+    spoof_score = 0.5  # Start uncertain
 
+    # Very basic checks (NOT scientifically valid)
     if volume_std < 0.05:  # Very consistent volume
-        spoof_score += 0.2
-    if mean_energy > 0.01:  # High energy
+        spoof_score += 0.15
+    if volume_std > 0.15:  # Very inconsistent
         spoof_score -= 0.1
+    if mean_energy > 0.01:  # High energy
+        spoof_score -= 0.05
+    if zero_crossing_rate > 0.5:  # High ZCR
+        spoof_score += 0.1
 
+    # Add some variation based on spectral features
+    spoof_score += (spectral_centroid / 10000) * 0.1
+
+    # Clamp to valid range
     spoof_score = max(0.0, min(1.0, spoof_score))
 
     prediction = "spoofed" if spoof_score > 0.5 else "bonafide"
     confidence = abs(spoof_score - 0.5) * 2  # Convert to 0-1 confidence
 
-    print(f"\nPlaceholder analysis:")
-    print(f"  Duration: {duration:.2f}s")
-    print(f"  Volume std: {volume_std:.4f}")
-    print(f"  Mean energy: {mean_energy:.6f}")
-    print(f"  Prediction: {prediction} (confidence: {confidence:.2%})")
-    print(f"  Spoof score: {spoof_score:.4f}")
+    print("\n" + "=" * 70)
+    print("PLACEHOLDER ANALYSIS (NOT REAL DEEPFAKE DETECTION)")
+    print("=" * 70)
+    print(f"Duration:           {duration:.2f}s")
+    print(f"Volume std dev:     {volume_std:.4f}")
+    print(f"Mean energy:        {mean_energy:.6f}")
+    print(f"Zero crossing rate: {zero_crossing_rate:.4f}")
+    print(f"Spectral centroid:  {spectral_centroid:.2f} Hz")
+    print("-" * 70)
+    print(f"Prediction:         {prediction.upper()}")
+    print(f"Confidence:         {confidence:.1%}")
+    print(f"Spoof score:        {spoof_score:.4f}")
+    print("=" * 70)
+    print("\nREMINDER: These results are based on simple heuristics, not AI.")
+    print("For real deepfake detection, integrate a production solution.")
+    print("=" * 70)
 
     return prediction, confidence, spoof_score
