@@ -2,23 +2,22 @@
 
 ## Overview
 
-The audio deepfake detection feature uses **wav2vec2-large-anti-deepfake** from HuggingFace:
-- Model: [nii-yamagishilab/wav2vec-large-anti-deepfake](https://huggingface.co/nii-yamagishilab/wav2vec-large-anti-deepfake)
-- Pre-trained wav2vec 2.0 Large model fine-tuned for anti-spoofing
+The audio deepfake detection feature uses the **HuggingFace Inference API**:
+- **No model downloads required** - all processing happens via API calls
 - Works with Python 3.8+ including Python 3.12
-- No manual model downloads required!
+- Optional: Set `HUGGINGFACE_API_KEY` environment variable for better rate limits
+- Get your API key from: https://huggingface.co/settings/tokens
 
 ## Installation
 
 ```bash
-# Install audio dependencies
+# Install audio dependencies only
 pip install librosa soundfile
 
-# transformers is already in requirements
-pip install -r req.txt
+# No model downloads needed!
 ```
 
-That's it! The model downloads automatically from HuggingFace on first use (~1.2GB).
+That's it! The feature uses cloud-based inference, so no large model downloads are required.
 
 ## Usage
 
@@ -43,41 +42,69 @@ That's it! The model downloads automatically from HuggingFace on first use (~1.2
 
 ## Troubleshooting
 
-### "No module named 'transformers'"
-```bash
-pip install transformers
-```
-
 ### "No module named 'librosa'"
 ```bash
 pip install librosa soundfile
 ```
 
-### Model download is slow
-The first time you use the audio feature, HuggingFace will download the model (~1.2GB). This is normal and only happens once. Subsequent uses will be much faster.
+### API request timeouts
+- The API has built-in retry logic with exponential backoff
+- If models are loading on HuggingFace servers, it will wait and retry automatically
+- Check your internet connection if persistent issues occur
 
 ### Audio file format errors
 - Ensure your file is FLAC or WAV format
 - Sample rate will be automatically resampled to 16kHz
 
-## Model Information
+### Rate limiting
+- Without an API key, HuggingFace Inference API has rate limits
+- Set `HUGGINGFACE_API_KEY` environment variable for higher limits:
+  ```bash
+  export HUGGINGFACE_API_KEY="your_token_here"
+  ```
+- Get your token from: https://huggingface.co/settings/tokens
 
-**Model**: nii-yamagishilab/wav2vec2-large-anti-deepfake
-**Paper**: "Utterance-level Aggregation For Speaker Recognition In The Wild" (ICASSP 2019)
-**Trained on**: Multiple anti-spoofing datasets
-**Architecture**: wav2vec 2.0 Large (300M parameters) + classification head
+## Current Implementation Status
 
-This model is specifically trained to detect:
-- Text-to-speech (TTS) synthesis
-- Voice conversion
-- Audio deepfakes
-- Other spoofing attacks
+**IMPORTANT**: This is currently a proof-of-concept implementation using placeholder heuristics.
 
-## Performance
+The current implementation:
+- ✅ Successfully loads and processes audio files
+- ✅ Connects to HuggingFace Inference API
+- ✅ Provides UI integration with three-tab interface
+- ⚠️ Uses **placeholder heuristics** for detection (NOT production-ready)
 
-The model is trained on ASVspoof and other datasets, achieving strong performance on:
-- Logical Access (LA) attacks
-- Physical Access (PA) attacks
-- Audio deepfake detection
+### Why Placeholder Heuristics?
 
-For exact metrics, see the [model card](https://huggingface.co/nii-yamagishilab/wav2vec-large-anti-deepfake).
+The wav2vec2 base models available via free Inference API are NOT trained for deepfake detection. They're general-purpose audio models designed for speech recognition tasks.
+
+Current heuristics analyze:
+- Volume consistency (std deviation)
+- Mean energy levels
+
+**These are NOT reliable deepfake indicators** - they're just demonstrating the UI/API pipeline works.
+
+## Production Solutions
+
+For reliable deepfake detection, consider:
+
+1. **HuggingFace Pro Account**
+   - Access to specialized anti-spoofing models
+   - Higher API rate limits
+   - https://huggingface.co/pricing
+
+2. **Commercial Deepfake Detection APIs**
+   - Deepgram: https://deepgram.com/
+   - AssemblyAI: https://www.assemblyai.com/
+   - Purpose-built for audio verification
+
+3. **Self-Hosted Model** (requires Python 3.10)
+   - Use fairseq-based models like AASIST
+   - Full control but environment management complexity
+   - Models: SSL_Anti-spoofing, wav2vec2-large-anti-deepfake
+
+## Test Datasets
+
+For testing once production solution is implemented:
+- **ASVspoof 2019**: https://datashare.is.ed.ac.uk/handle/10283/3336
+- **In-the-Wild Audio Deepfake**: https://www.kaggle.com/datasets/abdallamohamed312/in-the-wild-audio-deepfake
