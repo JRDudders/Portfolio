@@ -121,6 +121,62 @@ def _extract_text_from_html(html: str) -> str:
     return text
 
 
+def _chunk_html_for_topics(html: str, min_chunk_length: int = 100) -> List[str]:
+    """
+    Split HTML into chunks (paragraphs/sections) for topic modeling.
+    Useful for books, long articles, etc.
+
+    Args:
+        html: HTML content
+        min_chunk_length: Minimum character length for a chunk to be included
+
+    Returns:
+        List of text chunks
+    """
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Drop script/style tags
+    for tag in soup(["script", "style", "noscript"]):
+        tag.extract()
+
+    chunks = []
+
+    # Try to extract by structural elements (chapters, sections, divs, paragraphs)
+    # Priority: div.chapter, div.section, h1-h6 + following content, then paragraphs
+
+    # First try to find chapter/section divs
+    for div in soup.find_all(['div', 'section', 'article']):
+        if div.get('class') and any(c in str(div.get('class')).lower() for c in ['chapter', 'section', 'content']):
+            text = div.get_text("\n", strip=True)
+            if len(text) >= min_chunk_length:
+                chunks.append(text)
+
+    # If we got good chunks from structural elements, use those
+    if chunks:
+        return chunks
+
+    # Otherwise, fall back to paragraphs
+    for p in soup.find_all(['p', 'div']):
+        text = p.get_text(strip=True)
+        if len(text) >= min_chunk_length:
+            chunks.append(text)
+
+    # If still no chunks, split by double newlines
+    if not chunks:
+        full_text = soup.get_text("\n", strip=True)
+        paragraphs = full_text.split('\n\n')
+        chunks = [p.strip() for p in paragraphs if len(p.strip()) >= min_chunk_length]
+
+    # Ensure we have at least some chunks
+    if not chunks:
+        # Last resort: split by single newlines
+        full_text = soup.get_text("\n", strip=True)
+        lines = full_text.split('\n')
+        chunks = [line.strip() for line in lines if len(line.strip()) >= min_chunk_length]
+
+    return chunks if chunks else [_extract_text_from_html(html)]
+
+
 # ============================================================
 # Request Models
 # ============================================================
@@ -219,12 +275,17 @@ async def analyze_file(
     - JSON: list of strings or objects with 'text' field
     - CSV: file with 'text' column or first string column
     - HTML/HTM: extracts text content from HTML file
+      * For topic modeling: automatically chunks into paragraphs/sections (great for books!)
+      * For other tasks: treats as single document
 
     Returns annotated JSON file with predictions
     """
     try:
         b = await file.read()
         name = (file.filename or "").lower()
+
+        # Determine task from preset early (needed for HTML chunking decision)
+        task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
 
         # Parse file based on type
         if name.endswith(".json"):
@@ -234,17 +295,24 @@ async def analyze_file(
         elif name.endswith((".html", ".htm")):
             # Extract text from HTML
             html = b.decode("utf-8", errors="ignore")
-            text = _extract_text_from_html(html)
-            texts = [text]
+
+            # For topic modeling, chunk the HTML into paragraphs/sections
+            # For other tasks (sentiment, NER), treat as single document
+            is_topic_task = task and ("topics" in task or "topic" in task)
+
+            if is_topic_task:
+                # Split into chunks for topic modeling (books, long articles)
+                texts = _chunk_html_for_topics(html, min_chunk_length=100)
+            else:
+                # Single document for sentiment, NER, etc.
+                text = _extract_text_from_html(html)
+                texts = [text]
         else:
             # Try JSON first, then CSV
             try:
                 texts = _texts_from_json_bytes(b)
             except Exception:
                 texts = _texts_from_csv_bytes(b)
-
-        # Determine task from preset
-        task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
 
         # Keep original texts for output, preprocess separately
         original_texts = texts
