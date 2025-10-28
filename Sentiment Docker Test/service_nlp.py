@@ -19,6 +19,8 @@ import os
 import io
 import json
 import pandas as pd
+from bs4 import BeautifulSoup
+import trafilatura
 
 # Import NLP processing modules
 from nlp_processor import (
@@ -98,6 +100,25 @@ def _make_download(name: str, payload: bytes, mime: str = "application/json") ->
     resp = StreamingResponse(io.BytesIO(payload), media_type=mime)
     resp.headers["Content-Disposition"] = f'attachment; filename="{name}"'
     return resp
+
+
+def _extract_text_from_html(html: str) -> str:
+    """Extract text from HTML using trafilatura, fallback to BeautifulSoup"""
+    # Try trafilatura first (better at extracting main content)
+    try:
+        extracted = trafilatura.extract(html, include_comments=False, favor_recall=False)
+        if extracted and extracted.strip():
+            return extracted.strip()
+    except Exception:
+        pass
+
+    # Fallback: BeautifulSoup get_text
+    soup = BeautifulSoup(html, "html.parser")
+    # Drop script/style tags
+    for tag in soup(["script", "style", "noscript"]):
+        tag.extract()
+    text = soup.get_text("\n", strip=True)
+    return text
 
 
 # ============================================================
@@ -192,11 +213,14 @@ async def analyze_file(
     include_stopwords: Optional[bool] = Query(False),
 ):
     """
-    Analyze text file (JSON or CSV) and return annotated results as downloadable file
+    Analyze text file and return annotated results as downloadable file
 
-    - Parses JSON (list of strings or objects with 'text' field) or CSV (with 'text' column)
-    - Runs NLP analysis using specified preset
-    - Returns annotated file in same format as input
+    Supports:
+    - JSON: list of strings or objects with 'text' field
+    - CSV: file with 'text' column or first string column
+    - HTML/HTM: extracts text content from HTML file
+
+    Returns annotated JSON file with predictions
     """
     try:
         b = await file.read()
@@ -207,6 +231,11 @@ async def analyze_file(
             texts = _texts_from_json_bytes(b)
         elif name.endswith(".csv"):
             texts = _texts_from_csv_bytes(b)
+        elif name.endswith((".html", ".htm")):
+            # Extract text from HTML
+            html = b.decode("utf-8", errors="ignore")
+            text = _extract_text_from_html(html)
+            texts = [text]
         else:
             # Try JSON first, then CSV
             try:
