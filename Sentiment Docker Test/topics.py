@@ -40,7 +40,12 @@ def topics_nmf(
     min_df: int = 2,
     topk: int = 12,
 ) -> Dict[str, object]:
-    vec = TfidfVectorizer(max_features=max_features, ngram_range=ngram_range, min_df=min_df)
+    vec = TfidfVectorizer(
+        max_features=max_features,
+        ngram_range=ngram_range,
+        min_df=min_df,
+        stop_words='english'  # Filter common stopwords
+    )
     X = vec.fit_transform(texts)
     nmf = NMF(n_components=n_topics, init="nndsvd", random_state=42, max_iter=400)
     W = nmf.fit_transform(X)  # docs x topics
@@ -75,7 +80,12 @@ def topics_kmeans(
     min_df: int = 2,
     topk: int = 12,
 ) -> Dict[str, object]:
-    vec = TfidfVectorizer(max_features=max_features, ngram_range=ngram_range, min_df=min_df)
+    vec = TfidfVectorizer(
+        max_features=max_features,
+        ngram_range=ngram_range,
+        min_df=min_df,
+        stop_words='english'  # Filter common stopwords
+    )
     X = vec.fit_transform(texts)
     km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
     labels = km.fit_predict(X)
