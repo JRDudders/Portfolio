@@ -1,6 +1,7 @@
 # Graph Analytics Service with GPU Support - RAPIDS cuGraph
-# Using RAPIDS 24.10 with CUDA 12.5, Python 3.11
-FROM rapidsai/rapidsai:24.10-cuda12.5-runtime-py3.11
+# Using RAPIDS 24.10 with CUDA 12.2, Python 3.11
+# Note: rapidsai/rapidsai was replaced by rapidsai/base in RAPIDS 23.08+
+FROM rapidsai/base:24.10-cuda12.2-py3.11
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -12,10 +13,9 @@ WORKDIR /app
 # Install additional dependencies
 COPY requirements-graph.txt .
 
-# Install PyTorch with GPU support first (CUDA 12.5 to match RAPIDS base image)
+# Install PyTorch with GPU support first (CUDA 12.2 to match RAPIDS base image)
 # Note: torch is commented out in requirements-graph.txt to avoid conflicts
-# Using cu121 (CUDA 12.1) as it's compatible with CUDA 12.5 runtime
-RUN pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cu121
+RUN pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cu122
 
 # Install remaining dependencies from requirements file
 RUN pip install --no-cache-dir -r requirements-graph.txt
