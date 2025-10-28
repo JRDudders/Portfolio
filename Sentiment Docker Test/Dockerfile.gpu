@@ -26,18 +26,18 @@ RUN apt-get update && \
 WORKDIR /app
 
 # --- Python deps ---
-# RAPIDS base already has cudf and cugraph installed in the rapids conda environment
-# Install remaining dependencies into the rapids environment
+# RAPIDS base already has cudf and cugraph installed in the base conda environment
+# Install remaining dependencies into the base environment
 COPY req.txt /app/req.txt
 RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate rapids && \
+    conda activate base && \
     python -m pip install --upgrade pip && \
     pip install -r /app/req.txt
 
 # --- CUDA Availability Check ---
 # Verify CUDA is available (version agnostic)
 RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate rapids && \
+    conda activate base && \
     python - <<'PY'
 import sys
 
@@ -96,12 +96,12 @@ PY
 # If you won't use URL rendering, you can comment this out to slim the image.
 # This installs Chromium and its system dependencies inside the image.
 RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate rapids && \
+    conda activate base && \
     playwright install --with-deps chromium || true
 
 # --- NLTK corpora (stopwords + punkt) ---
 RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate rapids && \
+    conda activate base && \
     python - <<'PY'
 import nltk
 nltk.download('stopwords', quiet=True)
@@ -113,12 +113,12 @@ PY
 
 # --- spaCy English model (CPU-friendly) ---
 RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate rapids && \
+    conda activate base && \
     python -m spacy download en_core_web_sm
 
 # --- (Optional) Pre-warm Stanza English pipeline to avoid first-run download ---
 RUN source /opt/conda/etc/profile.d/conda.sh && \
-    conda activate rapids && \
+    conda activate base && \
     python - <<'PY'
 try:
     import stanza
@@ -140,4 +140,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
   CMD curl -fsS http://127.0.0.1:${PORT}/healthz || exit 1
 
 # Run the API with conda environment activated
-CMD ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate rapids && uvicorn app:app --host 0.0.0.0 --port 8080 --lifespan on"]
+CMD ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate base && uvicorn app:app --host 0.0.0.0 --port 8080 --lifespan on"]

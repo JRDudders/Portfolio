@@ -45,7 +45,7 @@ cd /mnt/c/Users/YourUser/Path/To/Sentiment\ Docker\ Test
 bash setup_wsl2_gpu.sh
 
 # 4. Run
-conda activate rapids
+conda activate base
 python run_local.py
 ```
 
@@ -467,7 +467,7 @@ If you use this in research:
 **Start server (WSL2):**
 ```bash
 cd /mnt/c/.../Sentiment\ Docker\ Test
-conda activate rapids
+conda activate base
 python run_local.py
 ```
 
