@@ -6,7 +6,7 @@ pydantic>=2.0
 requests>=2.32
 
 # NLP Core
-transformers>=4.44
+transformers>=4.40,<4.48  # Pin below 4.48 which requires torch 2.6 (not yet released)
 # torch>=2.3  # Commented out - installed separately based on CPU/GPU in Dockerfile
 sentencepiece>=0.1.99
 sentence-transformers>=3.0
