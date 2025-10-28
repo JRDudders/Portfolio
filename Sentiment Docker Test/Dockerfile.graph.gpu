@@ -1,0 +1,38 @@
+# Graph Analytics Service with GPU Support - RAPIDS cuGraph
+# Using RAPIDS 24.08 with CUDA 12.2, Python 3.11
+FROM rapidsai/rapidsai:24.08-cuda12.2-runtime-ubuntu22.04-py3.11
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    CUDA_VISIBLE_DEVICES=0
+
+WORKDIR /app
+
+# RAPIDS base already has cudf and cugraph installed
+# Install additional dependencies
+COPY requirements-graph.txt .
+
+# Install PyTorch with GPU support first (CUDA 12.2 to match RAPIDS base image)
+# Note: torch is commented out in requirements-graph.txt to avoid conflicts
+RUN pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cu122
+
+# Install remaining dependencies from requirements file
+RUN pip install --no-cache-dir -r requirements-graph.txt
+
+# Copy all required Python files
+COPY service_graph.py .
+COPY graph_processor.py .
+COPY graph_tasks.py .
+
+# Create temp directory
+RUN mkdir -p /app/temp
+
+# Expose port
+EXPOSE 8002
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+  CMD python -c "import requests; requests.get('http://localhost:8002/health')"
+
+# Run the Graph service
+CMD ["python", "service_graph.py"]

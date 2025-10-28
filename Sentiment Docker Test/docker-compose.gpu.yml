@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # ============================================================
+  # Frontend - Serves UI and acts as reverse proxy
+  # ============================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - nlp
+      - graph
+      - audio
+    networks:
+      - cicerowatch
+    volumes:
+      - ./static:/usr/share/nginx/html:ro
+
+  # ============================================================
+  # NLP Service - Sentiment, Entities, Topics, etc.
+  # Python 3.12 with GPU support
+  # ============================================================
+  nlp:
+    build:
+      context: .
+      dockerfile: Dockerfile.nlp.gpu
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_NAME=nlp
+      - SERVICE_PORT=8001
+      - CUDA_VISIBLE_DEVICES=0
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 8G
+
+  # ============================================================
+  # Graph Analytics Service - GPU-accelerated with RAPIDS
+  # Python 3.11 (RAPIDS requirement)
+  # ============================================================
+  graph:
+    build:
+      context: .
+      dockerfile: Dockerfile.graph.gpu
+    ports:
+      - "8002:8002"
+    environment:
+      - SERVICE_NAME=graph
+      - SERVICE_PORT=8002
+      - CUDA_VISIBLE_DEVICES=0
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 12G
+
+  # ============================================================
+  # Audio Service - Deepfake Detection (Python 3.10 + fairseq)
+  # ============================================================
+  audio:
+    build:
+      context: .
+      dockerfile: Dockerfile.audio
+    ports:
+      - "8003:8003"
+    environment:
+      - SERVICE_NAME=audio
+      - SERVICE_PORT=8003
+      - CUDA_VISIBLE_DEVICES=0
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+      - ./models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 8G
+
+networks:
+  cicerowatch:
+    driver: bridge
+
+volumes:
+  models:
+    driver: local
+  temp:
+    driver: local

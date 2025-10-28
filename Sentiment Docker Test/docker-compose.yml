@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # ============================================================
+  # Frontend - Serves UI and acts as reverse proxy
+  # ============================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - nlp
+      - graph
+      - audio
+    networks:
+      - cicerowatch
+    volumes:
+      - ./static:/usr/share/nginx/html:ro
+
+  # ============================================================
+  # NLP Service - Sentiment, Entities, Topics, etc.
+  # ============================================================
+  nlp:
+    build:
+      context: .
+      dockerfile: Dockerfile.nlp
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_NAME=nlp
+      - SERVICE_PORT=8001
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # ============================================================
+  # Graph Analytics Service - Similarity, Clustering, Networks
+  # ============================================================
+  graph:
+    build:
+      context: .
+      dockerfile: Dockerfile.graph
+    ports:
+      - "8002:8002"
+    environment:
+      - SERVICE_NAME=graph
+      - SERVICE_PORT=8002
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ============================================================
+  # Audio Service - Deepfake Detection (Python 3.10 + fairseq)
+  # ============================================================
+  audio:
+    build:
+      context: .
+      dockerfile: Dockerfile.audio
+    ports:
+      - "8003:8003"
+    environment:
+      - SERVICE_NAME=audio
+      - SERVICE_PORT=8003
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+      - ./models:/app/models
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+
+networks:
+  cicerowatch:
+    driver: bridge
+
+volumes:
+  models:
+    driver: local
+  temp:
+    driver: local

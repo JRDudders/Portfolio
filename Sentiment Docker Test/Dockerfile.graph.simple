@@ -1,0 +1,24 @@
+# Graph Analytics Service - Python 3.12 (Simplified for build issues)
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copy requirements first (better layer caching)
+COPY requirements-graph.txt .
+
+# Install Python dependencies (no git needed if all packages are on PyPI)
+RUN pip install --no-cache-dir -r requirements-graph.txt
+
+# Copy Graph service code and dependencies
+COPY service_graph.py .
+COPY graph_processor.py .
+COPY graph_tasks.py .
+
+# Create temp directory
+RUN mkdir -p /app/temp
+
+# Expose port
+EXPOSE 8002
+
+# Run the Graph service
+CMD ["python", "service_graph.py"]
