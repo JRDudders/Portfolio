@@ -1,7 +1,7 @@
 #!/bin/bash
 # setup_wsl2_gpu.sh - One-command WSL2 GPU setup for development
 #
-# Run this inside WSL2 after: wsl --install -d Ubuntu-22.04
+# Run this inside WSL2 after: wsl --install -d Ubuntu-24.04
 #
 # Usage:
 #   cd /mnt/c/Users/YourUsername/.../Sentiment\ Docker\ Test

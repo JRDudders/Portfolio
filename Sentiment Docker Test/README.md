@@ -34,8 +34,8 @@ Production-ready FastAPI service for sentiment analysis, NLP tasks, and GPU-acce
 **Best for:** Active development with GPU acceleration on Windows
 
 ```bash
-# 1. Install WSL2
-wsl --install -d Ubuntu-22.04
+# 1. Install WSL2 with Ubuntu 24.04 (matches RAPIDS CUDA 12.5+ images)
+wsl --install -d Ubuntu-24.04
 wsl
 
 # 2. Navigate to project
