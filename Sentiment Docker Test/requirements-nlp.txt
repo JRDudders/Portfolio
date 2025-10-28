@@ -7,7 +7,7 @@ requests>=2.32
 
 # NLP Core
 transformers>=4.44
-torch>=2.3
+# torch>=2.3  # Commented out - installed separately based on CPU/GPU in Dockerfile
 sentencepiece>=0.1.99
 sentence-transformers>=3.0
 

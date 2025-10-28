@@ -6,6 +6,9 @@ WORKDIR /app
 # Copy requirements first (better layer caching)
 COPY requirements-graph.txt .
 
+# Install PyTorch (CPU version) first to avoid conflicts
+RUN pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cpu
+
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements-graph.txt
 

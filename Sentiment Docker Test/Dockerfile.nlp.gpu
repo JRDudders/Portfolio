@@ -29,9 +29,12 @@ RUN python3.12 -m pip install --upgrade pip
 # Copy requirements for NLP service
 COPY requirements-nlp.txt .
 
-# Install Python dependencies with GPU support
-RUN pip install torch --index-url https://download.pytorch.org/whl/cu121 && \
-    pip install --no-cache-dir -r requirements-nlp.txt
+# Install PyTorch with GPU support first (CUDA 12.1)
+# Note: torch is commented out in requirements-nlp.txt to avoid conflicts
+RUN pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cu121
+
+# Install remaining Python dependencies
+RUN pip install --no-cache-dir -r requirements-nlp.txt
 
 # Copy all required Python files
 COPY service_nlp.py .
