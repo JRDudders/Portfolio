@@ -12,6 +12,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     CUDA_VISIBLE_DEVICES=0
 
+# Activate conda environment for all subsequent commands
+SHELL ["/bin/bash", "-c"]
+
 # System deps (curl for healthcheck; playwright will bring its own libs in install step)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -22,15 +25,19 @@ RUN apt-get update && \
 WORKDIR /app
 
 # --- Python deps ---
-# RAPIDS base already has cudf and cugraph installed
-# Install remaining dependencies
+# RAPIDS base already has cudf and cugraph installed in the rapids conda environment
+# Install remaining dependencies into the rapids environment
 COPY req.txt /app/req.txt
-RUN python -m pip install --upgrade pip && \
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate rapids && \
+    python -m pip install --upgrade pip && \
     pip install -r /app/req.txt
 
 # --- CUDA Availability Check ---
 # Verify CUDA is available (version agnostic)
-RUN python - <<'PY'
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate rapids && \
+    python - <<'PY'
 import sys
 
 print("=" * 60)
@@ -87,10 +94,14 @@ PY
 # --- Optional browsers (Playwright) ---
 # If you won't use URL rendering, you can comment this out to slim the image.
 # This installs Chromium and its system dependencies inside the image.
-RUN playwright install --with-deps chromium || true
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate rapids && \
+    playwright install --with-deps chromium || true
 
 # --- NLTK corpora (stopwords + punkt) ---
-RUN python - <<'PY'
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate rapids && \
+    python - <<'PY'
 import nltk
 nltk.download('stopwords', quiet=True)
 try: nltk.download('punkt', quiet=True)
@@ -100,10 +111,14 @@ except Exception: pass
 PY
 
 # --- spaCy English model (CPU-friendly) ---
-RUN python -m spacy download en_core_web_sm
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate rapids && \
+    python -m spacy download en_core_web_sm
 
 # --- (Optional) Pre-warm Stanza English pipeline to avoid first-run download ---
-RUN python - <<'PY'
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate rapids && \
+    python - <<'PY'
 try:
     import stanza
     stanza.download('en', processors='tokenize,pos,lemma,depparse', verbose=False)
@@ -123,5 +138,5 @@ ENV HOST=0.0.0.0 \
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
   CMD curl -fsS http://127.0.0.1:${PORT}/healthz || exit 1
 
-# Run the API
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--lifespan", "on"]
+# Run the API with conda environment activated
+CMD ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate rapids && uvicorn app:app --host 0.0.0.0 --port 8080 --lifespan on"]

@@ -7,18 +7,26 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CUDA_VISIBLE_DEVICES=0
 
+# Activate conda environment for all subsequent commands
+SHELL ["/bin/bash", "-c"]
+
 WORKDIR /app
 
-# RAPIDS base already has cudf and cugraph installed
-# Install additional dependencies
+# RAPIDS base already has cudf and cugraph installed in the rapids conda environment
+# Install additional dependencies into the rapids environment
 COPY requirements-graph.txt .
 
 # Install PyTorch with GPU support first (CUDA 12.2 to match RAPIDS base image)
 # Note: torch is commented out in requirements-graph.txt to avoid conflicts
-RUN pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cu122
+# Use conda run to ensure we're in the rapids environment
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate rapids && \
+    pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cu122
 
 # Install remaining dependencies from requirements file
-RUN pip install --no-cache-dir -r requirements-graph.txt
+RUN source /opt/conda/etc/profile.d/conda.sh && \
+    conda activate rapids && \
+    pip install --no-cache-dir -r requirements-graph.txt
 
 # Copy all required Python files
 COPY service_graph.py .
@@ -31,9 +39,9 @@ RUN mkdir -p /app/temp
 # Expose port
 EXPOSE 8002
 
-# Health check
+# Health check - activate conda environment first
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD python -c "import requests; requests.get('http://localhost:8002/health')"
+  CMD bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate rapids && python -c \"import requests; requests.get('http://localhost:8002/health')\""
 
-# Run the Graph service
-CMD ["python", "service_graph.py"]
+# Run the Graph service with conda environment activated
+CMD ["/bin/bash", "-c", "source /opt/conda/etc/profile.d/conda.sh && conda activate rapids && python service_graph.py"]
