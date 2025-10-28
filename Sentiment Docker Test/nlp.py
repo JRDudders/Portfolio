@@ -230,22 +230,15 @@ PRESETS: Dict[str, Tuple[str, Optional[str], Dict[str, Any]]] = {
     "ner-conll":         ("token-classification", "dslim/bert-base-NER", {"aggregation_strategy": "simple"}),
     "ner-bertbase":      ("token-classification", "dslim/bert-base-NER", {"aggregation_strategy": "simple"}),
 
-    # spaCy
-    "spacy-ner":         ("spacy-ner", None, {}),
-    "spacy-posdep":      ("spacy-posdep", None, {}),
-    "spacy-sents":       ("spacy-sents", None, {}),
-
-    # Stanza
-    "stanza-posdep":     ("stanza-posdep", "en", {}),
-    "stanza-sents":      ("stanza-sents", "en", {}),
-
-    # Sentence-Transformers
-    "sbert-embed":       ("sbert-embed", "all-MiniLM-L6-v2", {}),
-    "bertopic":          ("bertopic", "all-MiniLM-L6-v2", {}),
-
     # Topics (tf-idf based)
     "topics-nmf":        ("topics-nmf", None, {"n_topics": 10}),
     "topics-kmeans":     ("topics-kmeans", None, {"n_clusters": 10}),
+
+    # NOTE: Disabled presets (missing implementation files):
+    # - spacy-ner, spacy-posdep, spacy-sents (needs spacy_tasks.py)
+    # - stanza-posdep, stanza-sents (needs stanza_tasks.py)
+    # - sbert-embed, bertopic (needs sbert_tasks.py)
+    # These can be re-enabled by creating the corresponding *_tasks.py modules
 }
 
 

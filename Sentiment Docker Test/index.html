@@ -349,15 +349,15 @@
 
     // --- Presets (mirror nlp.py PRESETS keys) ---
     const PRESETS = [
-      // HF
+      // Sentiment / Classification (HF Transformers)
       "sentiment-twitter","sentiment-sst2",
+      // Zero-shot Classification
       "zeroshot-bart","zeroshot-mdeberta",
+      // Named Entity Recognition
       "ner-conll","ner-bertbase",
-      // spaCy / Stanza
-      "spacy-ner","spacy-posdep","spacy-sents",
-      "stanza-posdep","stanza-sents",
-      // Embeddings / Topics
-      "sbert-embed","bertopic","topics-nmf","topics-kmeans"
+      // Topic Modeling (tf-idf based)
+      "topics-nmf","topics-kmeans"
+      // NOTE: spacy, stanza, and sbert presets disabled (missing implementation files)
     ];
 
     function populatePresets(sel){
