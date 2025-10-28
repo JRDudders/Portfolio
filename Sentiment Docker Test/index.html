@@ -410,7 +410,7 @@
       fd.append('file', f, f.name);
 
       try{
-        const res = await fetch('/predict/file?'+qs.toString(), { method:'POST', body: fd });
+        const res = await fetch('/api/nlp/analyze/file?'+qs.toString(), { method:'POST', body: fd });
         if(!res.ok){
           const err = await res.text().catch(()=>res.statusText);
           throw new Error(err);
@@ -460,7 +460,7 @@
       };
 
       try{
-        const res = await fetch('/predict/url', {
+        const res = await fetch('/api/nlp/analyze/url', {
           method:'POST',
           headers:{'content-type':'application/json'},
           body: JSON.stringify(body)
@@ -517,7 +517,7 @@
       if(nodesFile) fd.append('nodes_file', nodesFile, nodesFile.name);
 
       try{
-        let endpoint = '/graph/' + metric;
+        let endpoint = '/api/graph/' + metric;
         let qs = '';
 
         // Add metric-specific parameters
@@ -872,7 +872,7 @@
         let qs = '';
         if(egoId) qs = `?ego_id=${encodeURIComponent(egoId)}`;
 
-        const res = await fetch('/graph/ego-network' + qs, {
+        const res = await fetch('/api/graph/ego-network' + qs, {
           method:'POST',
           body: fd
         });
@@ -1189,7 +1189,7 @@
     });
 
     // Check model status on page load
-    fetch('/audio/model-status')
+    fetch('/api/audio/model-status')
       .then(r => r.json())
       .then(data => {
         if(data.model_ready){
@@ -1212,7 +1212,7 @@
       modelStatus.style.color = 'var(--muted)';
 
       try {
-        const resp = await fetch('/audio/download-model', { method: 'POST' });
+        const resp = await fetch('/api/audio/download-model', { method: 'POST' });
         const data = await resp.json();
         if(resp.ok){
           modelStatus.textContent = '✓ Model downloaded successfully';
@@ -1245,7 +1245,7 @@
       fd.append('file', file);
 
       try {
-        const resp = await fetch('/audio/analyze', { method: 'POST', body: fd });
+        const resp = await fetch('/api/audio/analyze', { method: 'POST', body: fd });
         const data = await resp.json();
 
         if(!resp.ok){
