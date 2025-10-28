@@ -543,7 +543,8 @@
 
         // For 'load', we get JSON response to visualize
         if(metric === 'load'){
-          const data = await res.json();
+          const response = await res.json();
+          const data = response.graph || response;  // Extract nested data
           currentGraphData = data;
           displayGraph(data);
           setStatus(statusGraph, `Loaded ${data.n_nodes} nodes, ${data.n_edges} edges`, 'ok');
@@ -882,7 +883,8 @@
           throw new Error(err);
         }
 
-        const data = await res.json();
+        const response = await res.json();
+        const data = response.ego_network || response;  // Extract nested data
         displayEgoNetwork(data);
         setStatus(statusEgo, `Loaded ${data.n_nodes} nodes, ${data.n_edges} edges`, 'ok');
       }catch(e){

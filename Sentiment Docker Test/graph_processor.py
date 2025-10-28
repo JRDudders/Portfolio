@@ -266,37 +266,83 @@ def compute_betweenness_centrality(
 
 def get_graph_info(graph: GraphData) -> Dict[str, Any]:
     """
-    Get basic graph information
+    Get graph information including full nodes/edges for visualization
 
     Args:
         graph: GraphData object
 
     Returns:
-        Dictionary with graph statistics
+        Dictionary with graph statistics and visualization data
     """
-    # Sample nodes (first 10)
-    sample_nodes = []
-    for i, node_id in enumerate(graph.idx_to_id[:10]):
-        node_info = {"id": node_id, "index": i}
+    # Build circles mapping: {circle_name: [node_ids]}
+    circles_dict = None
+    node_circles_map = {}  # {node_id: [circle_names]}
 
-        # Add attributes if available
+    if graph.circles is not None:
+        circles_dict = {}
+        for _, row in graph.circles.iterrows():
+            circle = str(row['circle'])
+            node = str(row['node'])
+
+            if circle not in circles_dict:
+                circles_dict[circle] = []
+            circles_dict[circle].append(node)
+
+            if node not in node_circles_map:
+                node_circles_map[node] = []
+            node_circles_map[node].append(circle)
+
+    # Build nodes array for visualization
+    nodes_array = []
+    for node_id in graph.idx_to_id:
+        node_info = {"id": node_id}
+
+        # Add name attribute if available
         if graph.nodes is not None:
             node_row = graph.nodes[graph.nodes['id'] == node_id]
             if not node_row.empty:
+                # Look for 'name' column
+                if 'name' in graph.nodes.columns:
+                    node_info['name'] = str(node_row.iloc[0]['name'])
+                # Add other attributes
                 for col in graph.nodes.columns:
-                    if col not in ['id', 'idx']:
+                    if col not in ['id', 'idx', 'name']:
                         node_info[col] = node_row.iloc[0][col]
 
-        sample_nodes.append(node_info)
+        # Add circles membership
+        if node_id in node_circles_map:
+            node_info['circles'] = node_circles_map[node_id]
 
-    return {
+        nodes_array.append(node_info)
+
+    # Build edges array for visualization
+    edges_array = []
+    for _, row in graph.edges.iterrows():
+        src_idx = int(row['src_idx'])
+        dst_idx = int(row['dst_idx'])
+        edges_array.append({
+            "source": graph.idx_to_id[src_idx],
+            "target": graph.idx_to_id[dst_idx]
+        })
+
+    result = {
         "n_nodes": graph.n,
         "n_edges": int(graph.edges.shape[0]),
-        "sample_nodes": sample_nodes,
-        "has_graphblas": graph.gb_matrix is not None,
+        "nodes": nodes_array,
+        "edges": edges_array,
         "has_node_attributes": graph.nodes is not None,
-        "edge_columns": list(graph.edges.columns),
         "has_circles": graph.circles is not None,
         "has_features": graph.features is not None,
         "ego_id": graph.ego_id
     }
+
+    # Add circles dictionary if available
+    if circles_dict is not None:
+        result["circles"] = circles_dict
+
+    # Add feature count if available
+    if graph.features is not None:
+        feature_cols = [c for c in graph.features.columns if c not in ['id', 'idx']]
+        result["feature_count"] = len(feature_cols)
+
+    return result
