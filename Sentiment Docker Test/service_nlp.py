@@ -9,12 +9,16 @@ Handles all NLP-related tasks:
 - URL scraping and analysis
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Dict, Any
 import uvicorn
 import os
+import io
+import json
+import pandas as pd
 
 # Import NLP processing modules
 from nlp_processor import (
@@ -23,6 +27,7 @@ from nlp_processor import (
     analyze_topics,
     scrape_and_analyze_url
 )
+from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
 
 app = FastAPI(
     title="CiceroWatch NLP Service",
@@ -38,6 +43,61 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ============================================================
+# Helper Functions
+# ============================================================
+
+def _as_json_bytes(obj: Any) -> bytes:
+    """Convert object to JSON bytes"""
+    return json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
+
+
+def _parse_labels_csv(s: Optional[str]) -> Optional[List[str]]:
+    """Parse comma-separated labels"""
+    if not s or not s.strip():
+        return None
+    labels = [x.strip() for x in s.split(",") if x.strip()]
+    return labels if labels else None
+
+
+def _texts_from_json_bytes(b: bytes) -> List[str]:
+    """Extract texts from JSON bytes"""
+    data = json.loads(b.decode("utf-8"))
+    if isinstance(data, list):
+        if all(isinstance(x, str) for x in data):
+            return data
+        if all(isinstance(x, dict) for x in data):
+            out = []
+            for obj in data:
+                if "text" in obj and isinstance(obj["text"], str):
+                    out.append(obj["text"])
+            if out:
+                return out
+    raise ValueError("JSON must be a list of strings or list of {'text': ...} objects")
+
+
+def _texts_from_csv_bytes(b: bytes) -> List[str]:
+    """Extract texts from CSV bytes"""
+    df = pd.read_csv(io.BytesIO(b))
+    # Prefer 'text' column; otherwise take the first object dtype column
+    if "text" in df.columns:
+        col = "text"
+    else:
+        obj_cols = [c for c in df.columns if df[c].dtype == object]
+        if not obj_cols:
+            raise ValueError("CSV must contain a 'text' column or at least one string column")
+        col = obj_cols[0]
+    vals = df[col].astype(str).tolist()
+    return vals
+
+
+def _make_download(name: str, payload: bytes, mime: str = "application/json") -> StreamingResponse:
+    """Create downloadable file response"""
+    resp = StreamingResponse(io.BytesIO(payload), media_type=mime)
+    resp.headers["Content-Disposition"] = f'attachment; filename="{name}"'
+    return resp
 
 
 # ============================================================
@@ -125,29 +185,71 @@ async def analyze_url(request: URLAnalysisRequest):
 
 
 @app.post("/analyze/file")
-async def analyze_file(file: UploadFile = File(...)):
+async def analyze_file(
+    file: UploadFile = File(...),
+    preset: Optional[str] = Query(None, description="Preset name from nlp.PRESETS"),
+    labels: Optional[str] = Query(None, description="Comma-separated labels for zero-shot"),
+    include_stopwords: Optional[bool] = Query(False),
+):
     """
-    Analyze text file
+    Analyze text file (JSON or CSV) and return annotated results as downloadable file
+
+    - Parses JSON (list of strings or objects with 'text' field) or CSV (with 'text' column)
+    - Runs NLP analysis using specified preset
+    - Returns annotated file in same format as input
     """
     try:
-        content = await file.read()
-        text = content.decode('utf-8')
+        b = await file.read()
+        name = (file.filename or "").lower()
 
-        results = {
-            "sentiment": analyze_sentiment(text),
-            "entities": extract_entities(text),
-            "topics": analyze_topics(text)
-        }
+        # Parse file based on type
+        if name.endswith(".json"):
+            texts = _texts_from_json_bytes(b)
+        elif name.endswith(".csv"):
+            texts = _texts_from_csv_bytes(b)
+        else:
+            # Try JSON first, then CSV
+            try:
+                texts = _texts_from_json_bytes(b)
+            except Exception:
+                texts = _texts_from_csv_bytes(b)
 
-        return {
-            "success": True,
-            "filename": file.filename,
-            "text_length": len(text),
-            "results": results
-        }
+        # Determine task from preset
+        task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
+
+        # Keep original texts for output, preprocess separately
+        original_texts = texts
+        processed_texts = [preprocess_for_task(t, task or "") for t in texts]
+
+        # Parse labels for zero-shot tasks
+        lbls = None
+        if preset and "zeroshot" in preset:
+            lbls = _parse_labels_csv(labels)
+            if not lbls:
+                lbls = DEFAULT_ZS_LABELS
+
+        # Run NLP task
+        predictions = run_task(processed_texts, preset=preset, labels=lbls)
+
+        # Merge original texts with predictions
+        if (task == "token-classification") or (preset and "ner" in preset):
+            # NER: keep entities format
+            output = [{"text": t, "entities": p} for t, p in zip(original_texts, predictions)]
+        else:
+            # Classification: merge text with scores
+            output = []
+            for t, p in zip(original_texts, predictions):
+                result_dict = {"text": t}
+                if isinstance(p, dict):
+                    result_dict.update(p)  # Add labels, scores, etc.
+                output.append(result_dict)
+
+        # Return as downloadable JSON
+        payload = _as_json_bytes({"preset": preset, "results": output})
+        return _make_download("predictions.json", payload, "application/json")
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"File processing failed: {str(e)}")
 
 
 # ============================================================
