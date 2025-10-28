@@ -37,6 +37,15 @@ services:
       - cicerowatch
     volumes:
       - ./temp:/app/temp
+      # Mount source code for live editing (no rebuild needed)
+      - ./service_nlp.py:/app/service_nlp.py
+      - ./nlp_processor.py:/app/nlp_processor.py
+      - ./nlp.py:/app/nlp.py
+      - ./fetch.py:/app/fetch.py
+      - ./render.py:/app/render.py
+      - ./topics.py:/app/topics.py
+      - ./adapters.py:/app/adapters.py
+      - ./apputils.py:/app/apputils.py
     deploy:
       resources:
         reservations:
@@ -65,6 +74,10 @@ services:
       - cicerowatch
     volumes:
       - ./temp:/app/temp
+      # Mount source code for live editing (no rebuild needed)
+      - ./service_graph.py:/app/service_graph.py
+      - ./graph_processor.py:/app/graph_processor.py
+      - ./graph_tasks.py:/app/graph_tasks.py
     deploy:
       resources:
         reservations:
@@ -93,6 +106,9 @@ services:
     volumes:
       - ./temp:/app/temp
       - ./models:/app/models
+      # Mount source code for live editing (no rebuild needed)
+      - ./audio_service.py:/app/audio_service.py
+      - ./audio_antispoofing.py:/app/audio_antispoofing.py
     deploy:
       resources:
         reservations:
