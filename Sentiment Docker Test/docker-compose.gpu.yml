@@ -16,6 +16,9 @@ services:
       - audio
     networks:
       - cicerowatch
+    volumes:
+      # Mount index.html for live editing (no rebuild needed)
+      - ./index.html:/usr/share/nginx/html/index.html:ro
 
   # ============================================================
   # NLP Service - Sentiment, Entities, Topics, etc.
