@@ -37,12 +37,9 @@ def topics_nmf(
     n_topics: int = 10,
     max_features: int = 20000,
     ngram_range: Tuple[int, int] = (1, 2),
-    min_df: int = 1,  # Allow terms that appear in just 1 document (was 2)
+    min_df: int = 2,
     topk: int = 12,
 ) -> Dict[str, object]:
-    # Reduce n_topics if we have fewer documents
-    n_topics = min(n_topics, len(texts))
-
     vec = TfidfVectorizer(
         max_features=max_features,
         ngram_range=ngram_range,
@@ -50,10 +47,6 @@ def topics_nmf(
         stop_words='english'  # Filter common stopwords
     )
     X = vec.fit_transform(texts)
-
-    # Check if we have any terms after filtering
-    if X.shape[1] == 0:
-        raise ValueError(f"No terms remain after filtering. Input has {len(texts)} documents. Try uploading more text or different content.")
     nmf = NMF(n_components=n_topics, init="nndsvd", random_state=42, max_iter=400)
     W = nmf.fit_transform(X)  # docs x topics
     H = nmf.components_      # topics x terms
@@ -84,12 +77,9 @@ def topics_kmeans(
     n_clusters: int = 10,
     max_features: int = 20000,
     ngram_range: Tuple[int, int] = (1, 2),
-    min_df: int = 1,  # Allow terms that appear in just 1 document (was 2)
+    min_df: int = 2,
     topk: int = 12,
 ) -> Dict[str, object]:
-    # Reduce n_clusters if we have fewer documents
-    n_clusters = min(n_clusters, len(texts))
-
     vec = TfidfVectorizer(
         max_features=max_features,
         ngram_range=ngram_range,
@@ -97,10 +87,6 @@ def topics_kmeans(
         stop_words='english'  # Filter common stopwords
     )
     X = vec.fit_transform(texts)
-
-    # Check if we have any terms after filtering
-    if X.shape[1] == 0:
-        raise ValueError(f"No terms remain after filtering. Input has {len(texts)} documents. Try uploading more text or different content.")
     km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
     labels = km.fit_predict(X)
     vocab = vec.get_feature_names_out().tolist()
