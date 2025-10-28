@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # LEGACY: GPU-accelerated monolithic image (use docker-compose.gpu.yml instead)
-# Using RAPIDS 24.10 with CUDA 12.2, Python 3.11
+# Using RAPIDS 24.08a with CUDA 12.2, Python 3.11
 # Note: rapidsai/rapidsai was replaced by rapidsai/base in RAPIDS 23.08+
-FROM rapidsai/base:24.10-cuda12.2-py3.11
+FROM rapidsai/base:24.08a-cuda12.2-py3.11
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
