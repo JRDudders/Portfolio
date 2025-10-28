@@ -211,7 +211,8 @@ def _hf_token_classification(
     """
     task = "token-classification"
     pipe = _hf_pipeline_cache(task, model_id, key=f"agg={aggregation_strategy}")
-    return pipe(texts, aggregation_strategy=aggregation_strategy, truncation=True)
+    # Note: truncation is handled automatically by the tokenizer in the pipeline
+    return pipe(texts, aggregation_strategy=aggregation_strategy)
 
 
 # ----------------------------- PRESETS -------------------------------------- #
