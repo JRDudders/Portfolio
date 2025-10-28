@@ -361,6 +361,13 @@
     ];
 
     function populatePresets(sel){
+      // Add default option
+      const defaultOpt = document.createElement('option');
+      defaultOpt.value = 'sentiment-twitter';  // Default to first preset
+      defaultOpt.textContent = '(default: sentiment-twitter)';
+      sel.appendChild(defaultOpt);
+
+      // Add all presets
       PRESETS.forEach(p=>{
         const o=document.createElement('option'); o.value=p; o.textContent=p; sel.appendChild(o);
       });

@@ -22,7 +22,7 @@ def analyze_sentiment(text: str) -> Dict[str, Any]:
     Returns:
         Dictionary with sentiment results
     """
-    results = run_task([text], preset="sentiment")
+    results = run_task([text], preset="sentiment-twitter")
 
     if results and len(results) > 0:
         result = results[0]
@@ -64,7 +64,7 @@ def extract_entities(text: str) -> Dict[str, Any]:
     Returns:
         Dictionary with extracted entities
     """
-    results = run_task([text], preset="ner")
+    results = run_task([text], preset="ner-conll")
 
     if results and len(results) > 0:
         entities = results[0]  # List of entity dicts
@@ -112,7 +112,7 @@ def analyze_topics(text: str) -> Dict[str, Any]:
         Dictionary with topic results
     """
     # Use zero-shot classification with default topic labels
-    results = run_task([text], preset="zero-shot", labels=DEFAULT_ZS_LABELS)
+    results = run_task([text], preset="zeroshot-bart", labels=DEFAULT_ZS_LABELS)
 
     if results and len(results) > 0:
         result = results[0]
