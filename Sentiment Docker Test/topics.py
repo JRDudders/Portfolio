@@ -40,14 +40,25 @@ def topics_nmf(
     min_df: int = 2,
     topk: int = 12,
 ) -> Dict[str, object]:
+    # Validate and adjust parameters based on dataset size
+    n_docs = len(texts)
+    if n_docs < 2:
+        raise ValueError(f"Topic modeling requires at least 2 documents, got {n_docs}. Cannot extract meaningful topics from a single document.")
+
+    # Adjust min_df to not exceed number of documents
+    actual_min_df = min(min_df, n_docs)
+
+    # Adjust n_topics to not exceed number of documents
+    actual_n_topics = min(n_topics, n_docs)
+
     vec = TfidfVectorizer(
         max_features=max_features,
         ngram_range=ngram_range,
-        min_df=min_df,
+        min_df=actual_min_df,
         stop_words='english'  # Filter common stopwords
     )
     X = vec.fit_transform(texts)
-    nmf = NMF(n_components=n_topics, init="nndsvd", random_state=42, max_iter=400)
+    nmf = NMF(n_components=actual_n_topics, init="nndsvd", random_state=42, max_iter=400)
     W = nmf.fit_transform(X)  # docs x topics
     H = nmf.components_      # topics x terms
     vocab = vec.get_feature_names_out().tolist()
@@ -80,14 +91,25 @@ def topics_kmeans(
     min_df: int = 2,
     topk: int = 12,
 ) -> Dict[str, object]:
+    # Validate and adjust parameters based on dataset size
+    n_docs = len(texts)
+    if n_docs < 2:
+        raise ValueError(f"Topic modeling requires at least 2 documents, got {n_docs}. Cannot extract meaningful topics from a single document.")
+
+    # Adjust min_df to not exceed number of documents
+    actual_min_df = min(min_df, n_docs)
+
+    # Adjust n_clusters to not exceed number of documents
+    actual_n_clusters = min(n_clusters, n_docs)
+
     vec = TfidfVectorizer(
         max_features=max_features,
         ngram_range=ngram_range,
-        min_df=min_df,
+        min_df=actual_min_df,
         stop_words='english'  # Filter common stopwords
     )
     X = vec.fit_transform(texts)
-    km = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
+    km = KMeans(n_clusters=actual_n_clusters, random_state=42, n_init="auto")
     labels = km.fit_predict(X)
     vocab = vec.get_feature_names_out().tolist()
 
