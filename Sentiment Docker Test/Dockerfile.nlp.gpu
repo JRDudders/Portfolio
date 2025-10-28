@@ -32,7 +32,7 @@ COPY requirements-nlp.txt .
 
 # Install PyTorch with GPU support first (CUDA 12.1)
 # Note: torch is commented out in requirements-nlp.txt to avoid conflicts
-RUN pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cu121
+RUN pip install --no-cache-dir "torch>=2.6" --index-url https://download.pytorch.org/whl/cu121
 
 # Install remaining Python dependencies
 RUN pip install --no-cache-dir -r requirements-nlp.txt

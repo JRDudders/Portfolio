@@ -21,7 +21,7 @@ COPY requirements-graph.txt .
 # Note: torch is commented out in requirements-graph.txt to avoid conflicts
 RUN source /opt/conda/etc/profile.d/conda.sh && \
     conda activate base && \
-    pip install --no-cache-dir torch>=2.3 --index-url https://download.pytorch.org/whl/cu121
+    pip install --no-cache-dir "torch>=2.6" --index-url https://download.pytorch.org/whl/cu121
 
 # Install remaining dependencies from requirements file
 RUN source /opt/conda/etc/profile.d/conda.sh && \
