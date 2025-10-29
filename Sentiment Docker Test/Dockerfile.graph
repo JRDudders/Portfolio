@@ -7,7 +7,8 @@ WORKDIR /app
 COPY requirements-graph.txt .
 
 # Install PyTorch (CPU version) first to avoid conflicts
-RUN pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+# Use >=2.3 for compatibility, let pip find the latest available version for the platform
+RUN pip install --no-cache-dir "torch>=2.3" --index-url https://download.pytorch.org/whl/cpu
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements-graph.txt
