@@ -27,7 +27,5 @@ lxml>=5.2
 trafilatura>=1.6
 readability-lxml>=0.8.1
 
-# Topic Modeling (optional)
-umap-learn>=0.5
-hdbscan>=0.8
-bertopic>=0.16
+# Note: Removed unused dependencies (bertopic, hdbscan, umap-learn)
+# These were for presets that don't have implementations (sbert-embed, bertopic)
