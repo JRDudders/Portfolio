@@ -148,6 +148,30 @@
         </div>
         <div id="status-url" class="status"></div>
       </div>
+
+      <!-- FILE ANALYSIS FROM URL -->
+      <div class="card">
+        <h2>Analyze Data File from URL</h2>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Download and analyze JSON, CSV, or HTML files from URLs (e.g., datasets, books)</p>
+
+        <label for="file-url">File URL</label>
+        <input id="file-url" type="text" placeholder="https://example.com/dataset.csv"/>
+
+        <label for="preset-file-url">Preset</label>
+        <select id="preset-file-url"></select>
+
+        <label for="labels-file-url">Labels (comma-separated, for zero-shot)</label>
+        <input id="labels-file-url" type="text" placeholder="e.g., politics, economy, health"/>
+
+        <div class="inline" style="margin-top:6px">
+          <label class="checkbox"><input type="checkbox" id="stopwords-file-url"/> Include stopwords (label guessing)</label>
+        </div>
+
+        <div class="controls">
+          <button class="btn primary" id="run-file-url">Analyze File</button>
+        </div>
+        <div id="status-file-url" class="status"></div>
+      </div>
     </div>
     </div><!-- End NLP Tab -->
 
@@ -235,6 +259,23 @@
       </div>
     </div>
 
+    <!-- GRAPH FROM URL -->
+    <div class="card" style="margin-top:16px">
+      <h2>Load Graph from URL</h2>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Load graph directly from hosted data URLs</p>
+
+      <label for="graph-url-edges">Edges URL (required)</label>
+      <input id="graph-url-edges" type="text" placeholder="https://example.com/edges.csv"/>
+
+      <label for="graph-url-nodes">Nodes URL (optional)</label>
+      <input id="graph-url-nodes" type="text" placeholder="https://example.com/nodes.json"/>
+
+      <div class="controls">
+        <button class="btn primary" id="run-graph-url">Load from URL</button>
+      </div>
+      <div id="status-graph-url" class="status"></div>
+    </div>
+
     <!-- EGO NETWORK (Multi-File Upload) -->
     <div class="card" style="margin-top:16px">
       <h2>Ego Network (Multiple Files)</h2>
@@ -276,6 +317,35 @@
         </div>
       </div>
     </div>
+
+    <!-- EGO NETWORK FROM URLs -->
+    <div class="card" style="margin-top:16px">
+      <h2>Ego Network from URLs</h2>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Load ego network from hosted data URLs (e.g., SNAP datasets)</p>
+
+      <label for="ego-url-edges">Edges URL (required)</label>
+      <input id="ego-url-edges" type="text" placeholder="https://snap.stanford.edu/data/facebook/0.edges"/>
+
+      <label for="ego-url-circles">Circles URL (optional)</label>
+      <input id="ego-url-circles" type="text" placeholder="https://snap.stanford.edu/data/facebook/0.circles"/>
+
+      <label for="ego-url-feat">Features URL (optional)</label>
+      <input id="ego-url-feat" type="text" placeholder="https://snap.stanford.edu/data/facebook/0.feat"/>
+
+      <label for="ego-url-egofeat">Ego Features URL (optional)</label>
+      <input id="ego-url-egofeat" type="text" placeholder="https://snap.stanford.edu/data/facebook/0.egofeat"/>
+
+      <label for="ego-url-featnames">Feature Names URL (optional)</label>
+      <input id="ego-url-featnames" type="text" placeholder="https://snap.stanford.edu/data/facebook/0.featnames"/>
+
+      <label for="ego-url-id">Ego Node ID (optional)</label>
+      <input id="ego-url-id" type="text" placeholder="Auto-detected if not specified"/>
+
+      <div class="controls">
+        <button class="btn primary" id="run-ego-url">Load from URLs</button>
+      </div>
+      <div id="status-ego-url" class="status"></div>
+    </div>
     </div><!-- End Graph Tab -->
 
     <!-- Audio Deepfake Detection Tab Content -->
@@ -305,6 +375,22 @@
             <div id="audio-result-content"></div>
           </div>
         </div>
+      </div>
+
+      <!-- Audio from URL -->
+      <div class="card" style="margin-top:16px">
+        <h2>Analyze Audio from URL</h2>
+        <p style="font-size:13px;color:var(--muted);margin:4px 0 16px">
+          Provide a URL to an audio file to analyze for deepfakes. Supports WAV, FLAC, MP3 formats.
+        </p>
+
+        <label for="audio-url">Audio File URL</label>
+        <input id="audio-url" type="text" placeholder="https://example.com/audio.wav"/>
+
+        <div class="controls">
+          <button class="btn primary" id="run-audio-url">Analyze from URL</button>
+        </div>
+        <div id="status-audio-url" class="status"></div>
       </div>
 
       <!-- Model Status Card -->
@@ -389,7 +475,8 @@
     // --- Wire up File tab ---
     const selFile = document.getElementById('preset-file');
     const selUrl  = document.getElementById('preset-url');
-    populatePresets(selFile); populatePresets(selUrl);
+    const selFileUrl = document.getElementById('preset-file-url');
+    populatePresets(selFile); populatePresets(selUrl); populatePresets(selFileUrl);
 
     const fileBtn = document.getElementById('btn-file');
     const fileIn  = document.getElementById('file-input');
@@ -899,6 +986,90 @@
       }
     };
 
+    // --- Wire up Graph from URL ---
+    const statusGraphUrl = document.getElementById('status-graph-url');
+    document.getElementById('run-graph-url').onclick = async ()=>{
+      const edgesUrl = document.getElementById('graph-url-edges').value.trim();
+      if(!edgesUrl){ setStatus(statusGraphUrl, 'Enter edges URL.', 'warn'); return; }
+
+      const nodesUrl = document.getElementById('graph-url-nodes').value.trim() || null;
+      setStatus(statusGraphUrl, 'Fetching from URL…');
+
+      try{
+        const payload = {
+          edges_url: edgesUrl
+        };
+        if(nodesUrl) payload.nodes_url = nodesUrl;
+
+        const res = await fetch('/api/graph/load-from-url', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+
+        const response = await res.json();
+        const data = response.graph || response;
+        displayGraph(data);
+        setStatus(statusGraphUrl, `Loaded ${data.n_nodes} nodes, ${data.n_edges} edges from URL`, 'ok');
+      }catch(e){
+        setStatus(statusGraphUrl, 'Error: '+(e?.message||e), 'err');
+      }
+    };
+
+    // --- Wire up Ego Network from URLs ---
+    const statusEgoUrl = document.getElementById('status-ego-url');
+    document.getElementById('run-ego-url').onclick = async ()=>{
+      const edgesUrl = document.getElementById('ego-url-edges').value.trim();
+      if(!edgesUrl){ setStatus(statusEgoUrl, 'Enter edges URL.', 'warn'); return; }
+
+      setStatus(statusEgoUrl, 'Fetching from URLs…');
+
+      try{
+        const payload = {
+          edges_url: edgesUrl
+        };
+
+        // Add optional URLs
+        const circlesUrl = document.getElementById('ego-url-circles').value.trim();
+        if(circlesUrl) payload.circles_url = circlesUrl;
+
+        const featUrl = document.getElementById('ego-url-feat').value.trim();
+        if(featUrl) payload.feat_url = featUrl;
+
+        const egofeatUrl = document.getElementById('ego-url-egofeat').value.trim();
+        if(egofeatUrl) payload.egofeat_url = egofeatUrl;
+
+        const featnamesUrl = document.getElementById('ego-url-featnames').value.trim();
+        if(featnamesUrl) payload.featnames_url = featnamesUrl;
+
+        const egoId = document.getElementById('ego-url-id').value.trim();
+        if(egoId) payload.ego_id = egoId;
+
+        const res = await fetch('/api/graph/ego-network-from-url', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+
+        const response = await res.json();
+        const data = response.ego_network || response;
+        displayEgoNetwork(data);
+        setStatus(statusEgoUrl, `Loaded ${data.n_nodes} nodes, ${data.n_edges} edges from URLs`, 'ok');
+      }catch(e){
+        setStatus(statusEgoUrl, 'Error: '+(e?.message||e), 'err');
+      }
+    };
+
     // Interactive ego network visualization with circle highlighting
     let currentEgoNetwork = null;
     let currentEgoPhysicsEnabled = false;
@@ -1287,6 +1458,109 @@
         setStatus(statusAudio, 'Error: ' + e.message, 'err');
       } finally {
         runAudio.disabled = false;
+      }
+    });
+
+    // --- Audio from URL ---
+    const statusAudioUrl = document.getElementById('status-audio-url');
+    document.getElementById('run-audio-url').addEventListener('click', async () => {
+      const audioUrl = document.getElementById('audio-url').value.trim();
+      if(!audioUrl){
+        setStatus(statusAudioUrl, 'Please enter audio file URL', 'warn');
+        return;
+      }
+
+      setStatus(statusAudioUrl, 'Fetching and analyzing audio from URL...', '');
+      audioResults.style.display = 'none';
+
+      try {
+        const resp = await fetch('/api/audio/analyze-from-url', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ url: audioUrl })
+        });
+        const data = await resp.json();
+
+        if(!resp.ok){
+          setStatus(statusAudioUrl, data.detail || 'Analysis failed', 'err');
+          return;
+        }
+
+        setStatus(statusAudioUrl, 'Analysis complete', 'ok');
+        audioResults.style.display = 'block';
+
+        const prediction = data.prediction === 'bonafide' ? 'Genuine (Real)' : 'Spoofed (Fake)';
+        const confidence = (data.confidence * 100).toFixed(2);
+        const predClass = data.prediction === 'bonafide' ? 'ok' : 'err';
+
+        audioResultContent.innerHTML = `
+          <div style="margin-bottom:12px">
+            <strong>URL:</strong> ${audioUrl}
+          </div>
+          <div style="margin-bottom:12px">
+            <strong>Prediction:</strong> <span style="color:var(--${predClass});font-weight:600">${prediction}</span>
+          </div>
+          <div style="margin-bottom:12px">
+            <strong>Confidence:</strong> ${confidence}%
+          </div>
+          <div style="margin-bottom:12px">
+            <strong>Spoof Score:</strong> ${data.spoof_score.toFixed(4)} <span style="font-size:11px;color:var(--muted)">(higher = more likely fake)</span>
+          </div>
+        `;
+      } catch(e) {
+        setStatus(statusAudioUrl, 'Error: ' + e.message, 'err');
+      }
+    });
+
+    // --- NLP File Analysis from URL ---
+    const statusFileUrl = document.getElementById('status-file-url');
+    document.getElementById('run-file-url').addEventListener('click', async () => {
+      const fileUrl = document.getElementById('file-url').value.trim();
+      if(!fileUrl){
+        setStatus(statusFileUrl, 'Please enter file URL', 'warn');
+        return;
+      }
+
+      const preset = selFileUrl.value;
+      if(!preset){
+        setStatus(statusFileUrl, 'Please select a preset', 'warn');
+        return;
+      }
+
+      const labels = parseLabels(document.getElementById('labels-file-url').value);
+      const includeStop = document.getElementById('stopwords-file-url').checked;
+
+      setStatus(statusFileUrl, 'Fetching and analyzing file from URL…');
+
+      try {
+        const payload = {
+          url: fileUrl,
+          preset: preset,
+          include_stopwords: includeStop
+        };
+        if(labels && labels.length > 0){
+          payload.labels = labels.join(',');
+        }
+
+        const res = await fetch('/api/nlp/analyze/file-from-url', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+
+        // Download the result file
+        const blob = await res.blob();
+        const disp = res.headers.get('content-disposition');
+        const name = filenameFromDisposition(disp) || ('url-file-output-'+Date.now()+'.json');
+        download(blob, name);
+        setStatus(statusFileUrl, 'Done — downloaded '+name, 'ok');
+      } catch(e) {
+        setStatus(statusFileUrl, 'Error: '+(e?.message||e), 'err');
       }
     });
   </script>
