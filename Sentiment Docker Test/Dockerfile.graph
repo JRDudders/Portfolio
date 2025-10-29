@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir "torch>=2.3" --index-url https://download.pytorch
 RUN pip install --no-cache-dir -r requirements-graph.txt
 
 # Copy all required Python files
+COPY url_fetch.py .
 COPY service_graph.py .
 COPY graph_processor.py .
 COPY graph_tasks.py .
