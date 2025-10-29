@@ -9,10 +9,13 @@ Handles all graph-related tasks:
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Dict, Any
 import uvicorn
 import os
+
+# Import URL fetch utility
+from url_fetch import fetch_url, guess_file_extension
 
 # Import graph processing modules
 from graph_processor import (
@@ -162,6 +165,104 @@ async def load_ego_network_files(
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ego network loading failed: {str(e)}")
+
+
+# ============================================================
+# URL Fetch Endpoints
+# ============================================================
+
+class GraphURLRequest(BaseModel):
+    """Request model for loading graph from URLs"""
+    edges_url: HttpUrl
+    nodes_url: Optional[HttpUrl] = None
+
+
+class EgoNetworkURLRequest(BaseModel):
+    """Request model for loading ego network from URLs"""
+    edges_url: HttpUrl
+    circles_url: Optional[HttpUrl] = None
+    feat_url: Optional[HttpUrl] = None
+    egofeat_url: Optional[HttpUrl] = None
+    featnames_url: Optional[HttpUrl] = None
+    ego_id: Optional[str] = None
+
+
+@app.post("/load-from-url")
+async def load_graph_from_url(request: GraphURLRequest):
+    """
+    Load graph from URLs instead of file uploads
+    """
+    try:
+        # Fetch edges file
+        edges_bytes, content_type = await fetch_url(str(request.edges_url))
+        ext = guess_file_extension(str(request.edges_url), content_type)
+        edges_kind = _detect_file_kind(f"edges{ext}")
+
+        # Fetch nodes file if provided
+        nodes_bytes = None
+        nodes_kind = None
+        if request.nodes_url:
+            nodes_bytes, content_type = await fetch_url(str(request.nodes_url))
+            ext = guess_file_extension(str(request.nodes_url), content_type)
+            nodes_kind = _detect_file_kind(f"nodes{ext}")
+
+        # Load graph
+        graph = load_graph(edges_bytes, edges_kind, nodes_bytes, nodes_kind)
+
+        # Get graph info
+        info = get_graph_info(graph)
+
+        return {
+            "success": True,
+            "graph": info
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Graph loading from URL failed: {str(e)}")
+
+
+@app.post("/ego-network-from-url")
+async def load_ego_network_from_url(request: EgoNetworkURLRequest):
+    """
+    Load ego network from URLs instead of file uploads
+    """
+    try:
+        files_dict = {}
+
+        # Fetch edges (required)
+        edges_bytes, _ = await fetch_url(str(request.edges_url))
+        files_dict['edges'] = edges_bytes
+
+        # Fetch optional files
+        if request.circles_url:
+            circles_bytes, _ = await fetch_url(str(request.circles_url))
+            files_dict['circles'] = circles_bytes
+
+        if request.feat_url:
+            feat_bytes, _ = await fetch_url(str(request.feat_url))
+            files_dict['feat'] = feat_bytes
+
+        if request.egofeat_url:
+            egofeat_bytes, _ = await fetch_url(str(request.egofeat_url))
+            files_dict['egofeat'] = egofeat_bytes
+
+        if request.featnames_url:
+            featnames_bytes, _ = await fetch_url(str(request.featnames_url))
+            files_dict['featnames'] = featnames_bytes
+
+        # Load ego network
+        graph = load_ego_network(files_dict, ego_id=request.ego_id)
+
+        # Get graph info with centrality measures
+        info = get_graph_info(graph, include_centrality=True)
+
+        return {
+            "success": True,
+            "ego_network": info
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Ego network loading from URL failed: {str(e)}")
 
 
 # ============================================================

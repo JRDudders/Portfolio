@@ -22,6 +22,9 @@ import pandas as pd
 from bs4 import BeautifulSoup
 import trafilatura
 
+# Import URL fetch utility
+from url_fetch import fetch_url, guess_file_extension
+
 # Import NLP processing modules
 from nlp_processor import (
     analyze_sentiment,
@@ -347,6 +350,103 @@ async def analyze_file(
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File processing failed: {str(e)}")
+
+
+class FileURLRequest(BaseModel):
+    """Request model for analyzing file from URL"""
+    url: HttpUrl
+    preset: Optional[str] = None
+    labels: Optional[str] = None  # Comma-separated for zero-shot
+    include_stopwords: Optional[bool] = False
+
+
+@app.post("/analyze/file-from-url")
+async def analyze_file_from_url(request: FileURLRequest):
+    """
+    Download and analyze a file from URL
+
+    Supports same file types as /analyze/file:
+    - JSON: list of strings or objects with 'text' field
+    - CSV: file with 'text' column or first string column
+    - HTML/HTM: extracts text content (with smart chunking for topics)
+
+    Returns annotated JSON file with predictions
+    """
+    try:
+        # Fetch file from URL
+        file_bytes, content_type = await fetch_url(str(request.url))
+
+        # Guess extension
+        ext = guess_file_extension(str(request.url), content_type)
+
+        # Determine task from preset early (needed for HTML chunking decision)
+        task = PRESETS.get(request.preset, (None, None, {}))[0] if request.preset else None
+
+        # Parse file based on type
+        if ext in ['.json']:
+            texts = _texts_from_json_bytes(file_bytes)
+        elif ext in ['.csv']:
+            texts = _texts_from_csv_bytes(file_bytes)
+        elif ext in ['.html', '.htm']:
+            # Extract text from HTML
+            html = file_bytes.decode("utf-8", errors="ignore")
+
+            # For topic modeling, chunk the HTML into paragraphs/sections
+            # For other tasks (sentiment, NER), treat as single document
+            is_topic_task = task and ("topics" in task or "topic" in task)
+
+            if is_topic_task:
+                # Split into chunks for topic modeling (books, long articles)
+                texts = _chunk_html_for_topics(html, min_chunk_length=100)
+            else:
+                # Single document for sentiment, NER, etc.
+                text = _extract_text_from_html(html)
+                texts = [text]
+        else:
+            # Try JSON first, then CSV
+            try:
+                texts = _texts_from_json_bytes(file_bytes)
+            except Exception:
+                texts = _texts_from_csv_bytes(file_bytes)
+
+        # Keep original texts for output, preprocess separately
+        original_texts = texts
+        processed_texts = [preprocess_for_task(t, task or "") for t in texts]
+
+        # Parse labels if provided
+        labels_list = _parse_labels_csv(request.labels) if request.labels else None
+
+        # Run analysis
+        if request.preset:
+            # Use preset
+            predictions = run_task(
+                processed_texts,
+                preset=request.preset,
+                labels=labels_list,
+                include_stopwords=request.include_stopwords
+            )
+        else:
+            raise ValueError("preset parameter is required")
+
+        # Format output
+        if isinstance(predictions, dict) and "topics" in predictions:
+            # Topic modeling result
+            output = predictions
+        else:
+            # Per-document results
+            output = []
+            for t, p in zip(original_texts, predictions):
+                result_dict = {"text": t}
+                if isinstance(p, dict):
+                    result_dict.update(p)  # Add labels, scores, etc.
+                output.append(result_dict)
+
+        # Return as downloadable JSON
+        payload = _as_json_bytes({"preset": request.preset, "url": str(request.url), "results": output})
+        return _make_download("predictions.json", payload, "application/json")
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"File processing from URL failed: {str(e)}")
 
 
 # ============================================================
