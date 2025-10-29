@@ -264,12 +264,66 @@ def compute_betweenness_centrality(
     }
 
 
-def get_graph_info(graph: GraphData) -> Dict[str, Any]:
+def compute_all_centralities(graph: GraphData) -> Dict[str, Dict[str, float]]:
+    """
+    Compute all centrality measures for ego network visualization.
+
+    Args:
+        graph: GraphData object
+
+    Returns:
+        Dictionary with centrality measures:
+        {
+            "pagerank": {"nodeId": score, ...},
+            "betweenness": {"nodeId": score, ...},
+            "eigenvector": {"nodeId": score, ...},
+            "degree": {"nodeId": score, ...}
+        }
+    """
+    result = {}
+
+    # Compute PageRank
+    try:
+        pr_df = pagerank(graph, alpha=0.85, iters=40, tol=1e-6)
+        result["pagerank"] = dict(zip(pr_df['node'], pr_df['pr']))
+    except Exception as e:
+        print(f"[graph_processor] PageRank computation failed: {e}")
+        result["pagerank"] = {node: 0.0 for node in graph.idx_to_id}
+
+    # Compute Betweenness Centrality
+    try:
+        bc_df = betweenness_centrality(graph, normalized=True)
+        result["betweenness"] = dict(zip(bc_df['node'], bc_df['centrality']))
+    except Exception as e:
+        print(f"[graph_processor] Betweenness centrality computation failed: {e}")
+        result["betweenness"] = {node: 0.0 for node in graph.idx_to_id}
+
+    # Compute Eigenvector Centrality
+    try:
+        ec_df = eigenvector_centrality(graph, max_iter=100, tol=1e-6)
+        result["eigenvector"] = dict(zip(ec_df['node'], ec_df['centrality']))
+    except Exception as e:
+        print(f"[graph_processor] Eigenvector centrality computation failed: {e}")
+        result["eigenvector"] = {node: 0.0 for node in graph.idx_to_id}
+
+    # Compute Degree Centrality
+    try:
+        deg_df = degrees(graph)
+        result["degree"] = dict(zip(deg_df['node'], deg_df['degree']))
+    except Exception as e:
+        print(f"[graph_processor] Degree computation failed: {e}")
+        result["degree"] = {node: 0 for node in graph.idx_to_id}
+
+    return result
+
+
+def get_graph_info(graph: GraphData, include_centrality: bool = False) -> Dict[str, Any]:
     """
     Get graph information including full nodes/edges for visualization
 
     Args:
         graph: GraphData object
+        include_centrality: If True, compute all centrality measures (for ego networks)
 
     Returns:
         Dictionary with graph statistics and visualization data
@@ -344,5 +398,11 @@ def get_graph_info(graph: GraphData) -> Dict[str, Any]:
     if graph.features is not None:
         feature_cols = [c for c in graph.features.columns if c not in ['id', 'idx']]
         result["feature_count"] = len(feature_cols)
+
+    # Add centrality measures if requested (for ego networks)
+    if include_centrality:
+        print("[graph_processor] Computing centrality measures for ego network...")
+        result["centrality"] = compute_all_centralities(graph)
+        print("[graph_processor] Centrality computation complete")
 
     return result

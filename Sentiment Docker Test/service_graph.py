@@ -123,7 +123,7 @@ async def load_ego_network_files(
     ego_id: Optional[str] = Query(None, description="Ego node ID")
 ):
     """
-    Load ego network from multiple files
+    Load ego network from multiple files and compute centrality measures
     """
     try:
         # Read all files
@@ -152,8 +152,8 @@ async def load_ego_network_files(
         # Load ego network
         graph = load_ego_network(files_dict, ego_id=ego_id)
 
-        # Get graph info
-        info = get_graph_info(graph)
+        # Get graph info with centrality measures for visualization
+        info = get_graph_info(graph, include_centrality=True)
 
         return {
             "success": True,
