@@ -48,9 +48,6 @@ services:
       - PYTHONUNBUFFERED=1
     networks:
       - cicerowatch
-    volumes:
-      # Only mount temp directory (for file uploads)
-      - nlp_temp:/app/temp
     restart: always
     deploy:
       resources:
@@ -80,9 +77,6 @@ services:
       - PYTHONUNBUFFERED=1
     networks:
       - cicerowatch
-    volumes:
-      # Only mount temp directory (for file uploads)
-      - graph_temp:/app/temp
     restart: always
     deploy:
       resources:
@@ -114,7 +108,6 @@ services:
       - cicerowatch
     volumes:
       # Only mount temp and models directories
-      - audio_temp:/app/temp
       - audio_models:/app/models
     restart: always
     deploy:
@@ -133,11 +126,5 @@ networks:
     driver: bridge
 
 volumes:
-  nlp_temp:
-    driver: local
-  graph_temp:
-    driver: local
-  audio_temp:
-    driver: local
   audio_models:
     driver: local
