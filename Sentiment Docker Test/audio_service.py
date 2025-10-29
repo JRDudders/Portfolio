@@ -9,10 +9,14 @@ Independent service for the Audio tab in CiceroWatch.
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, HttpUrl
 import uvicorn
 import tempfile
 import os
 from pathlib import Path
+
+# Import URL fetch utility
+from url_fetch import fetch_url, guess_file_extension
 
 # Import audio processing (requires fairseq)
 import audio_antispoofing
@@ -91,6 +95,66 @@ async def analyze_audio(file: UploadFile = File(...)):
     finally:
         # Cleanup temp file
         if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+class AudioURLRequest(BaseModel):
+    """Request model for analyzing audio from URL"""
+    url: HttpUrl
+
+
+@app.post("/analyze-from-url")
+async def analyze_audio_from_url(request: AudioURLRequest):
+    """
+    Analyze audio file from URL for deepfake detection
+
+    Returns:
+        - prediction: "bonafide" or "spoofed"
+        - confidence: confidence score (0-1)
+        - spoof_score: raw score (higher = more likely spoofed)
+    """
+    temp_path = None
+    try:
+        # Fetch audio file from URL
+        audio_bytes, content_type = await fetch_url(str(request.url))
+
+        # Guess extension
+        ext = guess_file_extension(str(request.url), content_type)
+        if ext not in ['.wav', '.flac', '.mp3']:
+            # Try to use extension from URL
+            url_ext = str(request.url).lower().split('.')[-1].split('?')[0]
+            if url_ext in ['wav', 'flac', 'mp3']:
+                ext = f'.{url_ext}'
+            else:
+                ext = '.wav'  # Default to wav
+
+        # Save to temporary file
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, f"audio_url_{os.getpid()}{ext}")
+
+        with open(temp_path, "wb") as f:
+            f.write(audio_bytes)
+
+        # Analyze audio
+        prediction, confidence, spoof_score = audio_antispoofing.predict_audio(temp_path)
+
+        return {
+            "success": True,
+            "prediction": prediction,
+            "confidence": float(confidence),
+            "spoof_score": float(spoof_score),
+            "url": str(request.url)
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Audio analysis from URL failed: {str(e)}"
+        )
+
+    finally:
+        # Cleanup temp file
+        if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
 
 
