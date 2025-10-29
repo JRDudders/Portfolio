@@ -29,6 +29,7 @@ RUN source /opt/conda/etc/profile.d/conda.sh && \
     pip install --no-cache-dir -r requirements-graph.txt
 
 # Copy all required Python files
+COPY url_fetch.py .
 COPY service_graph.py .
 COPY graph_processor.py .
 COPY graph_tasks.py .

@@ -38,6 +38,7 @@ RUN pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch
 RUN pip install --no-cache-dir -r requirements-nlp.txt
 
 # Copy all required Python files
+COPY url_fetch.py .
 COPY service_nlp.py .
 COPY nlp_processor.py .
 COPY nlp.py .
