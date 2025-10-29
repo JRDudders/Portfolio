@@ -51,25 +51,44 @@ All services communicate via REST APIs and support live code editing without reb
 
 ## Quick Start
 
-### Docker Compose (Recommended)
+### Production Deployment (Stable Build)
 
-**GPU Version (Requires NVIDIA GPU):**
+**Frozen code, no live editing - recommended for production use:**
 
 ```powershell
-# Prerequisites: Docker Desktop + NVIDIA Container Toolkit
-# See "GPU Setup" section below
+# GPU Version
+docker-compose -f docker-compose.prod.gpu.yml up --build -d
 
-# Build and run all services (one-time setup ~10 minutes)
-cd "Sentiment Docker Test"
-docker-compose -f docker-compose.gpu.yml up --build
+# CPU Version
+docker-compose -f docker-compose.prod.yml up --build -d
 
 # Access at http://localhost:80
 ```
 
-**CPU Version (Any Platform):**
+**Production features:**
+- ✅ Code baked into images (frozen and stable)
+- ✅ Auto-restart on failure (`restart: always`)
+- ✅ Health checks enabled
+- ✅ Named volumes for persistence
+- ✅ Resource limits configured
+- ❌ No live editing (requires rebuild for code changes)
 
-```bash
+### Development Setup (Live Editing)
+
+**Code mounted for instant changes - recommended for development:**
+
+```powershell
+# GPU Version (Requires NVIDIA GPU)
+# Prerequisites: Docker Desktop + NVIDIA Container Toolkit
+# See "GPU Setup" section below
+
+cd "Sentiment Docker Test"
+docker-compose -f docker-compose.gpu.yml up --build
+
+# CPU Version (Any Platform)
 docker-compose up --build
+
+# Access at http://localhost:80
 ```
 
 **Development Workflow** (No Rebuilds!):
@@ -356,13 +375,15 @@ All Python files are volume-mounted for live editing:
 ### Project Structure
 ```
 Sentiment Docker Test/
-├── docker-compose.yml          # CPU services
-├── docker-compose.gpu.yml      # GPU services
-├── Dockerfile.frontend         # nginx frontend
-├── Dockerfile.nlp.gpu          # NLP service (GPU)
-├── Dockerfile.graph.gpu        # Graph service (RAPIDS)
-├── Dockerfile.audio            # Audio service
-├── service_nlp.py              # NLP API endpoints
+├── docker-compose.yml              # DEV: CPU services (live editing)
+├── docker-compose.gpu.yml          # DEV: GPU services (live editing)
+├── docker-compose.prod.yml         # PROD: CPU services (frozen code)
+├── docker-compose.prod.gpu.yml     # PROD: GPU services (frozen code)
+├── Dockerfile.frontend             # nginx frontend
+├── Dockerfile.nlp.gpu              # NLP service (GPU)
+├── Dockerfile.graph.gpu            # Graph service (RAPIDS)
+├── Dockerfile.audio                # Audio service
+├── service_nlp.py                  # NLP API endpoints
 ├── service_graph.py            # Graph API endpoints
 ├── audio_service.py            # Audio API endpoints
 ├── nlp.py                      # NLP core (presets, models)
