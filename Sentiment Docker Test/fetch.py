@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 
 SEL_ENGINE = os.getenv("SELENIUM_ENGINE", "chrome")
 
-HTTP_TIMEOUT = (10, 120)
+HTTP_TIMEOUT = (300, 300)  # (connect_timeout, read_timeout) in seconds
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 REDDIT_LIMIT = int(os.getenv("REDDIT_LIMIT", "200"))
 

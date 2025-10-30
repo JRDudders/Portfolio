@@ -198,7 +198,7 @@ def _fetch_simple(url: str, cookies_header: str | None, extra_headers: dict | No
         headers.update({str(k): str(v) for k, v in extra_headers.items()})
     if cookies_header:
         headers["Cookie"] = cookies_header
-    r = requests.get(url, headers=headers, timeout=25)
+    r = requests.get(url, headers=headers, timeout=300)
     r.raise_for_status()
     return r.text
 
