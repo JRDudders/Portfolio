@@ -128,20 +128,25 @@ def render_annotated_html_classification(title: str, source: str,
         score = f'{p.get("top", {}).get("score", 0.0):.3f}'
         esc = htmlmod.escape(t)
         rows.append(
-            '<article class="item" style="--col:%s">'
-            '<div class="badge">%s %s</div>'
-            '<div class="txt">%s</div>'
-            '</article>' % (col, label, score, esc)
+            '<article class="item" style="--col:%s">\n'
+            '  <div class="badge">%s %s</div>\n'
+            '  <div class="txt">%s</div>\n'
+            '</article>\n' % (col, label, score, esc)
         )
     title_esc = htmlmod.escape(title or "Scored Page")
     source_esc = htmlmod.escape(source or "")
     return (
-        "<!doctype html><html lang='en'><meta charset='utf-8'>"
-        f"<title>{title_esc}</title>"
+        "<!doctype html>\n"
+        "<html lang='en'>\n"
+        "<meta charset='utf-8'>\n"
+        f"<title>{title_esc}</title>\n"
         f"{_BASE_CSS}"
-        "<div class='wrap'>"
-        f"<h1>{title_esc}</h1><div class='meta'>{source_esc}</div>"
-        + "".join(rows) + "</div></html>"
+        "<div class='wrap'>\n"
+        f"  <h1>{title_esc}</h1>\n"
+        f"  <div class='meta'>{source_esc}</div>\n"
+        + "".join(rows) +
+        "</div>\n"
+        "</html>\n"
     )
 
 def _annotate_text_with_entities(txt: str, ents: List[Dict[str, Any]]) -> str:
@@ -175,20 +180,25 @@ def render_annotated_html_ner(title: str, source: str,
             counts[e.get("label", "ENT")] = counts.get(e.get("label", "ENT"), 0) + 1
         badge = ", ".join(f"{htmlmod.escape(k)}:{v}" for k, v in sorted(counts.items()))
         rows.append(
-            '<article class="item" style="--col:%s">'
-            '<div class="badge">%s</div>'
-            '<div class="txt">%s</div>'
-            '</article>' % (col, badge or "entities:0", esc)
+            '<article class="item" style="--col:%s">\n'
+            '  <div class="badge">%s</div>\n'
+            '  <div class="txt">%s</div>\n'
+            '</article>\n' % (col, badge or "entities:0", esc)
         )
     title_esc = htmlmod.escape(title or "NER Page")
     source_esc = htmlmod.escape(source or "")
     return (
-        "<!doctype html><html lang='en'><meta charset='utf-8'>"
-        f"<title>{title_esc}</title>"
+        "<!doctype html>\n"
+        "<html lang='en'>\n"
+        "<meta charset='utf-8'>\n"
+        f"<title>{title_esc}</title>\n"
         f"{_BASE_CSS}"
-        "<div class='wrap'>"
-        f"<h1>{title_esc}</h1><div class='meta'>{source_esc}</div>"
-        + "".join(rows) + "</div></html>"
+        "<div class='wrap'>\n"
+        f"  <h1>{title_esc}</h1>\n"
+        f"  <div class='meta'>{source_esc}</div>\n"
+        + "".join(rows) +
+        "</div>\n"
+        "</html>\n"
     )
 
 def render_annotated_html(title: str, source: str,
@@ -204,9 +214,15 @@ def render_site_report(pages: List[tuple[str, List[str], List[Dict[str, Any]], s
     for url, paras, preds, task in pages:
         title = url
         block = render_annotated_html(title, url, paras, preds, task)
-        inner = block.split('<div class="wrap">', 1)[-1].rsplit("</div></html>", 1)[0]
+        inner = block.split('<div class="wrap">', 1)[-1].rsplit("</div>", 1)[0]
         sections.append(inner)
-    return ("<!doctype html><html lang='en'><meta charset='utf-8'>"
-            "<title>Site Report</title>"
-            "<body style='margin:0;background:#0b0c10;color:#e6e6e6;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial'>"
-            + "".join(sections) + "</body></html>")
+    return (
+        "<!doctype html>\n"
+        "<html lang='en'>\n"
+        "<meta charset='utf-8'>\n"
+        "<title>Site Report</title>\n"
+        "<body style='margin:0;background:#0b0c10;color:#e6e6e6;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial'>\n"
+        + "".join(sections) +
+        "</body>\n"
+        "</html>\n"
+    )
