@@ -198,7 +198,7 @@ class URLAnalysisRequest(BaseModel):
     cookies: Optional[str] = None
     wait_selector: Optional[str] = None
     scroll_passes: int = 0
-    render_timeout_ms: int = 30000
+    render_timeout_ms: int = 3600000  # 1 hour
     extra_headers: Optional[Dict[str, Any]] = None
     # Crawling options
     crawl: bool = False
