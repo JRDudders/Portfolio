@@ -48,6 +48,17 @@ async def health_check():
     }
 
 
+@app.get("/model-status")
+async def model_status():
+    """Check if anti-spoofing models are ready"""
+    status = audio_antispoofing.check_models_available()
+    return {
+        "model_ready": status.get("fairseq", False),
+        "mode": "local" if status.get("fairseq", False) else "api",
+        "fairseq_available": status.get("fairseq", False)
+    }
+
+
 @app.post("/analyze")
 async def analyze_audio(file: UploadFile = File(...)):
     """

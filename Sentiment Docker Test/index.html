@@ -1392,7 +1392,7 @@
       modelStatus.style.color = 'var(--muted)';
 
       try {
-        const resp = await fetch('/api/audio/download-model', { method: 'POST' });
+        const resp = await fetch('/api/audio/download-models', { method: 'POST' });
         const data = await resp.json();
         if(resp.ok){
           modelStatus.textContent = '✓ Model downloaded successfully';
