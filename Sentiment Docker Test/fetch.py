@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 
 SEL_ENGINE = os.getenv("SELENIUM_ENGINE", "chrome")
 
-HTTP_TIMEOUT = (300, 300)  # (connect_timeout, read_timeout) in seconds
+HTTP_TIMEOUT = (3600, 3600)  # (connect_timeout, read_timeout) in seconds - 1 hour for large model downloads
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 REDDIT_LIMIT = int(os.getenv("REDDIT_LIMIT", "200"))
 
@@ -106,7 +106,7 @@ async def _auto_scroll(page, passes: int = 6):
 async def fetch_url_bytes_rendered(
     url: str,
     browser: Browser,
-    timeout_ms: int = 25000,
+    timeout_ms: int = 3600000,  # 1 hour
     cookies_header: Optional[str] = None,
     wait_selector: Optional[str] = None,
     scroll_passes: int = 6,
@@ -167,7 +167,7 @@ def _selenium_render_sync(
     engine: str = "chrome",
     wait_selector: Optional[str] = None,
     scroll_passes: int = 6,
-    timeout_ms: int = 25000,
+    timeout_ms: int = 3600000,  # 1 hour
     extra_headers: Optional[Dict[str,str]] = None,
 ) -> Tuple[bytes, str]:
     if engine == "firefox":
@@ -254,7 +254,7 @@ async def fetch_url_bytes_rendered_selenium(
     cookies_header: Optional[str] = None,
     wait_selector: Optional[str] = None,
     scroll_passes: int = 6,
-    timeout_ms: int = 25000,
+    timeout_ms: int = 3600000,  # 1 hour
     extra_headers: Optional[Dict[str,str]] = None,
 ) -> Tuple[bytes, str]:
     return await asyncio.to_thread(

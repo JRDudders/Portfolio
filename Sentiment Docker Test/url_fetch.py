@@ -16,8 +16,8 @@ import mimetypes
 # Maximum file size to download (500MB to match nginx limit)
 MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024  # 500MB in bytes
 
-# Connection timeout
-TIMEOUT_SECONDS = 300
+# Connection timeout (1 hour for large model downloads)
+TIMEOUT_SECONDS = 3600
 
 
 async def fetch_url(

@@ -201,7 +201,7 @@ def query_api(audio_bytes: bytes, max_retries: int = 3) -> Dict:
                 API_URL,
                 headers=headers,
                 data=audio_bytes,
-                timeout=300
+                timeout=3600
             )
 
             if response.status_code == 200:

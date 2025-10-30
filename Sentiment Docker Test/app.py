@@ -198,7 +198,7 @@ def _fetch_simple(url: str, cookies_header: str | None, extra_headers: dict | No
         headers.update({str(k): str(v) for k, v in extra_headers.items()})
     if cookies_header:
         headers["Cookie"] = cookies_header
-    r = requests.get(url, headers=headers, timeout=300)
+    r = requests.get(url, headers=headers, timeout=3600)
     r.raise_for_status()
     return r.text
 
@@ -308,7 +308,7 @@ async def predict_url(body: UrlBody = Body(...)):
     renderer = (body.get("renderer") or "auto").lower()
     wait_selector = body.get("wait_selector")
     scroll_passes = int(body.get("scroll_passes") or 8)
-    timeout_ms = int(body.get("render_timeout_ms") or 25000)
+    timeout_ms = int(body.get("render_timeout_ms") or 3600000)  # 1 hour default
     cookies_header = body.get("cookies")
     extra_headers = body.get("extra_headers") or {}
 

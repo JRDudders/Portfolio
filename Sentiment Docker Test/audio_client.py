@@ -42,7 +42,7 @@ def analyze_audio_remote(file_path: str) -> Tuple[str, float, float]:
         response = requests.post(
             f"{AUDIO_SERVICE_URL}/analyze",
             files=files,
-            timeout=300
+            timeout=3600
         )
 
     if response.status_code != 200:
