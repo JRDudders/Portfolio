@@ -59,7 +59,7 @@ def _as_json_bytes(obj: Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
 
 
-def _truncate_text(text: str, max_length: int = 200) -> str:
+def _truncate_text(text: str, max_length: int = 500) -> str:
     """Truncate text to max_length characters, adding ellipsis if truncated"""
     if len(text) <= max_length:
         return text
@@ -386,12 +386,12 @@ async def analyze_file(
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
             # NER: keep entities format
-            output = [{"text": _truncate_text(t), "entities": p} for t, p in zip(original_texts, predictions)]
+            output = [{"text (truncated)": _truncate_text(t), "entities": p} for t, p in zip(original_texts, predictions)]
         else:
             # Classification: merge text with scores
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text": _truncate_text(t)}
+                result_dict = {"text (truncated)": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)  # Add labels, scores, etc.
                 output.append(result_dict)
@@ -487,7 +487,7 @@ async def analyze_file_from_url(request: FileURLRequest):
             # Per-document results
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text": _truncate_text(t)}
+                result_dict = {"text (truncated)": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)  # Add labels, scores, etc.
                 output.append(result_dict)
