@@ -63,6 +63,7 @@ services:
     environment:
       - SERVICE_NAME=graph
       - SERVICE_PORT=8002
+      - FORCE_CPU=1
     networks:
       - cicerowatch
     volumes:
