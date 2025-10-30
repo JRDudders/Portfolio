@@ -28,5 +28,9 @@ lxml>=5.2
 trafilatura>=1.6
 readability-lxml>=0.8.1
 
+# JavaScript Rendering (for dynamic sites)
+playwright>=1.40
+selenium>=4.15
+
 # Note: Removed unused dependencies (bertopic, hdbscan, umap-learn)
 # These were for presets that don't have implementations (sbert-embed, bertopic)

@@ -21,3 +21,9 @@ networkx>=3.0
 
 # GraphBLAS (optional, for advanced operations)
 python-graphblas>=2024.2 ; python_version >= "3.11"
+
+# GPU Acceleration (cuGraph/cuDF)
+# Note: cuGraph and cuDF are NOT in this requirements file.
+# They are only available in GPU mode via docker-compose.prod.gpu.yml
+# which uses Dockerfile.graph.gpu with the rapidsai/base image.
+# CPU mode (Dockerfile.graph) uses NetworkX instead (automatic fallback).
