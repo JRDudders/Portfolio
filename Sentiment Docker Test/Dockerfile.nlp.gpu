@@ -42,6 +42,7 @@ COPY url_fetch.py .
 COPY service_nlp.py .
 COPY nlp_processor.py .
 COPY nlp.py .
+COPY topics.py .
 
 # Create temp directory
 RUN mkdir -p /app/temp
