@@ -43,6 +43,10 @@ COPY service_nlp.py .
 COPY nlp_processor.py .
 COPY nlp.py .
 COPY topics.py .
+COPY adapters.py .
+COPY fetch.py .
+COPY render.py .
+COPY apputils.py .
 
 # Create temp directory
 RUN mkdir -p /app/temp
