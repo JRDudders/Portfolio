@@ -61,6 +61,14 @@ def _truncate_text(text: str, max_length: int = 500) -> str:
         return text
     return text[:max_length].rstrip() + "..."
 
+def _get_predictions_filename(input_filename: str) -> str:
+    """Generate output filename with _predictions appended before extension"""
+    from pathlib import Path
+    p = Path(input_filename)
+    stem = p.stem or "output"
+    suffix = p.suffix or ".json"
+    return f"{stem}_predictions{suffix}"
+
 def _detect_graph_file_kind(filename: str | None) -> str:
     """Detect graph file type from filename extension."""
     if not filename:
@@ -236,7 +244,8 @@ async def predict_file(
 ):
     try:
         b = await file.read()
-        name = (file.filename or "").lower()
+        original_filename = file.filename or "input.json"
+        name = original_filename.lower()
         if name.endswith(".json"):
             texts = _texts_from_json_bytes(b)
         elif name.endswith(".csv"):
@@ -283,7 +292,8 @@ async def predict_file(
                 output.append(result_dict)
 
         payload = _as_json_bytes({"preset": preset, "results": output})
-        return _make_download("predictions.json", payload, "application/json")
+        output_filename = _get_predictions_filename(original_filename)
+        return _make_download(output_filename, payload, "application/json")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File processing failed: {e}")
 
