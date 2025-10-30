@@ -82,6 +82,7 @@ services:
       - SERVICE_NAME=graph
       - SERVICE_PORT=8002
       - CUDA_VISIBLE_DEVICES=0
+      - FORCE_CPU=1
       - PYTHONUNBUFFERED=1
     networks:
       - cicerowatch
