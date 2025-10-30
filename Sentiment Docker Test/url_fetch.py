@@ -17,7 +17,7 @@ import mimetypes
 MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024  # 500MB in bytes
 
 # Connection timeout
-TIMEOUT_SECONDS = 60
+TIMEOUT_SECONDS = 300
 
 
 async def fetch_url(
@@ -31,7 +31,7 @@ async def fetch_url(
     Args:
         url: URL to fetch
         max_size: Maximum file size in bytes (default 500MB)
-        timeout: Timeout in seconds (default 60s)
+        timeout: Timeout in seconds (default 300s)
 
     Returns:
         Tuple of (file_bytes, content_type)
