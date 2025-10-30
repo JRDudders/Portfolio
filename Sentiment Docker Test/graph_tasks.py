@@ -77,11 +77,16 @@ import sys
 import platform
 VERBOSE_GPU = os.getenv('VERBOSE_GPU', '1') == '1'
 is_windows = platform.system() == 'Windows'
+is_mac = platform.system() == 'Darwin'
 
 if VERBOSE_GPU:
     if is_windows:
         print("[graph_tasks] Running on Windows - using NetworkX for graph analytics (CPU)")
         print("[graph_tasks] For GPU acceleration, use Docker or WSL2 (see WINDOWS_GPU.md)")
+    elif is_mac:
+        print("[graph_tasks] Running on macOS - using NetworkX for graph analytics (CPU)")
+        print("[graph_tasks] Note: RAPIDS/cuGraph does not support macOS (Intel or Apple Silicon)")
+        print("[graph_tasks] For GPU acceleration, use Linux with NVIDIA GPU or cloud instances")
     else:
         print("[graph_tasks] GPU Detection Starting...")
 
@@ -95,7 +100,7 @@ try:
 except ImportError as e:
     HAS_GPU = False
     HAS_CUGRAPH = False
-    if VERBOSE_GPU and not is_windows:
+    if VERBOSE_GPU and not is_windows and not is_mac:
         # Only show detailed cuDF errors on Linux (where it's expected to work)
         print(f"[graph_tasks] ✗ cuGraph/cuDF not installed")
 
@@ -108,7 +113,7 @@ except ImportError as e:
             print("[graph_tasks]   Solution: Use Docker (has Python 3.11)")
         else:
             print("[graph_tasks]   Install: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
-            print("[graph_tasks]   Or use: docker build -f Dockerfile.gpu -t sentiment-gpu .")
+            print("[graph_tasks]   Or use: docker-compose -f docker-compose.prod.gpu.yml up")
         print("[graph_tasks]   Falling back to NetworkX (CPU)")
 
 if HAS_CUGRAPH:
@@ -131,6 +136,9 @@ if HAS_CUGRAPH:
 if not HAS_GPU and VERBOSE_GPU:
     if is_windows:
         print("[graph_tasks] ✓ NetworkX ready for graph analytics (works great on CPU)")
+        print("[graph_tasks]   Set VERBOSE_GPU=0 to hide this message")
+    elif is_mac:
+        print("[graph_tasks] ✓ NetworkX ready for graph analytics (CPU mode)")
         print("[graph_tasks]   Set VERBOSE_GPU=0 to hide this message")
     else:
         print("[graph_tasks] ⚠ GPU graph acceleration disabled - using NetworkX (CPU)")
