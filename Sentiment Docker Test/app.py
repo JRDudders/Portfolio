@@ -55,11 +55,19 @@ def _parse_labels_csv(s: str | None) -> T.List[str] | None:
     labels = [x.strip() for x in s.split(",") if x.strip()]
     return labels if labels else None  # More explicit than 'or'
 
-def _truncate_text(text: str, max_length: int = 200) -> str:
+def _truncate_text(text: str, max_length: int = 500) -> str:
     """Truncate text to max_length characters, adding ellipsis if truncated"""
     if len(text) <= max_length:
         return text
     return text[:max_length].rstrip() + "..."
+
+def _get_predictions_filename(input_filename: str) -> str:
+    """Generate output filename with _predictions appended before extension"""
+    from pathlib import Path
+    p = Path(input_filename)
+    stem = p.stem or "output"
+    suffix = p.suffix or ".json"
+    return f"{stem}_predictions{suffix}"
 
 def _detect_graph_file_kind(filename: str | None) -> str:
     """Detect graph file type from filename extension."""
@@ -236,7 +244,8 @@ async def predict_file(
 ):
     try:
         b = await file.read()
-        name = (file.filename or "").lower()
+        original_filename = file.filename or "input.json"
+        name = original_filename.lower()
         if name.endswith(".json"):
             texts = _texts_from_json_bytes(b)
         elif name.endswith(".csv"):
@@ -272,18 +281,19 @@ async def predict_file(
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
             # NER: keep entities format
-            output = [{"text": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
+            output = [{"text (analyzed in full, truncated for display)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
         else:
             # Classification: merge text with scores
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text": _truncate_text(t)}
+                result_dict = {"text (analyzed in full, truncated for display)": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)  # Add labels, scores, etc.
                 output.append(result_dict)
 
         payload = _as_json_bytes({"preset": preset, "results": output})
-        return _make_download("predictions.json", payload, "application/json")
+        output_filename = _get_predictions_filename(original_filename)
+        return _make_download(output_filename, payload, "application/json")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File processing failed: {e}")
 
@@ -413,11 +423,11 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
 
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
-            output = [{"text": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
+            output = [{"text (analyzed in full, truncated for display)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
         else:
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text": _truncate_text(t)}
+                result_dict = {"text (analyzed in full, truncated for display)": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)
                 output.append(result_dict)

@@ -59,11 +59,20 @@ def _as_json_bytes(obj: Any) -> bytes:
     return json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
 
 
-def _truncate_text(text: str, max_length: int = 200) -> str:
+def _truncate_text(text: str, max_length: int = 500) -> str:
     """Truncate text to max_length characters, adding ellipsis if truncated"""
     if len(text) <= max_length:
         return text
     return text[:max_length].rstrip() + "..."
+
+
+def _get_predictions_filename(input_filename: str) -> str:
+    """Generate output filename with _predictions appended before extension"""
+    from pathlib import Path
+    p = Path(input_filename)
+    stem = p.stem or "output"
+    suffix = p.suffix or ".json"
+    return f"{stem}_predictions{suffix}"
 
 
 def _parse_labels_csv(s: Optional[str]) -> Optional[List[str]]:
@@ -337,7 +346,8 @@ async def analyze_file(
     """
     try:
         b = await file.read()
-        name = (file.filename or "").lower()
+        original_filename = file.filename or "input.json"
+        name = original_filename.lower()
 
         # Determine task from preset early (needed for HTML chunking decision)
         task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
@@ -386,19 +396,20 @@ async def analyze_file(
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
             # NER: keep entities format
-            output = [{"text": _truncate_text(t), "entities": p} for t, p in zip(original_texts, predictions)]
+            output = [{"text (analyzed in full, truncated for display)": _truncate_text(t), "entities": p} for t, p in zip(original_texts, predictions)]
         else:
             # Classification: merge text with scores
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text": _truncate_text(t)}
+                result_dict = {"text (analyzed in full, truncated for display)": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)  # Add labels, scores, etc.
                 output.append(result_dict)
 
         # Return as downloadable JSON
         payload = _as_json_bytes({"preset": preset, "results": output})
-        return _make_download("predictions.json", payload, "application/json")
+        output_filename = _get_predictions_filename(original_filename)
+        return _make_download(output_filename, payload, "application/json")
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File processing failed: {str(e)}")
@@ -428,8 +439,18 @@ async def analyze_file_from_url(request: FileURLRequest):
         # Fetch file from URL
         file_bytes, content_type = await fetch_url(str(request.url))
 
+        # Extract filename from URL for output naming
+        from pathlib import Path
+        from urllib.parse import urlparse
+        url_path = urlparse(str(request.url)).path
+        original_filename = Path(url_path).name or "downloaded_file"
+
         # Guess extension
         ext = guess_file_extension(str(request.url), content_type)
+
+        # Ensure filename has proper extension
+        if not original_filename.lower().endswith(ext):
+            original_filename = f"{Path(original_filename).stem}{ext}"
 
         # Determine task from preset early (needed for HTML chunking decision)
         task = PRESETS.get(request.preset, (None, None, {}))[0] if request.preset else None
@@ -487,14 +508,15 @@ async def analyze_file_from_url(request: FileURLRequest):
             # Per-document results
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text": _truncate_text(t)}
+                result_dict = {"text (analyzed in full, truncated for display)": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)  # Add labels, scores, etc.
                 output.append(result_dict)
 
         # Return as downloadable JSON
         payload = _as_json_bytes({"preset": request.preset, "url": str(request.url), "results": output})
-        return _make_download("predictions.json", payload, "application/json")
+        output_filename = _get_predictions_filename(original_filename)
+        return _make_download(output_filename, payload, "application/json")
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"File processing from URL failed: {str(e)}")
