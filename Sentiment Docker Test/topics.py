@@ -115,7 +115,7 @@ def topics_kmeans(
 
     # derive top terms per cluster using centroid weights
     topics = []
-    for k in range(n_clusters):
+    for k in range(actual_n_clusters):
         centroid = km.cluster_centers_[k]
         idx = np.argsort(centroid)[::-1][:topk]
         topics.append({

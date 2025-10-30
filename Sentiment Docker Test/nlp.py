@@ -311,40 +311,11 @@ def run_task(
         agg = kwargs.get("aggregation_strategy", "simple")
         return _hf_token_classification(texts, model_id=model_id, aggregation_strategy=agg)  # type: ignore[arg-type]
 
-    # ---------------- spaCy --------------------------
-    if task == "spacy-ner":
-        from spacy_tasks import spacy_ner
-        return spacy_ner(texts)
-
-    if task in {"spacy-posdep", "spacy-pos", "spacy-lemma", "spacy-dep"}:
-        from spacy_tasks import spacy_pos_dep_lemma
-        return spacy_pos_dep_lemma(texts)
-
-    if task == "spacy-sents":
-        from spacy_tasks import spacy_sentences
-        return spacy_sentences(texts)
-
-    # ---------------- Stanza -------------------------
-    if task == "stanza-posdep":
-        from stanza_tasks import stanza_pos_dep
-        lang = (kwargs.get("lang") or "en")
-        return stanza_pos_dep(texts, lang=lang)
-
-    if task == "stanza-sents":
-        from stanza_tasks import stanza_sentences
-        lang = (kwargs.get("lang") or "en")
-        return stanza_sentences(texts, lang=lang)
-
-    # ---------------- Sentence-Transformers ----------
-    if task == "sbert-embed":
-        from sbert_tasks import sbert_embeddings
-        model = (kwargs.get("model") or "all-MiniLM-L6-v2")
-        return sbert_embeddings(texts, model)
-
-    if task == "bertopic":
-        from sbert_tasks import sbert_topics
-        model = (kwargs.get("model") or "all-MiniLM-L6-v2")
-        return [sbert_topics(texts, model)]
+    # NOTE: The following tasks are disabled (missing implementation files):
+    # - spacy-ner, spacy-posdep, spacy-sents (needs spacy_tasks.py)
+    # - stanza-posdep, stanza-sents (needs stanza_tasks.py)
+    # - sbert-embed, bertopic (needs sbert_tasks.py)
+    # These can be re-enabled by creating the corresponding *_tasks.py modules
 
     # ---------------- Topics (tf-idf) ----------------
     if task == "topics-nmf":

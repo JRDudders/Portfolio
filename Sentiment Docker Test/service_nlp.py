@@ -29,10 +29,10 @@ from url_fetch import fetch_url, guess_file_extension
 from nlp_processor import (
     analyze_sentiment,
     extract_entities,
-    analyze_topics,
-    scrape_and_analyze_url
+    analyze_topics
 )
 from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
+from adapters import process_url
 
 app = FastAPI(
     title="CiceroWatch NLP Service",
@@ -190,8 +190,26 @@ class TextAnalysisRequest(BaseModel):
 
 
 class URLAnalysisRequest(BaseModel):
+    """Request model for URL analysis with full adapter support"""
     url: HttpUrl
-    tasks: List[str] = ["sentiment", "entities", "topics"]
+    # Rendering options
+    render: bool = False
+    renderer: str = "playwright"
+    cookies: Optional[str] = None
+    wait_selector: Optional[str] = None
+    scroll_passes: int = 0
+    render_timeout_ms: int = 30000
+    extra_headers: Optional[Dict[str, Any]] = None
+    # Crawling options
+    crawl: bool = False
+    max_pages: int = 10
+    max_depth: int = 2
+    same_host_only: bool = True
+    delay_ms: int = 1000
+    # Analysis options
+    preset: Optional[str] = None
+    labels: Optional[List[str]] = None
+    include_stopwords: bool = False
 
 
 # ============================================================
@@ -247,18 +265,45 @@ async def analyze_text(request: TextAnalysisRequest):
 @app.post("/analyze/url")
 async def analyze_url(request: URLAnalysisRequest):
     """
-    Scrape URL and analyze content
+    Scrape URL and analyze content with full adapter support
+
+    Supports:
+    - Zero-shot classification with custom labels
+    - Sentiment analysis, NER, topic modeling
+    - JavaScript rendering (Playwright/Selenium)
+    - Site crawling with multi-page analysis
+    - Custom presets from nlp.PRESETS
+
+    Returns annotated HTML file with predictions
     """
     try:
-        result = scrape_and_analyze_url(
+        # Use the adapter system for full-featured URL processing
+        result = await process_url(
             url=str(request.url),
-            tasks=request.tasks
+            app=app,
+            # Rendering
+            render=request.render,
+            renderer=request.renderer,
+            cookies=request.cookies,
+            wait_selector=request.wait_selector,
+            scroll_passes=request.scroll_passes,
+            render_timeout_ms=request.render_timeout_ms,
+            extra_headers=request.extra_headers,
+            # Crawling
+            crawl=request.crawl,
+            max_pages=request.max_pages,
+            max_depth=request.max_depth,
+            same_host_only=request.same_host_only,
+            delay_ms=request.delay_ms,
+            # Analysis
+            task=None,  # Will be determined from preset
+            preset=request.preset,
+            labels=request.labels,
+            include_stopwords=request.include_stopwords,
         )
-        return {
-            "success": True,
-            "url": str(request.url),
-            "results": result
-        }
+
+        # Return the processed content as a downloadable file
+        return _make_download(result.filename, result.content, result.media_type)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -418,12 +463,11 @@ async def analyze_file_from_url(request: FileURLRequest):
 
         # Run analysis
         if request.preset:
-            # Use preset
+            # Use preset (note: include_stopwords is handled in adapters, not in run_task)
             predictions = run_task(
                 processed_texts,
                 preset=request.preset,
-                labels=labels_list,
-                include_stopwords=request.include_stopwords
+                labels=labels_list
             )
         else:
             raise ValueError("preset parameter is required")
