@@ -76,6 +76,7 @@ import os
 import sys
 import platform
 VERBOSE_GPU = os.getenv('VERBOSE_GPU', '1') == '1'
+FORCE_CPU = os.getenv('FORCE_CPU', '0') == '1'  # Force CPU mode even if GPU available
 is_windows = platform.system() == 'Windows'
 is_mac = platform.system() == 'Darwin'
 
@@ -87,34 +88,44 @@ if VERBOSE_GPU:
         print("[graph_tasks] Running on macOS - using NetworkX for graph analytics (CPU)")
         print("[graph_tasks] Note: RAPIDS/cuGraph does not support macOS (Intel or Apple Silicon)")
         print("[graph_tasks] For GPU acceleration, use Linux with NVIDIA GPU or cloud instances")
+    elif FORCE_CPU:
+        print("[graph_tasks] FORCE_CPU=1 detected - forcing CPU mode (NetworkX)")
     else:
         print("[graph_tasks] GPU Detection Starting...")
 
-try:
-    import cudf  # GPU DataFrame
-    import cugraph  # GPU graph analytics
-    HAS_CUGRAPH = True
-    if VERBOSE_GPU:
-        print(f"[graph_tasks] ✓ cuGraph available (version {cugraph.__version__})")
-        print(f"[graph_tasks] ✓ cuDF available (version {cudf.__version__})")
-except ImportError as e:
+# Skip GPU imports if FORCE_CPU is set
+if not FORCE_CPU:
+    try:
+        import cudf  # GPU DataFrame
+        import cugraph  # GPU graph analytics
+        HAS_CUGRAPH = True
+        if VERBOSE_GPU:
+            print(f"[graph_tasks] ✓ cuGraph available (version {cugraph.__version__})")
+            print(f"[graph_tasks] ✓ cuDF available (version {cudf.__version__})")
+    except ImportError as e:
+        HAS_GPU = False
+        HAS_CUGRAPH = False
+        if VERBOSE_GPU and not is_windows and not is_mac:
+            # Only show detailed cuDF errors on Linux (where it's expected to work)
+            print(f"[graph_tasks] ✗ cuGraph/cuDF not installed")
+
+            py_version = sys.version_info
+            py_supported = (3, 10) <= py_version[:2] <= (3, 12)
+
+            if not py_supported:
+                print(f"[graph_tasks]   ⚠ Python {py_version.major}.{py_version.minor} not supported by RAPIDS")
+                print(f"[graph_tasks]   RAPIDS requires Python 3.10, 3.11, or 3.12")
+                print("[graph_tasks]   Solution: Use Docker (has Python 3.11)")
+            else:
+                print("[graph_tasks]   Install: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
+                print("[graph_tasks]   Or use: docker-compose -f docker-compose.prod.gpu.yml up")
+            print("[graph_tasks]   Falling back to NetworkX (CPU)")
+else:
+    # FORCE_CPU is set - skip GPU entirely
     HAS_GPU = False
     HAS_CUGRAPH = False
-    if VERBOSE_GPU and not is_windows and not is_mac:
-        # Only show detailed cuDF errors on Linux (where it's expected to work)
-        print(f"[graph_tasks] ✗ cuGraph/cuDF not installed")
-
-        py_version = sys.version_info
-        py_supported = (3, 10) <= py_version[:2] <= (3, 12)
-
-        if not py_supported:
-            print(f"[graph_tasks]   ⚠ Python {py_version.major}.{py_version.minor} not supported by RAPIDS")
-            print(f"[graph_tasks]   RAPIDS requires Python 3.10, 3.11, or 3.12")
-            print("[graph_tasks]   Solution: Use Docker (has Python 3.11)")
-        else:
-            print("[graph_tasks]   Install: pip install cudf-cu12 cugraph-cu12 --extra-index-url=https://pypi.nvidia.com")
-            print("[graph_tasks]   Or use: docker-compose -f docker-compose.prod.gpu.yml up")
-        print("[graph_tasks]   Falling back to NetworkX (CPU)")
+    if VERBOSE_GPU:
+        print("[graph_tasks] ✓ NetworkX ready for graph analytics (CPU mode forced)")
 
 if HAS_CUGRAPH:
     try:
