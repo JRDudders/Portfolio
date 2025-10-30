@@ -55,6 +55,12 @@ def _parse_labels_csv(s: str | None) -> T.List[str] | None:
     labels = [x.strip() for x in s.split(",") if x.strip()]
     return labels if labels else None  # More explicit than 'or'
 
+def _truncate_text(text: str, max_length: int = 200) -> str:
+    """Truncate text to max_length characters, adding ellipsis if truncated"""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length].rstrip() + "..."
+
 def _detect_graph_file_kind(filename: str | None) -> str:
     """Detect graph file type from filename extension."""
     if not filename:
@@ -266,12 +272,12 @@ async def predict_file(
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
             # NER: keep entities format
-            output = [{"text": t, "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
+            output = [{"text": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
         else:
             # Classification: merge text with scores
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text": t}
+                result_dict = {"text": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)  # Add labels, scores, etc.
                 output.append(result_dict)
@@ -407,11 +413,11 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
 
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
-            output = [{"text": t, "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
+            output = [{"text": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
         else:
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text": t}
+                result_dict = {"text": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)
                 output.append(result_dict)

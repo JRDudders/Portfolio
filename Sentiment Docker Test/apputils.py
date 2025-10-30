@@ -11,6 +11,12 @@ def filename_with_suffix(name: str, suffix: str) -> str:
     stem = Path(name).stem or "output"
     return f"{stem}_scored.{suffix}"
 
+def _truncate_text(text: str, max_length: int = 200) -> str:
+    """Truncate text to max_length characters, adding ellipsis if truncated"""
+    if len(text) <= max_length:
+        return text
+    return text[:max_length].rstrip() + "..."
+
 def _pick_text_column(df: pd.DataFrame) -> str:
     for c in df.columns:
         if c.lower() in {"text", "tweet", "content"}:
@@ -36,11 +42,20 @@ def process_csv_bytes(csv_bytes: bytes, *, task: Optional[str] = None,
     else:
         all_labels = set()
         for p in preds:
-            all_labels.update(p.get("scores", {}).keys())
+            all_labels.update(p.get("topics", {}).keys())
         for lab in sorted(all_labels):
-            df[f"score_{lab}"] = [p.get("scores", {}).get(lab, float("nan")) for p in preds]
-        df["top_label"] = [p.get("top", {}).get("label", "") for p in preds]
-        df["top_score"] = [p.get("top", {}).get("score", float("nan")) for p in preds]
+            df[f"score_{lab}"] = [p.get("topics", {}).get(lab, float("nan")) for p in preds]
+        # Calculate top label and score from topics dict
+        def get_top_label(topics):
+            if not topics:
+                return ""
+            return max(topics.items(), key=lambda x: x[1])[0]
+        def get_top_score(topics):
+            if not topics:
+                return float("nan")
+            return max(topics.values())
+        df["top_label"] = [get_top_label(p.get("topics", {})) for p in preds]
+        df["top_score"] = [get_top_score(p.get("topics", {})) for p in preds]
 
     return df.to_csv(index=False).encode("utf-8")
 
@@ -54,9 +69,13 @@ def process_json_bytes(json_bytes: bytes, *, task: Optional[str] = None,
         proc = [preprocess_for_task(t, task or "text-classification") for t in texts]
         preds = run_task(proc, task=task, preset=preset, labels=labels)
         if (task == "token-classification") or (preset and "ner" in preset):
-            out = [{"text": t, "entities": p.get("entities", [])} for t, p in zip(texts, preds)]
+            out = [{"text": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(texts, preds)]
         else:
-            out = [{"text": t, "scores": p.get("scores", {}), "top": p.get("top", {})} for t, p in zip(texts, preds)]
+            out = []
+            for t, p in zip(texts, preds):
+                result = {"text": _truncate_text(t)}
+                result.update(p)  # Add topics dict
+                out.append(result)
         return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
 
     # List of objects with text-ish key
@@ -70,11 +89,13 @@ def process_json_bytes(json_bytes: bytes, *, task: Optional[str] = None,
         out = []
         for obj, p in zip(data, preds):
             new_obj = dict(obj)
+            # Truncate the text field
+            new_obj[key] = _truncate_text(new_obj[key])
             if (task == "token-classification") or (preset and "ner" in preset):
                 new_obj["entities"] = p.get("entities", [])
             else:
-                new_obj["scores"] = p.get("scores", {})
-                new_obj["top"] = p.get("top", {})
+                # Add topics dict directly
+                new_obj.update(p)
             out.append(new_obj)
         return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
 

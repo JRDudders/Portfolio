@@ -157,10 +157,10 @@ def _hf_text_classification(
                     # unexpected; fallback: wrap
                     label_sets.append({})
         avg = _avg_scores(label_sets)
-        # return sorted label scores for transparency
+        # return topic->score mapping, sorted by score descending
+        sorted_items = sorted(avg.items(), key=lambda kv: kv[1], reverse=True)
         results.append({
-            "labels": [k for k, _ in sorted(avg.items(), key=lambda kv: kv[1], reverse=True)],
-            "scores": [float(v) for _, v in sorted(avg.items(), key=lambda kv: kv[1], reverse=True)],
+            "topics": {label: float(score) for label, score in sorted_items}
         })
     return results
 
@@ -195,7 +195,7 @@ def _hf_zero_shot(
 
         avg = _avg_scores(per_label_probs)
         ordered = sorted(avg.items(), key=lambda kv: kv[1], reverse=True)
-        results.append({"labels": [k for k, _ in ordered], "scores": [float(v) for _, v in ordered]})
+        results.append({"topics": {label: float(score) for label, score in ordered}})
     return results
 
 
@@ -276,7 +276,7 @@ def run_task(
     """
     Unified entry point.
     Returns:
-      - text/zero-shot classification: list[{"labels":[...], "scores":[...]}]
+      - text/zero-shot classification: list[{"topics": {label: score, ...}}]
       - token-classification (NER):   list[list[ent-dict]]
       - spaCy/Stanza POS/DEP/LEMMA:   list[dict]
       - SBERT embeddings:             list[{"text":..,"embedding":[...]}]
