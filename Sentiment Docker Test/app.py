@@ -272,12 +272,12 @@ async def predict_file(
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
             # NER: keep entities format
-            output = [{"text (truncated)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
+            output = [{"text (analyzed in full, truncated for display)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
         else:
             # Classification: merge text with scores
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text (truncated)": _truncate_text(t)}
+                result_dict = {"text (analyzed in full, truncated for display)": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)  # Add labels, scores, etc.
                 output.append(result_dict)
@@ -413,11 +413,11 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
 
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
-            output = [{"text (truncated)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
+            output = [{"text (analyzed in full, truncated for display)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(original_texts, predictions)]
         else:
             output = []
             for t, p in zip(original_texts, predictions):
-                result_dict = {"text (truncated)": _truncate_text(t)}
+                result_dict = {"text (analyzed in full, truncated for display)": _truncate_text(t)}
                 if isinstance(p, dict):
                     result_dict.update(p)
                 output.append(result_dict)

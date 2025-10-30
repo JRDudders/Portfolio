@@ -69,11 +69,11 @@ def process_json_bytes(json_bytes: bytes, *, task: Optional[str] = None,
         proc = [preprocess_for_task(t, task or "text-classification") for t in texts]
         preds = run_task(proc, task=task, preset=preset, labels=labels)
         if (task == "token-classification") or (preset and "ner" in preset):
-            out = [{"text (truncated)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(texts, preds)]
+            out = [{"text (analyzed in full, truncated for display)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(texts, preds)]
         else:
             out = []
             for t, p in zip(texts, preds):
-                result = {"text (truncated)": _truncate_text(t)}
+                result = {"text (analyzed in full, truncated for display)": _truncate_text(t)}
                 result.update(p)  # Add topics dict
                 out.append(result)
         return json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8")
@@ -91,7 +91,7 @@ def process_json_bytes(json_bytes: bytes, *, task: Optional[str] = None,
             new_obj = dict(obj)
             # Remove original text field and add truncated version
             original_text = new_obj.pop(key, "")
-            new_obj["text (truncated)"] = _truncate_text(original_text)
+            new_obj["text (analyzed in full, truncated for display)"] = _truncate_text(original_text)
             if (task == "token-classification") or (preset and "ner" in preset):
                 new_obj["entities"] = p.get("entities", [])
             else:
