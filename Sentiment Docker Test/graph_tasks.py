@@ -1274,6 +1274,9 @@ _SOCIAL_MEDIA_COLUMNS = {
     "hashtags": [
         "hashtags", "entities_hashtags", "entities.hashtags"
     ],
+    "timestamp": [
+        "created_at", "timestamp", "date", "datetime", "time", "posted_at", "created"
+    ],
 }
 
 
@@ -1454,6 +1457,7 @@ def extract_social_media_edges(
     col_quote = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["quoted_user"])
     col_urls = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["urls"])
     col_hashtags = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["hashtags"])
+    col_timestamp = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["timestamp"])
 
     if not col_author:
         raise ValueError(
