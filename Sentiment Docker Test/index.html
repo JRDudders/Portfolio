@@ -1469,11 +1469,9 @@
     function escapeCSVField(field){
       // Convert to string and handle special characters
       const str = String(field ?? '');
-      // If field contains comma, quote, or newline, wrap in quotes and escape internal quotes
-      if(str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')){
-        return '"' + str.replace(/"/g, '""') + '"';
-      }
-      return str;
+      // Always quote all fields (QUOTE_ALL mode) for maximum compatibility
+      // Escape any internal quotes by doubling them (RFC 4180)
+      return '"' + str.replace(/"/g, '""') + '"';
     }
 
     function downloadEdgeCSV(edges, filename){

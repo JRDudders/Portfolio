@@ -180,10 +180,57 @@ def _coerce_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def load_edges_csv(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
     # Use standard CSV quoting to handle fields with commas, quotes, etc.
-    df = pd.read_csv(io.BytesIO(file_bytes), quotechar='"', skipinitialspace=True)
+    # Try with strict RFC 4180 compliance first
+    try:
+        df = pd.read_csv(
+            io.BytesIO(file_bytes),
+            quotechar='"',
+            doublequote=True,
+            skipinitialspace=True,
+            on_bad_lines='error'
+        )
+    except pd.errors.ParserError as e:
+        # If parsing fails, try with more lenient settings
+        try:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                on_bad_lines='skip',
+                engine='python'  # Python engine is more lenient
+            )
+        except Exception:
+            # Last resort: try assuming all fields are quoted
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                quoting=1,  # QUOTE_ALL
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                engine='python'
+            )
+
     if df.shape[1] < 2:
         # Try no-header
-        df = pd.read_csv(io.BytesIO(file_bytes), header=None, quotechar='"', skipinitialspace=True)
+        try:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                header=None,
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True
+            )
+        except Exception:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                header=None,
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                engine='python'
+            )
+
     df = _coerce_columns(df)
     df = df.dropna(subset=["src", "dst"]).astype({"src": str, "dst": str})
     return df
@@ -204,7 +251,35 @@ def load_edges_json(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
 def load_nodes_csv(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
     """Load node list from CSV with attributes. First column must be node ID."""
     # Use standard CSV quoting to handle fields with commas, quotes, etc.
-    df = pd.read_csv(io.BytesIO(file_bytes), quotechar='"', skipinitialspace=True)
+    try:
+        df = pd.read_csv(
+            io.BytesIO(file_bytes),
+            quotechar='"',
+            doublequote=True,
+            skipinitialspace=True,
+            on_bad_lines='error'
+        )
+    except pd.errors.ParserError:
+        # Try with lenient parsing
+        try:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                on_bad_lines='skip',
+                engine='python'
+            )
+        except Exception:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                quoting=1,
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                engine='python'
+            )
+
     if df.shape[1] < 1:
         raise ValueError("Node CSV must have at least one column (id)")
 
