@@ -414,7 +414,27 @@
     <div id="user-data-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10001;overflow:auto">
       <div style="max-width:1200px;margin:40px auto;background:#0b0c10;border:1px solid var(--border);border-radius:12px;padding:24px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-          <h2 style="margin:0">User Content</h2>
+          <div style="display:flex;align-items:center;gap:16px">
+            <h2 style="margin:0">User Content</h2>
+            <div style="display:flex;align-items:center;gap:8px">
+              <label for="translate-lang" style="font-size:13px;color:var(--muted)">Translate:</label>
+              <select id="translate-lang" style="padding:4px 8px;background:#1a1d24;border:1px solid var(--border);border-radius:4px;color:#e6e6e6;font-size:13px">
+                <option value="">None</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ru">Russian</option>
+                <option value="zh">Chinese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="ar">Arabic</option>
+                <option value="hi">Hindi</option>
+              </select>
+            </div>
+          </div>
           <button id="close-user-modal" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:28px;padding:0;line-height:1">&times;</button>
         </div>
         <div id="user-data-info" style="margin-bottom:16px;padding:12px;background:#13151b;border-radius:8px"></div>
@@ -1067,11 +1087,90 @@
       panel.style.display = 'block';
     }
 
-    function showUserDataModal(nodeId, displayName) {
-      const modal = document.getElementById('user-data-modal');
+    // Translation functions
+    async function translateText(text, targetLang) {
+      if(!text || !targetLang) return text;
+
+      try {
+        // Use MyMemory Translation API (free, no key required)
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${targetLang}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if(data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
+          return data.responseData.translatedText;
+        }
+        return text;
+      } catch(e) {
+        console.error('Translation error:', e);
+        return text;
+      }
+    }
+
+    async function renderUserDataTable(userData, username, translateLang = '') {
       const infoDiv = document.getElementById('user-data-info');
       const tableContainer = document.getElementById('user-data-table-container');
 
+      if(!userData || userData.length === 0) {
+        infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px;color:var(--muted)">No content found for this user.</div>`;
+        tableContainer.innerHTML = '';
+        return;
+      }
+
+      // Display user info with translation status
+      const translating = translateLang ? ' (translating...)' : '';
+      infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px">Found ${userData.length} post(s)${translating}</div>`;
+
+      // If translation requested, translate the data
+      let displayData = userData;
+      if(translateLang) {
+        displayData = await Promise.all(userData.map(async (row) => {
+          const translatedRow = {};
+          for(const [key, value] of Object.entries(row)) {
+            if(value && typeof value === 'string' && value.length > 0 && value.length < 500) {
+              // Only translate text fields under 500 chars to avoid API limits
+              translatedRow[key] = await translateText(value, translateLang);
+            } else {
+              translatedRow[key] = value;
+            }
+          }
+          return translatedRow;
+        }));
+
+        // Update info to show translation complete
+        infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px">Found ${userData.length} post(s) - Translated to ${translateLang.toUpperCase()}</div>`;
+      }
+
+      // Build data table
+      const columns = Object.keys(displayData[0]);
+      let tableHTML = '<table style="width:100%;border-collapse:collapse;margin-top:12px">';
+
+      // Header
+      tableHTML += '<thead><tr style="background:#1a1d24;border-bottom:2px solid var(--border)">';
+      columns.forEach(col => {
+        tableHTML += `<th style="padding:12px;text-align:left;font-weight:600">${col}</th>`;
+      });
+      tableHTML += '</tr></thead>';
+
+      // Body
+      tableHTML += '<tbody>';
+      displayData.forEach((row, idx) => {
+        const bgColor = idx % 2 === 0 ? '#13151b' : '#0b0c10';
+        tableHTML += `<tr style="background:${bgColor};border-bottom:1px solid var(--border)">`;
+        columns.forEach(col => {
+          const value = row[col] || '';
+          const displayValue = value.toString().length > 200 ? value.toString().substring(0, 200) + '...' : value;
+          tableHTML += `<td style="padding:12px;font-size:12px;vertical-align:top">${displayValue}</td>`;
+        });
+        tableHTML += '</tr>';
+      });
+      tableHTML += '</tbody></table>';
+
+      tableContainer.innerHTML = tableHTML;
+    }
+
+    function showUserDataModal(nodeId, displayName) {
+      const modal = document.getElementById('user-data-modal');
       const username = displayName || nodeId;
 
       // Try to get user data from graph nodes first (if uploaded with nodes file)
@@ -1095,46 +1194,15 @@
         });
       }
 
-      // If still no data, show message
-      if(userData.length === 0) {
-        infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px;color:var(--muted)">No content found for this user.</div>`;
-        tableContainer.innerHTML = '';
-        modal.style.display = 'block';
-        return;
-      }
+      // Store data for translation
+      currentModalUserData = userData;
+      currentModalUsername = username;
 
-      // Display user info
-      infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px">Found ${userData.length} post(s)</div>`;
+      // Reset translate dropdown
+      document.getElementById('translate-lang').value = '';
 
-      // Build data table
-      if(userData.length > 0) {
-        const columns = Object.keys(userData[0]);
-
-        let tableHTML = '<table style="width:100%;border-collapse:collapse;margin-top:12px">';
-
-        // Header
-        tableHTML += '<thead><tr style="background:#1a1d24;border-bottom:2px solid var(--border)">';
-        columns.forEach(col => {
-          tableHTML += `<th style="padding:12px;text-align:left;font-weight:600">${col}</th>`;
-        });
-        tableHTML += '</tr></thead>';
-
-        // Body
-        tableHTML += '<tbody>';
-        userData.forEach((row, idx) => {
-          const bgColor = idx % 2 === 0 ? '#13151b' : '#0b0c10';
-          tableHTML += `<tr style="background:${bgColor};border-bottom:1px solid var(--border)">`;
-          columns.forEach(col => {
-            const value = row[col] || '';
-            const displayValue = value.toString().length > 200 ? value.toString().substring(0, 200) + '...' : value;
-            tableHTML += `<td style="padding:12px;font-size:12px;vertical-align:top">${displayValue}</td>`;
-          });
-          tableHTML += '</tr>';
-        });
-        tableHTML += '</tbody></table>';
-
-        tableContainer.innerHTML = tableHTML;
-      }
+      // Render table without translation
+      renderUserDataTable(userData, username);
 
       modal.style.display = 'block';
     }
@@ -1152,6 +1220,14 @@
     document.getElementById('user-data-modal').onclick = (e) => {
       if(e.target.id === 'user-data-modal') {
         document.getElementById('user-data-modal').style.display = 'none';
+      }
+    };
+
+    // Wire up translate dropdown
+    document.getElementById('translate-lang').onchange = async (e) => {
+      const targetLang = e.target.value;
+      if(currentModalUserData && currentModalUsername) {
+        await renderUserDataTable(currentModalUserData, currentModalUsername, targetLang);
       }
     };
 
@@ -1580,6 +1656,8 @@
     let socialMediaData = null;  // Store original social media data for node lookup
     let socialMediaAuthorColumn = null;  // Store which column contains usernames
     let graphNodeContentMap = {};  // Map of node ID to content (from nodes file)
+    let currentModalUserData = null;  // Store current user data for translation
+    let currentModalUsername = null;  // Store current username
 
     btnSocialFile.onclick = () => socialFileInput.click();
     socialFileInput.onchange = () => {
