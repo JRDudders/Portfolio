@@ -31,6 +31,11 @@ from graph_processor import (
     get_graph_info
 )
 
+# Import social media edge extraction
+from graph_tasks import extract_social_media_edges
+import pandas as pd
+import io
+
 app = FastAPI(
     title="CiceroWatch Graph Analytics Service",
     description="Graph analytics microservice with GPU acceleration",
@@ -528,6 +533,123 @@ async def calculate_betweenness(
 
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Betweenness centrality computation failed: {str(e)}")
+
+
+@app.post("/prepare")
+async def prepare_social_media_graph(
+    file: UploadFile = File(..., description="CSV or XLSX file with social media data"),
+    sheet: str = Query("0", description="Sheet name or index for XLSX files"),
+    extract_hashtags: bool = Query(False, description="Extract hashtag edges (user->hashtag)")
+):
+    """
+    Convert social media CSV/XLSX into network edge lists.
+
+    Automatically detects columns (author, mentions, replies, retweets, quotes, URLs, hashtags)
+    and extracts various types of network relationships:
+
+    - **mention_edges**: User @mentions another user
+    - **reply_edges**: User replies to another user
+    - **retweet_edges**: User retweets another user
+    - **quote_edges**: User quotes another user
+    - **domain_edges**: User shares a URL domain
+    - **hashtag_edges**: User uses a hashtag (optional)
+    - **nodes**: All unique nodes with type annotations (user/domain/hashtag)
+
+    **Column Detection** (case-insensitive, substring matching):
+    - Author: author, username, user, screen_name, from, account
+    - Text: text, full_text, tweet, content, body
+    - Mentions: mentions, mentioned_users, entities_user_mentions
+    - Reply: in_reply_to_screen_name, in_reply_to_user, reply_to
+    - Retweet: retweeted_user, retweeted_username, rt_username
+    - Quote: quoted_user, quoted_username
+    - URLs: urls, entities_urls, links, expanded_urls
+    - Hashtags: hashtags, entities_hashtags
+
+    **Response Format**:
+    ```json
+    {
+      "success": true,
+      "edges": {
+        "mention_edges": [{"src": "user1", "dst": "user2"}, ...],
+        "reply_edges": [...],
+        "retweet_edges": [...],
+        "quote_edges": [...],
+        "domain_edges": [{"src": "user1", "dst": "example.com"}, ...],
+        "hashtag_edges": [{"src": "user1", "dst": "#politics"}, ...],
+        "nodes": [{"id": "user1", "type": "user"}, {"id": "example.com", "type": "domain"}, ...]
+      },
+      "stats": {
+        "mention_count": 150,
+        "reply_count": 50,
+        "retweet_count": 30,
+        "quote_count": 10,
+        "domain_count": 80,
+        "hashtag_count": 40,
+        "node_count": 200
+      }
+    }
+    ```
+
+    **Example Usage**:
+    ```bash
+    # CSV
+    curl -F "file=@tweets.csv" http://localhost:8002/prepare
+
+    # XLSX with hashtags
+    curl -F "file=@data.xlsx" http://localhost:8002/prepare?sheet=0&extract_hashtags=true
+
+    # Then use the edges for analysis
+    # Save mention_edges to file and upload to /metrics endpoint
+    ```
+    """
+    try:
+        # Read file
+        file_bytes = await file.read()
+        filename = file.filename or "data.csv"
+
+        # Load DataFrame
+        if filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+            # Parse sheet parameter (could be int or string)
+            try:
+                sheet_param = int(sheet)
+            except ValueError:
+                sheet_param = sheet
+
+            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_param)
+        else:
+            # Assume CSV
+            df = pd.read_csv(io.BytesIO(file_bytes))
+
+        # Extract edges
+        edges = extract_social_media_edges(df, extract_hashtags=extract_hashtags)
+
+        # Convert to dict
+        result = edges.to_dict()
+
+        return {
+            "success": True,
+            "edges": {
+                "mention_edges": result["mention_edges"],
+                "reply_edges": result["reply_edges"],
+                "retweet_edges": result["retweet_edges"],
+                "quote_edges": result["quote_edges"],
+                "domain_edges": result["domain_edges"],
+                "hashtag_edges": result["hashtag_edges"],
+                "nodes": result["nodes"]
+            },
+            "stats": result["stats"]
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not detect required columns: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Social media graph preparation failed: {str(e)}"
+        )
 
 
 if __name__ == "__main__":
