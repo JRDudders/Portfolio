@@ -1594,7 +1594,7 @@ def extract_social_media_edges(
     # Build user content dictionary (aggregate posts by author)
     user_content = {}
     if col_author:
-        # Collect columns to preserve
+        # Collect columns to preserve (only if they exist)
         content_cols = []
         if col_text:
             content_cols.append(col_text)
@@ -1613,49 +1613,53 @@ def extract_social_media_edges(
         if col_hashtags:
             content_cols.append(col_hashtags)
 
-        # Group by author and aggregate content
-        for idx, row in df.iterrows():
-            author = _normalize_user(row[col_author])
-            if not author:
-                continue
+        # Only process if we have columns to preserve
+        if content_cols:
+            # Group by author and aggregate content
+            for idx, row in df.iterrows():
+                author = _normalize_user(row[col_author])
+                if not author:
+                    continue
 
-            if author not in user_content:
-                user_content[author] = []
+                if author not in user_content:
+                    user_content[author] = []
 
-            post_data = {}
-            for col in content_cols:
-                if col in row:
-                    val = row[col]
-                    # Convert to string, handle NaN
-                    if pd.isna(val):
-                        post_data[col] = ""
-                    else:
-                        post_data[col] = str(val)
+                post_data = {}
+                for col in content_cols:
+                    if col in row:
+                        val = row[col]
+                        # Convert to string, handle NaN
+                        if pd.isna(val):
+                            post_data[col] = ""
+                        else:
+                            post_data[col] = str(val)
 
-            user_content[author].append(post_data)
+                # Only add if we got some data
+                if post_data:
+                    user_content[author].append(post_data)
 
     # Create nodes DataFrame with type annotations and content
     node_rows = []
     for node in sorted(all_nodes):
         if node in hashtags:
             node_type = "hashtag"
-            node_row = {"id": str(node), "type": node_type}
         elif node in domains:
             node_type = "domain"
-            node_row = {"id": str(node), "type": node_type}
         else:
             node_type = "user"
-            node_row = {"id": str(node), "type": node_type}
 
-            # Add content for user nodes
-            if node in user_content:
-                # Store content as JSON string for CSV compatibility
-                import json
-                node_row["content"] = json.dumps(user_content[node])
-                node_row["post_count"] = len(user_content[node])
-            else:
-                node_row["content"] = "[]"
-                node_row["post_count"] = 0
+        # Create base node row
+        node_row = {"id": str(node), "type": node_type}
+
+        # Add content for all nodes (always add fields for consistency)
+        if node_type == "user" and node in user_content and user_content[node]:
+            # Store content as JSON string for CSV compatibility
+            node_row["content"] = json.dumps(user_content[node], ensure_ascii=False)
+            node_row["post_count"] = len(user_content[node])
+        else:
+            # Empty content for non-user nodes or users without content
+            node_row["content"] = "[]"
+            node_row["post_count"] = 0
 
         node_rows.append(node_row)
 
