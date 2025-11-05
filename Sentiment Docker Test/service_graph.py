@@ -94,9 +94,10 @@ async def health_check():
 async def load_graph_file(
     edges_file: UploadFile = File(..., description="Edge list (CSV/JSON/.edge)"),
     nodes_file: Optional[UploadFile] = File(None, description="Optional node attributes"),
+    compute_centrality: bool = Query(True, description="Compute centrality measures (PageRank, Betweenness, Eigenvector, Degree)")
 ):
     """
-    Load and validate a graph file
+    Load and validate a graph file with optional centrality computation
     """
     try:
         # Read edges file
@@ -113,8 +114,8 @@ async def load_graph_file(
         # Load graph
         graph = load_graph(edges_bytes, edges_kind, nodes_bytes, nodes_kind)
 
-        # Get graph info
-        info = get_graph_info(graph)
+        # Get graph info with optional centrality computation
+        info = get_graph_info(graph, include_centrality=compute_centrality)
 
         return {
             "success": True,
@@ -180,6 +181,7 @@ class GraphURLRequest(BaseModel):
     """Request model for loading graph from URLs"""
     edges_url: HttpUrl
     nodes_url: Optional[HttpUrl] = None
+    compute_centrality: bool = True
 
 
 class EgoNetworkURLRequest(BaseModel):
@@ -214,8 +216,8 @@ async def load_graph_from_url(request: GraphURLRequest):
         # Load graph
         graph = load_graph(edges_bytes, edges_kind, nodes_bytes, nodes_kind)
 
-        # Get graph info
-        info = get_graph_info(graph)
+        # Get graph info with optional centrality computation
+        info = get_graph_info(graph, include_centrality=request.compute_centrality)
 
         return {
             "success": True,
