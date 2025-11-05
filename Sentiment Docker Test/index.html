@@ -776,6 +776,12 @@
       const nodeIds = new Set(nodesToShow.map(n => n.id));
       const edgesToShow = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
+      // Build content map from nodes (preserve all node attributes including content)
+      graphNodeContentMap = {};
+      for(const node of data.nodes){
+        graphNodeContentMap[node.id] = node;
+      }
+
       // Prepare vis.js data with name field support
       const visNodes = nodesToShow.map(n => {
         // Use 'name' field if available, otherwise use 'id'
@@ -1046,8 +1052,12 @@
 
       content.innerHTML = html;
 
-      // Show "View User's Content" button only if we have social media data
-      if(socialMediaData && socialMediaAuthorColumn) {
+      // Show "View User's Content" button if we have content data
+      const nodeData = graphNodeContentMap[nodeId];
+      const hasNodeContent = nodeData && nodeData.content && nodeData.content !== '[]';
+      const hasSocialData = socialMediaData && socialMediaAuthorColumn;
+
+      if(hasNodeContent || hasSocialData) {
         viewDataBtn.style.display = 'block';
         viewDataBtn.onclick = () => showUserDataModal(nodeId, node.displayName || nodeId);
       } else {
@@ -1062,20 +1072,32 @@
       const infoDiv = document.getElementById('user-data-info');
       const tableContainer = document.getElementById('user-data-table-container');
 
-      if(!socialMediaData || !socialMediaAuthorColumn) {
-        alert('No social media data available. Extract edges from a social media file first.');
-        return;
+      const username = displayName || nodeId;
+
+      // Try to get user data from graph nodes first (if uploaded with nodes file)
+      let userData = [];
+      const nodeData = graphNodeContentMap[nodeId];
+
+      if(nodeData && nodeData.content) {
+        try {
+          // Parse JSON content from nodes file
+          userData = JSON.parse(nodeData.content);
+        } catch(e) {
+          console.error('Failed to parse node content:', e);
+        }
       }
 
-      // Filter data for this user
-      const username = displayName || nodeId;
-      const userData = socialMediaData.filter(row => {
-        const author = row[socialMediaAuthorColumn];
-        return author && author.toString().toLowerCase() === username.toLowerCase();
-      });
+      // Fallback to socialMediaData if no content in nodes
+      if(userData.length === 0 && socialMediaData && socialMediaAuthorColumn) {
+        userData = socialMediaData.filter(row => {
+          const author = row[socialMediaAuthorColumn];
+          return author && author.toString().toLowerCase() === username.toLowerCase();
+        });
+      }
 
+      // If still no data, show message
       if(userData.length === 0) {
-        infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px;color:var(--muted)">No content found for this user in the dataset.</div>`;
+        infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px;color:var(--muted)">No content found for this user.</div>`;
         tableContainer.innerHTML = '';
         modal.style.display = 'block';
         return;
@@ -1557,6 +1579,7 @@
     let extractedEdges = null;
     let socialMediaData = null;  // Store original social media data for node lookup
     let socialMediaAuthorColumn = null;  // Store which column contains usernames
+    let graphNodeContentMap = {};  // Map of node ID to content (from nodes file)
 
     btnSocialFile.onclick = () => socialFileInput.click();
     socialFileInput.onchange = () => {
@@ -1645,13 +1668,29 @@
         alert('No nodes were found.');
         return;
       }
-      const rows = ['id,type'];
-      for(const n of nodes){
-        rows.push(`${escapeCSVField(n.id)},${escapeCSVField(n.type)}`);
+
+      // Check if nodes have content (for backward compatibility)
+      const hasContent = nodes.some(n => n.content !== undefined);
+
+      if(hasContent){
+        // Include content and post_count columns
+        const rows = ['id,type,content,post_count'];
+        for(const n of nodes){
+          rows.push(`${escapeCSVField(n.id)},${escapeCSVField(n.type)},${escapeCSVField(n.content || '[]')},${escapeCSVField(n.post_count || 0)}`);
+        }
+        const csv = rows.join('\n');
+        const blob = new Blob([csv], {type: 'text/csv'});
+        downloadBlob(blob, filename);
+      } else {
+        // Legacy format (just id and type)
+        const rows = ['id,type'];
+        for(const n of nodes){
+          rows.push(`${escapeCSVField(n.id)},${escapeCSVField(n.type)}`);
+        }
+        const csv = rows.join('\n');
+        const blob = new Blob([csv], {type: 'text/csv'});
+        downloadBlob(blob, filename);
       }
-      const csv = rows.join('\n');
-      const blob = new Blob([csv], {type: 'text/csv'});
-      downloadBlob(blob, filename);
     }
 
     document.getElementById('download-mention-edges').onclick = () => {

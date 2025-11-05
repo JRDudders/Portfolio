@@ -1565,7 +1565,7 @@ def extract_social_media_edges(
     domain_df = _to_edge_df(domain_pairs)
     hashtag_df = _to_edge_df(hashtag_pairs)
 
-    # === Build Nodes with Type Annotations ===
+    # === Build Nodes with Type Annotations and Content ===
     all_nodes = set()
     domains = set()
     hashtags = set()
@@ -1587,18 +1587,75 @@ def extract_social_media_edges(
         hashtags.update(hashtag_df["dst"].tolist())
         all_nodes.update(hashtags)
 
-    # Create nodes DataFrame with type annotations
+    # Build user content dictionary (aggregate posts by author)
+    user_content = {}
+    if col_author:
+        # Collect columns to preserve
+        content_cols = []
+        if col_text:
+            content_cols.append(col_text)
+        if col_timestamp:
+            content_cols.append(col_timestamp)
+        if col_mentions:
+            content_cols.append(col_mentions)
+        if col_reply:
+            content_cols.append(col_reply)
+        if col_rt:
+            content_cols.append(col_rt)
+        if col_quote:
+            content_cols.append(col_quote)
+        if col_urls:
+            content_cols.append(col_urls)
+        if col_hashtags:
+            content_cols.append(col_hashtags)
+
+        # Group by author and aggregate content
+        for idx, row in df.iterrows():
+            author = _normalize_user(row[col_author])
+            if not author:
+                continue
+
+            if author not in user_content:
+                user_content[author] = []
+
+            post_data = {}
+            for col in content_cols:
+                if col in row:
+                    val = row[col]
+                    # Convert to string, handle NaN
+                    if pd.isna(val):
+                        post_data[col] = ""
+                    else:
+                        post_data[col] = str(val)
+
+            user_content[author].append(post_data)
+
+    # Create nodes DataFrame with type annotations and content
     node_rows = []
     for node in sorted(all_nodes):
         if node in hashtags:
             node_type = "hashtag"
+            node_row = {"id": str(node), "type": node_type}
         elif node in domains:
             node_type = "domain"
+            node_row = {"id": str(node), "type": node_type}
         else:
             node_type = "user"
-        node_rows.append({"id": str(node), "type": node_type})
+            node_row = {"id": str(node), "type": node_type}
 
-    nodes_df = pd.DataFrame(node_rows) if node_rows else pd.DataFrame(columns=["id", "type"])
+            # Add content for user nodes
+            if node in user_content:
+                # Store content as JSON string for CSV compatibility
+                import json
+                node_row["content"] = json.dumps(user_content[node])
+                node_row["post_count"] = len(user_content[node])
+            else:
+                node_row["content"] = "[]"
+                node_row["post_count"] = 0
+
+        node_rows.append(node_row)
+
+    nodes_df = pd.DataFrame(node_rows) if node_rows else pd.DataFrame(columns=["id", "type", "content", "post_count"])
 
     return SocialMediaEdges(
         mention_edges=mention_df,
