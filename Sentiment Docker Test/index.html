@@ -1466,12 +1466,26 @@
     };
 
     // Download handlers for social media edges
+    function escapeCSVField(field){
+      // Convert to string and handle special characters
+      const str = String(field ?? '');
+      // If field contains comma, quote, or newline, wrap in quotes and escape internal quotes
+      if(str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')){
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    }
+
     function downloadEdgeCSV(edges, filename){
       if(!edges || edges.length === 0){
         alert('No edges of this type were found.');
         return;
       }
-      const csv = 'src,dst\n' + edges.map(e => `${e.src},${e.dst}`).join('\n');
+      const rows = ['src,dst'];
+      for(const e of edges){
+        rows.push(`${escapeCSVField(e.src)},${escapeCSVField(e.dst)}`);
+      }
+      const csv = rows.join('\n');
       const blob = new Blob([csv], {type: 'text/csv'});
       downloadBlob(blob, filename);
     }
@@ -1481,7 +1495,11 @@
         alert('No nodes were found.');
         return;
       }
-      const csv = 'id,type\n' + nodes.map(n => `${n.id},${n.type}`).join('\n');
+      const rows = ['id,type'];
+      for(const n of nodes){
+        rows.push(`${escapeCSVField(n.id)},${escapeCSVField(n.type)}`);
+      }
+      const csv = rows.join('\n');
       const blob = new Blob([csv], {type: 'text/csv'});
       downloadBlob(blob, filename);
     }

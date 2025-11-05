@@ -179,10 +179,11 @@ def _coerce_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_edges_csv(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
-    df = pd.read_csv(io.BytesIO(file_bytes))
+    # Use standard CSV quoting to handle fields with commas, quotes, etc.
+    df = pd.read_csv(io.BytesIO(file_bytes), quotechar='"', skipinitialspace=True)
     if df.shape[1] < 2:
         # Try no-header
-        df = pd.read_csv(io.BytesIO(file_bytes), header=None)
+        df = pd.read_csv(io.BytesIO(file_bytes), header=None, quotechar='"', skipinitialspace=True)
     df = _coerce_columns(df)
     df = df.dropna(subset=["src", "dst"]).astype({"src": str, "dst": str})
     return df
@@ -202,7 +203,8 @@ def load_edges_json(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
 
 def load_nodes_csv(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
     """Load node list from CSV with attributes. First column must be node ID."""
-    df = pd.read_csv(io.BytesIO(file_bytes))
+    # Use standard CSV quoting to handle fields with commas, quotes, etc.
+    df = pd.read_csv(io.BytesIO(file_bytes), quotechar='"', skipinitialspace=True)
     if df.shape[1] < 1:
         raise ValueError("Node CSV must have at least one column (id)")
 
