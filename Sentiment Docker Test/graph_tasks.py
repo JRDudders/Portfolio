@@ -42,10 +42,13 @@ Ego Network Formats (SNAP-style):
 """
 from __future__ import annotations
 
+import ast
 import io
 import json
+import re
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlparse
 import typing as T
 
 import numpy as np
@@ -176,10 +179,58 @@ def _coerce_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_edges_csv(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
-    df = pd.read_csv(io.BytesIO(file_bytes))
+    # Use standard CSV quoting to handle fields with commas, quotes, etc.
+    # Try with strict RFC 4180 compliance first
+    try:
+        df = pd.read_csv(
+            io.BytesIO(file_bytes),
+            quotechar='"',
+            doublequote=True,
+            skipinitialspace=True,
+            on_bad_lines='error'
+        )
+    except pd.errors.ParserError as e:
+        # If parsing fails, try with more lenient settings
+        try:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                on_bad_lines='skip',
+                engine='python'  # Python engine is more lenient
+            )
+        except Exception:
+            # Last resort: try assuming all fields are quoted
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                quoting=1,  # QUOTE_ALL
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                engine='python'
+            )
+
     if df.shape[1] < 2:
         # Try no-header
-        df = pd.read_csv(io.BytesIO(file_bytes), header=None)
+        try:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                header=None,
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True
+            )
+        except Exception:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                header=None,
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                engine='python'
+            )
+
     df = _coerce_columns(df)
     df = df.dropna(subset=["src", "dst"]).astype({"src": str, "dst": str})
     return df
@@ -199,7 +250,36 @@ def load_edges_json(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
 
 def load_nodes_csv(file_bytes: bytes, encoding: str = "utf-8") -> pd.DataFrame:
     """Load node list from CSV with attributes. First column must be node ID."""
-    df = pd.read_csv(io.BytesIO(file_bytes))
+    # Use standard CSV quoting to handle fields with commas, quotes, etc.
+    try:
+        df = pd.read_csv(
+            io.BytesIO(file_bytes),
+            quotechar='"',
+            doublequote=True,
+            skipinitialspace=True,
+            on_bad_lines='error'
+        )
+    except pd.errors.ParserError:
+        # Try with lenient parsing
+        try:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                on_bad_lines='skip',
+                engine='python'
+            )
+        except Exception:
+            df = pd.read_csv(
+                io.BytesIO(file_bytes),
+                quoting=1,
+                quotechar='"',
+                doublequote=True,
+                skipinitialspace=True,
+                engine='python'
+            )
+
     if df.shape[1] < 1:
         raise ValueError("Node CSV must have at least one column (id)")
 
@@ -1158,3 +1238,439 @@ def run_graph_metrics(
         else:
             raise ValueError(f"Unknown graph task: {t}")
     return out
+
+
+# ==============================================================================
+# Social Media Edge Extraction (Twitter/CSV/XLSX → Network Edges)
+# ==============================================================================
+
+# Column detection heuristics (case-insensitive)
+_SOCIAL_MEDIA_COLUMNS = {
+    "author": [
+        "author", "username", "user", "screen_name", "from", "account",
+        "author_username", "user_screen_name", "user_name"
+    ],
+    "text": [
+        "text", "full_text", "tweet", "content", "body"
+    ],
+    "mentions": [
+        "mentions", "mentioned_users", "entities_user_mentions",
+        "user_mentions", "entities.mentions", "users_mentioned"
+    ],
+    "in_reply_to": [
+        "in_reply_to_screen_name", "in_reply_to_user", "reply_to",
+        "reply_to_username", "in_reply_to"
+    ],
+    "retweeted_user": [
+        "retweet_of", "retweeted_user", "retweeted_username",
+        "rt_username", "retweeted_screen_name"
+    ],
+    "quoted_user": [
+        "quoted_user", "quoted_username", "quoted_screen_name"
+    ],
+    "urls": [
+        "urls", "entities_urls", "entities.urls", "links", "expanded_urls"
+    ],
+    "hashtags": [
+        "hashtags", "entities_hashtags", "entities.hashtags"
+    ],
+    "timestamp": [
+        "created_at", "timestamp", "date", "datetime", "time", "posted_at", "created"
+    ],
+}
+
+
+def _pick_column(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
+    """Find first matching column name from candidates (case-insensitive)."""
+    cols_lower = {c.lower(): c for c in df.columns}
+
+    # Exact match
+    for candidate in candidates:
+        if candidate.lower() in cols_lower:
+            return cols_lower[candidate.lower()]
+
+    # Substring match
+    for candidate in candidates:
+        for col_lower, col_orig in cols_lower.items():
+            if candidate.lower() in col_lower:
+                return col_orig
+
+    return None
+
+
+def _parse_listish(value: T.Any) -> List[str]:
+    """Parse JSON/Python list, dict, or delimited string into list of strings."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+
+    s = str(value).strip()
+    if not s:
+        return []
+
+    # Try JSON
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        if isinstance(parsed, dict) and "username" in parsed:
+            return [parsed["username"]]
+    except Exception:
+        pass
+
+    # Try Python literal
+    try:
+        parsed = ast.literal_eval(s)
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        if isinstance(parsed, dict) and "username" in parsed:
+            return [parsed["username"]]
+    except Exception:
+        pass
+
+    # Comma-delimited
+    if "," in s:
+        return [token.strip("@ ").strip() for token in s.split(",") if token.strip()]
+
+    # @mentions in text
+    if "@" in s:
+        return [token.strip("@ ").strip() for token in re.findall(r"@([A-Za-z0-9_]{1,50})", s)]
+
+    return [s]
+
+
+_URL_RE = re.compile(r"https?://\S+")
+
+def _extract_domains(text: str) -> List[str]:
+    """Extract domain names from URLs in text."""
+    if not isinstance(text, str):
+        return []
+
+    urls = _URL_RE.findall(text)
+    domains = []
+
+    for url in urls:
+        try:
+            netloc = urlparse(url).netloc.lower()
+            if netloc:
+                # Strip www. prefix
+                domain = re.sub(r"^www\.", "", netloc)
+                domains.append(domain)
+        except Exception:
+            pass
+
+    return domains
+
+
+def _normalize_user(username: T.Any) -> Optional[str]:
+    """Normalize username by stripping whitespace and @ symbol."""
+    if username is None:
+        return None
+    s = str(username).strip()
+    if not s:
+        return None
+    return s.lstrip("@")
+
+
+def _to_edge_df(pairs: List[Tuple[str, str]]) -> pd.DataFrame:
+    """Convert list of (src, dst) pairs to DataFrame with deduplication."""
+    if not pairs:
+        return pd.DataFrame(columns=["src", "dst"])
+
+    df = pd.DataFrame(pairs, columns=["src", "dst"])
+    # Remove empty
+    df = df[df["src"].astype(bool) & df["dst"].astype(bool)]
+    # Stringify
+    df["src"] = df["src"].astype(str)
+    df["dst"] = df["dst"].astype(str)
+    # Deduplicate
+    df = df.drop_duplicates()
+    return df
+
+
+@dataclass
+class SocialMediaEdges:
+    """Container for extracted social media network edges."""
+    mention_edges: pd.DataFrame  # user mentions another user
+    reply_edges: pd.DataFrame    # user replies to another user
+    retweet_edges: pd.DataFrame  # user retweets another user
+    quote_edges: pd.DataFrame    # user quotes another user
+    domain_edges: pd.DataFrame   # user shares a domain
+    hashtag_edges: pd.DataFrame  # user uses a hashtag
+    nodes: pd.DataFrame          # all unique nodes with type annotations
+
+    def to_dict(self) -> Dict[str, T.Any]:
+        """Convert to JSON-serializable dict."""
+        return {
+            "mention_edges": self.mention_edges.to_dict(orient="records") if not self.mention_edges.empty else [],
+            "reply_edges": self.reply_edges.to_dict(orient="records") if not self.reply_edges.empty else [],
+            "retweet_edges": self.retweet_edges.to_dict(orient="records") if not self.retweet_edges.empty else [],
+            "quote_edges": self.quote_edges.to_dict(orient="records") if not self.quote_edges.empty else [],
+            "domain_edges": self.domain_edges.to_dict(orient="records") if not self.domain_edges.empty else [],
+            "hashtag_edges": self.hashtag_edges.to_dict(orient="records") if not self.hashtag_edges.empty else [],
+            "nodes": self.nodes.to_dict(orient="records") if not self.nodes.empty else [],
+            "stats": {
+                "mention_count": len(self.mention_edges),
+                "reply_count": len(self.reply_edges),
+                "retweet_count": len(self.retweet_edges),
+                "quote_count": len(self.quote_edges),
+                "domain_count": len(self.domain_edges),
+                "hashtag_count": len(self.hashtag_edges),
+                "node_count": len(self.nodes),
+            }
+        }
+
+
+def extract_social_media_edges(
+    df: pd.DataFrame,
+    extract_hashtags: bool = False
+) -> SocialMediaEdges:
+    """
+    Extract network edges from social media data (Twitter CSV/XLSX).
+
+    Automatically detects column names using heuristics and extracts:
+    - Mention edges (user @mentions another)
+    - Reply edges (user replies to another)
+    - Retweet edges (user retweets another)
+    - Quote edges (user quotes another)
+    - Domain edges (user shares a URL domain)
+    - Hashtag edges (user uses a hashtag) - optional
+
+    Args:
+        df: DataFrame with social media data
+        extract_hashtags: If True, also extract user→hashtag edges
+
+    Returns:
+        SocialMediaEdges object with all edge types and nodes
+
+    Raises:
+        ValueError: If no author/user column can be detected
+    """
+    # Detect columns
+    col_author = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["author"])
+    col_text = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["text"])
+    col_mentions = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["mentions"])
+    col_reply = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["in_reply_to"])
+    col_rt = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["retweeted_user"])
+    col_quote = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["quoted_user"])
+    col_urls = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["urls"])
+    col_hashtags = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["hashtags"])
+    col_timestamp = _pick_column(df, _SOCIAL_MEDIA_COLUMNS["timestamp"])
+
+    if not col_author:
+        raise ValueError(
+            f"Could not detect author/user column. Expected one of: {_SOCIAL_MEDIA_COLUMNS['author']}"
+        )
+
+    # Extract author (required)
+    authors = df[col_author].map(_normalize_user)
+
+    # === Mention Edges ===
+    mention_pairs = []
+    if col_mentions:
+        mentions_lists = df[col_mentions].map(_parse_listish)
+    elif col_text:
+        mentions_lists = df[col_text].map(_parse_listish)
+    else:
+        mentions_lists = pd.Series([[]] * len(df))
+
+    for author, mentions in zip(authors, mentions_lists):
+        author = _normalize_user(author)
+        for mention in mentions:
+            mention = _normalize_user(mention)
+            if author and mention and mention != author:
+                mention_pairs.append((author, mention))
+
+    # === Reply Edges ===
+    reply_pairs = []
+    if col_reply:
+        for author, reply_to in zip(authors, df[col_reply]):
+            author = _normalize_user(author)
+            reply_to = _normalize_user(reply_to)
+            if author and reply_to and reply_to != author:
+                reply_pairs.append((author, reply_to))
+
+    # === Retweet Edges ===
+    rt_pairs = []
+    if col_rt:
+        for author, rt_user in zip(authors, df[col_rt]):
+            author = _normalize_user(author)
+            rt_user = _normalize_user(rt_user)
+            if author and rt_user and rt_user != author:
+                rt_pairs.append((author, rt_user))
+
+    # === Quote Edges ===
+    quote_pairs = []
+    if col_quote:
+        for author, quote_user in zip(authors, df[col_quote]):
+            author = _normalize_user(author)
+            quote_user = _normalize_user(quote_user)
+            if author and quote_user and quote_user != author:
+                quote_pairs.append((author, quote_user))
+
+    # === Domain Edges ===
+    domain_pairs = []
+    text_series = df[col_text] if col_text else pd.Series([""] * len(df))
+
+    if col_urls:
+        url_field = df[col_urls]
+        for author, url_data, text in zip(authors, url_field, text_series):
+            author = _normalize_user(author)
+            domains = []
+            # Parse URL field
+            domains.extend(_parse_listish(url_data))
+            # Also parse text for URLs
+            domains.extend(_extract_domains(str(text)))
+
+            for domain in domains:
+                # Handle both raw domains and full URLs
+                host = urlparse(domain if domain.startswith("http") else f"http://{domain}").netloc or domain
+                host = re.sub(r"^www\.", "", host.lower())
+                if author and host:
+                    domain_pairs.append((author, host))
+    else:
+        # No explicit URL column - extract from text
+        for author, text in zip(authors, text_series):
+            author = _normalize_user(author)
+            for domain in _extract_domains(str(text)):
+                if author and domain:
+                    domain_pairs.append((author, domain))
+
+    # === Hashtag Edges ===
+    hashtag_pairs = []
+    if extract_hashtags:
+        if col_hashtags:
+            hashtags_lists = df[col_hashtags].map(_parse_listish)
+        elif col_text:
+            # Extract #hashtags from text
+            def extract_hashtags(text: str) -> List[str]:
+                if not isinstance(text, str):
+                    return []
+                return [tag.lower() for tag in re.findall(r"#(\w+)", text)]
+
+            hashtags_lists = text_series.map(extract_hashtags)
+        else:
+            hashtags_lists = pd.Series([[]] * len(df))
+
+        for author, hashtags in zip(authors, hashtags_lists):
+            author = _normalize_user(author)
+            for hashtag in hashtags:
+                hashtag = str(hashtag).strip().lstrip("#").lower()
+                if author and hashtag:
+                    hashtag_pairs.append((author, f"#{hashtag}"))
+
+    # === Convert to DataFrames ===
+    mention_df = _to_edge_df(mention_pairs)
+    reply_df = _to_edge_df(reply_pairs)
+    retweet_df = _to_edge_df(rt_pairs)
+    quote_df = _to_edge_df(quote_pairs)
+    domain_df = _to_edge_df(domain_pairs)
+    hashtag_df = _to_edge_df(hashtag_pairs)
+
+    # === Build Nodes with Type Annotations and Content ===
+    all_nodes = set()
+    domains = set()
+    hashtags = set()
+
+    # Collect user nodes from interaction edges
+    for edge_df in [mention_df, reply_df, retweet_df, quote_df]:
+        if not edge_df.empty:
+            all_nodes.update(edge_df["src"].tolist())
+            all_nodes.update(edge_df["dst"].tolist())
+
+    # Add domains and hashtags with type markers
+    if not domain_df.empty:
+        all_nodes.update(domain_df["src"].tolist())
+        domains.update(domain_df["dst"].tolist())
+        all_nodes.update(domains)
+
+    if not hashtag_df.empty:
+        all_nodes.update(hashtag_df["src"].tolist())
+        hashtags.update(hashtag_df["dst"].tolist())
+        all_nodes.update(hashtags)
+
+    # Build user content dictionary (aggregate posts by author)
+    user_content = {}
+    if col_author:
+        # Collect columns to preserve (only if they exist)
+        content_cols = []
+        if col_text:
+            content_cols.append(col_text)
+        if col_timestamp:
+            content_cols.append(col_timestamp)
+        if col_mentions:
+            content_cols.append(col_mentions)
+        if col_reply:
+            content_cols.append(col_reply)
+        if col_rt:
+            content_cols.append(col_rt)
+        if col_quote:
+            content_cols.append(col_quote)
+        if col_urls:
+            content_cols.append(col_urls)
+        if col_hashtags:
+            content_cols.append(col_hashtags)
+
+        # Only process if we have columns to preserve
+        if content_cols:
+            # Group by author and aggregate content
+            for idx, row in df.iterrows():
+                author = _normalize_user(row[col_author])
+                if not author:
+                    continue
+
+                if author not in user_content:
+                    user_content[author] = []
+
+                post_data = {}
+                for col in content_cols:
+                    if col in row:
+                        val = row[col]
+                        # Convert to string, handle NaN
+                        if pd.isna(val):
+                            post_data[col] = ""
+                        else:
+                            post_data[col] = str(val)
+
+                # Only add if we got some data
+                if post_data:
+                    user_content[author].append(post_data)
+
+    # Create nodes DataFrame with type annotations and content
+    node_rows = []
+    for node in sorted(all_nodes):
+        if node in hashtags:
+            node_type = "hashtag"
+        elif node in domains:
+            node_type = "domain"
+        else:
+            node_type = "user"
+
+        # Create base node row
+        node_row = {"id": str(node), "type": node_type}
+
+        # Add content for all nodes (always add fields for consistency)
+        if node_type == "user" and node in user_content and user_content[node]:
+            # Store content as JSON string for CSV compatibility
+            node_row["content"] = json.dumps(user_content[node], ensure_ascii=False)
+            node_row["post_count"] = len(user_content[node])
+        else:
+            # Empty content for non-user nodes or users without content
+            node_row["content"] = "[]"
+            node_row["post_count"] = 0
+
+        node_rows.append(node_row)
+
+    nodes_df = pd.DataFrame(node_rows) if node_rows else pd.DataFrame(columns=["id", "type", "content", "post_count"])
+
+    return SocialMediaEdges(
+        mention_edges=mention_df,
+        reply_edges=reply_df,
+        retweet_edges=retweet_df,
+        quote_edges=quote_df,
+        domain_edges=domain_df,
+        hashtag_edges=hashtag_df,
+        nodes=nodes_df
+    )

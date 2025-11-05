@@ -346,7 +346,101 @@
       </div>
       <div id="status-ego-url" class="status"></div>
     </div>
+
+    <!-- SOCIAL MEDIA EDGE EXTRACTION -->
+    <div class="card" style="margin-top:16px">
+      <h2>Social Media Network Extractor</h2>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">
+        Upload Twitter/social media CSV or Excel file to automatically extract network edges (mentions, replies, retweets, quotes, domains, hashtags).
+        <br>Auto-detects columns like: author, username, text, mentions, in_reply_to, retweeted_user, urls, hashtags.
+      </p>
+
+      <label>Social Media Data File (CSV or XLSX)</label>
+      <div class="inline">
+        <button class="btn" id="btn-social-file">Choose File</button>
+        <span class="file-name" id="social-file-name">No file selected</span>
+        <input type="file" id="social-file-input" style="display:none" accept=".csv,.xlsx,.xlsm,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
+      </div>
+
+      <label for="social-sheet">Excel Sheet (name or index, for XLSX only)</label>
+      <input id="social-sheet" type="text" value="0" placeholder="0 (first sheet)"/>
+
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px">
+        <input type="checkbox" id="social-hashtags" style="width:auto;margin:0"/>
+        <span>Extract hashtag edges (user→#hashtag)</span>
+      </label>
+
+      <div class="controls">
+        <button class="btn primary" id="run-social">Extract Network Edges</button>
+      </div>
+      <div id="status-social" class="status"></div>
+
+      <!-- Results display -->
+      <div id="social-results" style="display:none;margin-top:16px">
+        <div class="card" style="background:#0f1117;padding:12px">
+          <h3 style="font-size:14px;margin:0 0 10px">Extracted Network Edges</h3>
+          <div id="social-stats" style="font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+
+          <div style="display:grid;gap:8px">
+            <button class="btn" id="download-mention-edges">Download Mention Edges</button>
+            <button class="btn" id="download-reply-edges">Download Reply Edges</button>
+            <button class="btn" id="download-retweet-edges">Download Retweet Edges</button>
+            <button class="btn" id="download-quote-edges">Download Quote Edges</button>
+            <button class="btn" id="download-domain-edges">Download Domain Edges</button>
+            <button class="btn" id="download-hashtag-edges">Download Hashtag Edges</button>
+            <button class="btn" id="download-nodes">Download All Nodes</button>
+            <button class="btn primary" id="download-all-edges">Download All (JSON)</button>
+          </div>
+
+          <p style="font-size:11px;color:var(--muted);margin-top:12px">
+            💡 Tip: Download specific edge types and upload them above for analysis (PageRank, degrees, etc.)
+          </p>
+        </div>
+      </div>
+    </div>
     </div><!-- End Graph Tab -->
+
+    <!-- Node Info Panel (overlay) -->
+    <div id="node-info-panel" style="display:none;position:fixed;bottom:20px;right:20px;background:#1a1d24;border:1px solid var(--border);border-radius:12px;padding:16px;min-width:300px;max-width:400px;box-shadow:0 4px 12px rgba(0,0,0,0.5);z-index:10000">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px">
+        <h3 style="margin:0;font-size:16px">Node Information</h3>
+        <button id="close-node-info" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;padding:0;line-height:1">&times;</button>
+      </div>
+      <div id="node-info-content" style="font-size:13px;line-height:1.6"></div>
+      <button id="view-user-data-btn" class="btn primary" style="width:100%;margin-top:12px;display:none">View User's Content</button>
+    </div>
+
+    <!-- User Data Modal -->
+    <div id="user-data-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10001;overflow:auto">
+      <div style="max-width:1200px;margin:40px auto;background:#0b0c10;border:1px solid var(--border);border-radius:12px;padding:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <div style="display:flex;align-items:center;gap:16px">
+            <h2 style="margin:0">User Content</h2>
+            <div style="display:flex;align-items:center;gap:8px">
+              <label for="translate-lang" style="font-size:13px;color:var(--muted)">Translate:</label>
+              <select id="translate-lang" style="padding:4px 8px;background:#1a1d24;border:1px solid var(--border);border-radius:4px;color:#e6e6e6;font-size:13px">
+                <option value="">None</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ru">Russian</option>
+                <option value="zh">Chinese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="ar">Arabic</option>
+                <option value="hi">Hindi</option>
+              </select>
+            </div>
+          </div>
+          <button id="close-user-modal" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:28px;padding:0;line-height:1">&times;</button>
+        </div>
+        <div id="user-data-info" style="margin-bottom:16px;padding:12px;background:#13151b;border-radius:8px"></div>
+        <div id="user-data-table-container" style="overflow-x:auto"></div>
+      </div>
+    </div>
 
     <!-- Audio Deepfake Detection Tab Content -->
     <div id="tab-audio" class="tab-content">
@@ -702,6 +796,12 @@
       const nodeIds = new Set(nodesToShow.map(n => n.id));
       const edgesToShow = data.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target));
 
+      // Build content map from nodes (preserve all node attributes including content)
+      graphNodeContentMap = {};
+      for(const node of data.nodes){
+        graphNodeContentMap[node.id] = node;
+      }
+
       // Prepare vis.js data with name field support
       const visNodes = nodesToShow.map(n => {
         // Use 'name' field if available, otherwise use 'id'
@@ -797,27 +897,22 @@
         }
       });
 
-      // Click to pin label
+      // Click to show node info
       currentGraphNetwork.on('click', (params) => {
         if(params.nodes.length > 0){
           const nodeId = params.nodes[0];
           const node = currentGraphNodesData.get(nodeId);
+          showNodeInfo(nodeId, node);
+        }
+      });
 
-          if(selectedNodes.has(nodeId)){
-            // Unpin
-            selectedNodes.delete(nodeId);
-            currentGraphNodesData.update({id: nodeId, label: undefined});
-          } else {
-            // Pin
-            selectedNodes.add(nodeId);
-            currentGraphNodesData.update({id: nodeId, label: node.displayName});
-          }
-        } else {
-          // Clicked on canvas - unpin all
-          selectedNodes.forEach(nodeId => {
-            currentGraphNodesData.update({id: nodeId, label: undefined});
-          });
-          selectedNodes.clear();
+      // Right-click context menu
+      currentGraphNetwork.on('oncontext', (params) => {
+        params.event.preventDefault();
+        const nodeId = currentGraphNetwork.getNodeAt(params.pointer.DOM);
+        if(nodeId){
+          const node = currentGraphNodesData.get(nodeId);
+          showUserDataModal(nodeId, node.displayName || nodeId);
         }
       });
 
@@ -934,6 +1029,207 @@
         });
       });
     }
+
+    // --- Node Info and User Data Functions ---
+    function showNodeInfo(nodeId, node) {
+      const panel = document.getElementById('node-info-panel');
+      const content = document.getElementById('node-info-content');
+      const viewDataBtn = document.getElementById('view-user-data-btn');
+
+      if(!node) {
+        panel.style.display = 'none';
+        return;
+      }
+
+      // Build info display
+      let html = `<div style="margin-bottom:8px"><strong>ID:</strong> ${nodeId}</div>`;
+
+      if(node.displayName && node.displayName !== nodeId) {
+        html += `<div style="margin-bottom:8px"><strong>Name:</strong> ${node.displayName}</div>`;
+      }
+
+      // Show centrality measures if available
+      if(currentGraphData && currentGraphData.centrality) {
+        const cent = currentGraphData.centrality;
+        html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">`;
+        html += `<strong>Centrality Measures:</strong><br>`;
+
+        if(cent.pagerank && cent.pagerank[nodeId] !== undefined) {
+          html += `<div style="margin-top:4px">PageRank: ${cent.pagerank[nodeId].toFixed(4)}</div>`;
+        }
+        if(cent.betweenness && cent.betweenness[nodeId] !== undefined) {
+          html += `<div style="margin-top:4px">Betweenness: ${cent.betweenness[nodeId].toFixed(4)}</div>`;
+        }
+        if(cent.eigenvector && cent.eigenvector[nodeId] !== undefined) {
+          html += `<div style="margin-top:4px">Eigenvector: ${cent.eigenvector[nodeId].toFixed(4)}</div>`;
+        }
+        if(cent.degree && cent.degree[nodeId] !== undefined) {
+          html += `<div style="margin-top:4px">Degree: ${cent.degree[nodeId]}</div>`;
+        }
+
+        html += `</div>`;
+      }
+
+      content.innerHTML = html;
+
+      // Show "View User's Content" button if we have content data
+      const nodeData = graphNodeContentMap[nodeId];
+      const hasNodeContent = nodeData && nodeData.content && nodeData.content !== '[]';
+      const hasSocialData = socialMediaData && socialMediaAuthorColumn;
+
+      if(hasNodeContent || hasSocialData) {
+        viewDataBtn.style.display = 'block';
+        viewDataBtn.onclick = () => showUserDataModal(nodeId, node.displayName || nodeId);
+      } else {
+        viewDataBtn.style.display = 'none';
+      }
+
+      panel.style.display = 'block';
+    }
+
+    // Translation functions
+    async function translateText(text, targetLang) {
+      if(!text || !targetLang) return text;
+
+      try {
+        // Use MyMemory Translation API (free, no key required)
+        const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=auto|${targetLang}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if(data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
+          return data.responseData.translatedText;
+        }
+        return text;
+      } catch(e) {
+        console.error('Translation error:', e);
+        return text;
+      }
+    }
+
+    async function renderUserDataTable(userData, username, translateLang = '') {
+      const infoDiv = document.getElementById('user-data-info');
+      const tableContainer = document.getElementById('user-data-table-container');
+
+      if(!userData || userData.length === 0) {
+        infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px;color:var(--muted)">No content found for this user.</div>`;
+        tableContainer.innerHTML = '';
+        return;
+      }
+
+      // Display user info with translation status
+      const translating = translateLang ? ' (translating...)' : '';
+      infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px">Found ${userData.length} post(s)${translating}</div>`;
+
+      // If translation requested, translate the data
+      let displayData = userData;
+      if(translateLang) {
+        displayData = await Promise.all(userData.map(async (row) => {
+          const translatedRow = {};
+          for(const [key, value] of Object.entries(row)) {
+            if(value && typeof value === 'string' && value.length > 0 && value.length < 500) {
+              // Only translate text fields under 500 chars to avoid API limits
+              translatedRow[key] = await translateText(value, translateLang);
+            } else {
+              translatedRow[key] = value;
+            }
+          }
+          return translatedRow;
+        }));
+
+        // Update info to show translation complete
+        infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px">Found ${userData.length} post(s) - Translated to ${translateLang.toUpperCase()}</div>`;
+      }
+
+      // Build data table
+      const columns = Object.keys(displayData[0]);
+      let tableHTML = '<table style="width:100%;border-collapse:collapse;margin-top:12px">';
+
+      // Header
+      tableHTML += '<thead><tr style="background:#1a1d24;border-bottom:2px solid var(--border)">';
+      columns.forEach(col => {
+        tableHTML += `<th style="padding:12px;text-align:left;font-weight:600">${col}</th>`;
+      });
+      tableHTML += '</tr></thead>';
+
+      // Body
+      tableHTML += '<tbody>';
+      displayData.forEach((row, idx) => {
+        const bgColor = idx % 2 === 0 ? '#13151b' : '#0b0c10';
+        tableHTML += `<tr style="background:${bgColor};border-bottom:1px solid var(--border)">`;
+        columns.forEach(col => {
+          const value = row[col] || '';
+          const displayValue = value.toString().length > 200 ? value.toString().substring(0, 200) + '...' : value;
+          tableHTML += `<td style="padding:12px;font-size:12px;vertical-align:top">${displayValue}</td>`;
+        });
+        tableHTML += '</tr>';
+      });
+      tableHTML += '</tbody></table>';
+
+      tableContainer.innerHTML = tableHTML;
+    }
+
+    function showUserDataModal(nodeId, displayName) {
+      const modal = document.getElementById('user-data-modal');
+      const username = displayName || nodeId;
+
+      // Try to get user data from graph nodes first (if uploaded with nodes file)
+      let userData = [];
+      const nodeData = graphNodeContentMap[nodeId];
+
+      if(nodeData && nodeData.content) {
+        try {
+          // Parse JSON content from nodes file
+          userData = JSON.parse(nodeData.content);
+        } catch(e) {
+          console.error('Failed to parse node content:', e);
+        }
+      }
+
+      // Fallback to socialMediaData if no content in nodes
+      if(userData.length === 0 && socialMediaData && socialMediaAuthorColumn) {
+        userData = socialMediaData.filter(row => {
+          const author = row[socialMediaAuthorColumn];
+          return author && author.toString().toLowerCase() === username.toLowerCase();
+        });
+      }
+
+      // Store data for translation
+      currentModalUserData = userData;
+      currentModalUsername = username;
+
+      // Reset translate dropdown
+      document.getElementById('translate-lang').value = '';
+
+      // Render table without translation
+      renderUserDataTable(userData, username);
+
+      modal.style.display = 'block';
+    }
+
+    // Wire up close buttons for node info panel and user data modal
+    document.getElementById('close-node-info').onclick = () => {
+      document.getElementById('node-info-panel').style.display = 'none';
+    };
+
+    document.getElementById('close-user-modal').onclick = () => {
+      document.getElementById('user-data-modal').style.display = 'none';
+    };
+
+    // Close modal when clicking outside the content
+    document.getElementById('user-data-modal').onclick = (e) => {
+      if(e.target.id === 'user-data-modal') {
+        document.getElementById('user-data-modal').style.display = 'none';
+      }
+    };
+
+    // Wire up translate dropdown
+    document.getElementById('translate-lang').onchange = async (e) => {
+      const targetLang = e.target.value;
+      if(currentModalUserData && currentModalUsername) {
+        await renderUserDataTable(currentModalUserData, currentModalUsername, targetLang);
+      }
+    };
 
     // --- Wire up Ego Network Upload ---
     const egoFilesBtn = document.getElementById('btn-ego-files');
@@ -1350,6 +1646,172 @@
         });
       });
     }
+
+    // --- Social Media Edge Extraction ---
+    const btnSocialFile = document.getElementById('btn-social-file');
+    const socialFileInput = document.getElementById('social-file-input');
+    const socialFileName = document.getElementById('social-file-name');
+    const statusSocial = document.getElementById('status-social');
+    let extractedEdges = null;
+    let socialMediaData = null;  // Store original social media data for node lookup
+    let socialMediaAuthorColumn = null;  // Store which column contains usernames
+    let graphNodeContentMap = {};  // Map of node ID to content (from nodes file)
+    let currentModalUserData = null;  // Store current user data for translation
+    let currentModalUsername = null;  // Store current username
+
+    btnSocialFile.onclick = () => socialFileInput.click();
+    socialFileInput.onchange = () => {
+      const file = socialFileInput.files?.[0];
+      socialFileName.textContent = file ? file.name : 'No file selected';
+    };
+
+    document.getElementById('run-social').onclick = async ()=>{
+      const file = socialFileInput.files?.[0];
+      if(!file){ setStatus(statusSocial, 'Choose a file first.', 'warn'); return; }
+
+      const sheet = document.getElementById('social-sheet').value.trim() || '0';
+      const extractHashtags = document.getElementById('social-hashtags').checked;
+
+      setStatus(statusSocial, 'Extracting network edges…');
+
+      try{
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        const qs = `?sheet=${encodeURIComponent(sheet)}&extract_hashtags=${extractHashtags}`;
+        const res = await fetch('/api/graph/prepare' + qs, {
+          method: 'POST',
+          body: fd
+        });
+
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+
+        const response = await res.json();
+        extractedEdges = response;
+
+        // Store original data for node lookup
+        socialMediaData = response.original_data || null;
+        socialMediaAuthorColumn = response.author_column || null;
+
+        // Show results
+        document.getElementById('social-results').style.display = 'block';
+
+        const stats = response.stats;
+        const statsDiv = document.getElementById('social-stats');
+        statsDiv.innerHTML = `
+          <strong>Extracted Edges:</strong><br>
+          • Mentions: ${stats.mention_count}<br>
+          • Replies: ${stats.reply_count}<br>
+          • Retweets: ${stats.retweet_count}<br>
+          • Quotes: ${stats.quote_count}<br>
+          • Domains: ${stats.domain_count}<br>
+          • Hashtags: ${stats.hashtag_count}<br>
+          • Total Nodes: ${stats.node_count}
+        `;
+
+        setStatus(statusSocial, `Successfully extracted ${stats.node_count} nodes and ${stats.mention_count + stats.reply_count + stats.retweet_count + stats.quote_count + stats.domain_count + stats.hashtag_count} edges`, 'ok');
+      }catch(e){
+        setStatus(statusSocial, 'Error: '+(e?.message||e), 'err');
+      }
+    };
+
+    // Download handlers for social media edges
+    function escapeCSVField(field){
+      // Convert to string and handle special characters
+      const str = String(field ?? '');
+      // Always quote all fields (QUOTE_ALL mode) for maximum compatibility
+      // Escape any internal quotes by doubling them (RFC 4180)
+      return '"' + str.replace(/"/g, '""') + '"';
+    }
+
+    function downloadEdgeCSV(edges, filename){
+      if(!edges || edges.length === 0){
+        alert('No edges of this type were found.');
+        return;
+      }
+      const rows = ['src,dst'];
+      for(const e of edges){
+        rows.push(`${escapeCSVField(e.src)},${escapeCSVField(e.dst)}`);
+      }
+      const csv = rows.join('\n');
+      const blob = new Blob([csv], {type: 'text/csv'});
+      downloadBlob(blob, filename);
+    }
+
+    function downloadNodesCSV(nodes, filename){
+      if(!nodes || nodes.length === 0){
+        alert('No nodes were found.');
+        return;
+      }
+
+      // Check if nodes have content (for backward compatibility)
+      const hasContent = nodes.some(n => n.content !== undefined);
+
+      if(hasContent){
+        // Include content and post_count columns
+        const rows = ['id,type,content,post_count'];
+        for(const n of nodes){
+          rows.push(`${escapeCSVField(n.id)},${escapeCSVField(n.type)},${escapeCSVField(n.content || '[]')},${escapeCSVField(n.post_count || 0)}`);
+        }
+        const csv = rows.join('\n');
+        const blob = new Blob([csv], {type: 'text/csv'});
+        downloadBlob(blob, filename);
+      } else {
+        // Legacy format (just id and type)
+        const rows = ['id,type'];
+        for(const n of nodes){
+          rows.push(`${escapeCSVField(n.id)},${escapeCSVField(n.type)}`);
+        }
+        const csv = rows.join('\n');
+        const blob = new Blob([csv], {type: 'text/csv'});
+        downloadBlob(blob, filename);
+      }
+    }
+
+    document.getElementById('download-mention-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.mention_edges, 'mention_edges.csv');
+    };
+
+    document.getElementById('download-reply-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.reply_edges, 'reply_edges.csv');
+    };
+
+    document.getElementById('download-retweet-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.retweet_edges, 'retweet_edges.csv');
+    };
+
+    document.getElementById('download-quote-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.quote_edges, 'quote_edges.csv');
+    };
+
+    document.getElementById('download-domain-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.domain_edges, 'domain_edges.csv');
+    };
+
+    document.getElementById('download-hashtag-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.hashtag_edges, 'hashtag_edges.csv');
+    };
+
+    document.getElementById('download-nodes').onclick = () => {
+      if(!extractedEdges) return;
+      downloadNodesCSV(extractedEdges.edges.nodes, 'nodes.csv');
+    };
+
+    document.getElementById('download-all-edges').onclick = () => {
+      if(!extractedEdges) return;
+      const json = JSON.stringify(extractedEdges, null, 2);
+      const blob = new Blob([json], {type: 'application/json'});
+      downloadBlob(blob, 'social_media_edges.json');
+    };
 
     // --- Audio Deepfake Detection ---
     const btnAudio = document.getElementById('btn-audio');
