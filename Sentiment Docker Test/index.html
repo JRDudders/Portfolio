@@ -400,6 +400,28 @@
     </div>
     </div><!-- End Graph Tab -->
 
+    <!-- Node Info Panel (overlay) -->
+    <div id="node-info-panel" style="display:none;position:fixed;bottom:20px;right:20px;background:#1a1d24;border:1px solid var(--border);border-radius:12px;padding:16px;min-width:300px;max-width:400px;box-shadow:0 4px 12px rgba(0,0,0,0.5);z-index:10000">
+      <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:12px">
+        <h3 style="margin:0;font-size:16px">Node Information</h3>
+        <button id="close-node-info" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:20px;padding:0;line-height:1">&times;</button>
+      </div>
+      <div id="node-info-content" style="font-size:13px;line-height:1.6"></div>
+      <button id="view-user-data-btn" class="btn primary" style="width:100%;margin-top:12px;display:none">View User's Content</button>
+    </div>
+
+    <!-- User Data Modal -->
+    <div id="user-data-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.8);z-index:10001;overflow:auto">
+      <div style="max-width:1200px;margin:40px auto;background:#0b0c10;border:1px solid var(--border);border-radius:12px;padding:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <h2 style="margin:0">User Content</h2>
+          <button id="close-user-modal" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:28px;padding:0;line-height:1">&times;</button>
+        </div>
+        <div id="user-data-info" style="margin-bottom:16px;padding:12px;background:#13151b;border-radius:8px"></div>
+        <div id="user-data-table-container" style="overflow-x:auto"></div>
+      </div>
+    </div>
+
     <!-- Audio Deepfake Detection Tab Content -->
     <div id="tab-audio" class="tab-content">
       <div class="card">
@@ -849,27 +871,22 @@
         }
       });
 
-      // Click to pin label
+      // Click to show node info
       currentGraphNetwork.on('click', (params) => {
         if(params.nodes.length > 0){
           const nodeId = params.nodes[0];
           const node = currentGraphNodesData.get(nodeId);
+          showNodeInfo(nodeId, node);
+        }
+      });
 
-          if(selectedNodes.has(nodeId)){
-            // Unpin
-            selectedNodes.delete(nodeId);
-            currentGraphNodesData.update({id: nodeId, label: undefined});
-          } else {
-            // Pin
-            selectedNodes.add(nodeId);
-            currentGraphNodesData.update({id: nodeId, label: node.displayName});
-          }
-        } else {
-          // Clicked on canvas - unpin all
-          selectedNodes.forEach(nodeId => {
-            currentGraphNodesData.update({id: nodeId, label: undefined});
-          });
-          selectedNodes.clear();
+      // Right-click context menu
+      currentGraphNetwork.on('oncontext', (params) => {
+        params.event.preventDefault();
+        const nodeId = currentGraphNetwork.getNodeAt(params.pointer.DOM);
+        if(nodeId){
+          const node = currentGraphNodesData.get(nodeId);
+          showUserDataModal(nodeId, node.displayName || nodeId);
         }
       });
 
@@ -986,6 +1003,135 @@
         });
       });
     }
+
+    // --- Node Info and User Data Functions ---
+    function showNodeInfo(nodeId, node) {
+      const panel = document.getElementById('node-info-panel');
+      const content = document.getElementById('node-info-content');
+      const viewDataBtn = document.getElementById('view-user-data-btn');
+
+      if(!node) {
+        panel.style.display = 'none';
+        return;
+      }
+
+      // Build info display
+      let html = `<div style="margin-bottom:8px"><strong>ID:</strong> ${nodeId}</div>`;
+
+      if(node.displayName && node.displayName !== nodeId) {
+        html += `<div style="margin-bottom:8px"><strong>Name:</strong> ${node.displayName}</div>`;
+      }
+
+      // Show centrality measures if available
+      if(currentGraphData && currentGraphData.centrality) {
+        const cent = currentGraphData.centrality;
+        html += `<div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">`;
+        html += `<strong>Centrality Measures:</strong><br>`;
+
+        if(cent.pagerank && cent.pagerank[nodeId] !== undefined) {
+          html += `<div style="margin-top:4px">PageRank: ${cent.pagerank[nodeId].toFixed(4)}</div>`;
+        }
+        if(cent.betweenness && cent.betweenness[nodeId] !== undefined) {
+          html += `<div style="margin-top:4px">Betweenness: ${cent.betweenness[nodeId].toFixed(4)}</div>`;
+        }
+        if(cent.eigenvector && cent.eigenvector[nodeId] !== undefined) {
+          html += `<div style="margin-top:4px">Eigenvector: ${cent.eigenvector[nodeId].toFixed(4)}</div>`;
+        }
+        if(cent.degree && cent.degree[nodeId] !== undefined) {
+          html += `<div style="margin-top:4px">Degree: ${cent.degree[nodeId]}</div>`;
+        }
+
+        html += `</div>`;
+      }
+
+      content.innerHTML = html;
+
+      // Show "View User's Content" button only if we have social media data
+      if(socialMediaData && socialMediaAuthorColumn) {
+        viewDataBtn.style.display = 'block';
+        viewDataBtn.onclick = () => showUserDataModal(nodeId, node.displayName || nodeId);
+      } else {
+        viewDataBtn.style.display = 'none';
+      }
+
+      panel.style.display = 'block';
+    }
+
+    function showUserDataModal(nodeId, displayName) {
+      const modal = document.getElementById('user-data-modal');
+      const infoDiv = document.getElementById('user-data-info');
+      const tableContainer = document.getElementById('user-data-table-container');
+
+      if(!socialMediaData || !socialMediaAuthorColumn) {
+        alert('No social media data available. Extract edges from a social media file first.');
+        return;
+      }
+
+      // Filter data for this user
+      const username = displayName || nodeId;
+      const userData = socialMediaData.filter(row => {
+        const author = row[socialMediaAuthorColumn];
+        return author && author.toString().toLowerCase() === username.toLowerCase();
+      });
+
+      if(userData.length === 0) {
+        infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px;color:var(--muted)">No content found for this user in the dataset.</div>`;
+        tableContainer.innerHTML = '';
+        modal.style.display = 'block';
+        return;
+      }
+
+      // Display user info
+      infoDiv.innerHTML = `<strong>${username}</strong><div style="margin-top:8px">Found ${userData.length} post(s)</div>`;
+
+      // Build data table
+      if(userData.length > 0) {
+        const columns = Object.keys(userData[0]);
+
+        let tableHTML = '<table style="width:100%;border-collapse:collapse;margin-top:12px">';
+
+        // Header
+        tableHTML += '<thead><tr style="background:#1a1d24;border-bottom:2px solid var(--border)">';
+        columns.forEach(col => {
+          tableHTML += `<th style="padding:12px;text-align:left;font-weight:600">${col}</th>`;
+        });
+        tableHTML += '</tr></thead>';
+
+        // Body
+        tableHTML += '<tbody>';
+        userData.forEach((row, idx) => {
+          const bgColor = idx % 2 === 0 ? '#13151b' : '#0b0c10';
+          tableHTML += `<tr style="background:${bgColor};border-bottom:1px solid var(--border)">`;
+          columns.forEach(col => {
+            const value = row[col] || '';
+            const displayValue = value.toString().length > 200 ? value.toString().substring(0, 200) + '...' : value;
+            tableHTML += `<td style="padding:12px;font-size:12px;vertical-align:top">${displayValue}</td>`;
+          });
+          tableHTML += '</tr>';
+        });
+        tableHTML += '</tbody></table>';
+
+        tableContainer.innerHTML = tableHTML;
+      }
+
+      modal.style.display = 'block';
+    }
+
+    // Wire up close buttons for node info panel and user data modal
+    document.getElementById('close-node-info').onclick = () => {
+      document.getElementById('node-info-panel').style.display = 'none';
+    };
+
+    document.getElementById('close-user-modal').onclick = () => {
+      document.getElementById('user-data-modal').style.display = 'none';
+    };
+
+    // Close modal when clicking outside the content
+    document.getElementById('user-data-modal').onclick = (e) => {
+      if(e.target.id === 'user-data-modal') {
+        document.getElementById('user-data-modal').style.display = 'none';
+      }
+    };
 
     // --- Wire up Ego Network Upload ---
     const egoFilesBtn = document.getElementById('btn-ego-files');
@@ -1409,6 +1555,8 @@
     const socialFileName = document.getElementById('social-file-name');
     const statusSocial = document.getElementById('status-social');
     let extractedEdges = null;
+    let socialMediaData = null;  // Store original social media data for node lookup
+    let socialMediaAuthorColumn = null;  // Store which column contains usernames
 
     btnSocialFile.onclick = () => socialFileInput.click();
     socialFileInput.onchange = () => {
@@ -1442,6 +1590,10 @@
 
         const response = await res.json();
         extractedEdges = response;
+
+        // Store original data for node lookup
+        socialMediaData = response.original_data || null;
+        socialMediaAuthorColumn = response.author_column || null;
 
         // Show results
         document.getElementById('social-results').style.display = 'block';

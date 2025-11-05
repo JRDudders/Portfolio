@@ -628,6 +628,44 @@ async def prepare_social_media_graph(
         # Convert to dict
         result = edges.to_dict()
 
+        # Convert DataFrame to records for frontend (limit columns to reduce size)
+        # Include key columns for user content display
+        columns_to_include = []
+        df_cols_lower = {col.lower(): col for col in df.columns}
+
+        # Try to find author column
+        author_col = None
+        for key in ['author', 'username', 'user', 'screen_name', 'from', 'account']:
+            if key in df_cols_lower:
+                author_col = df_cols_lower[key]
+                columns_to_include.append(author_col)
+                break
+
+        # Try to find text column
+        for key in ['text', 'full_text', 'tweet', 'content', 'body']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+                break
+
+        # Try to find timestamp/date column
+        for key in ['created_at', 'timestamp', 'date', 'time', 'datetime']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+                break
+
+        # Add any other interesting columns (mentions, retweets, etc.)
+        for key in ['mentions', 'in_reply_to_screen_name', 'retweeted_user', 'urls', 'hashtags']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+
+        # If we couldn't find key columns, just include first 10 columns
+        if len(columns_to_include) < 2:
+            columns_to_include = df.columns[:10].tolist()
+
+        # Create filtered dataframe and convert to records
+        df_filtered = df[columns_to_include] if columns_to_include else df
+        original_data = df_filtered.fillna('').to_dict('records')
+
         return {
             "success": True,
             "edges": {
@@ -639,7 +677,9 @@ async def prepare_social_media_graph(
                 "hashtag_edges": result["hashtag_edges"],
                 "nodes": result["nodes"]
             },
-            "stats": result["stats"]
+            "stats": result["stats"],
+            "original_data": original_data,
+            "author_column": author_col  # Tell frontend which column has the username
         }
 
     except ValueError as e:
