@@ -346,6 +346,58 @@
       </div>
       <div id="status-ego-url" class="status"></div>
     </div>
+
+    <!-- SOCIAL MEDIA EDGE EXTRACTION -->
+    <div class="card" style="margin-top:16px">
+      <h2>Social Media Network Extractor</h2>
+      <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">
+        Upload Twitter/social media CSV or Excel file to automatically extract network edges (mentions, replies, retweets, quotes, domains, hashtags).
+        <br>Auto-detects columns like: author, username, text, mentions, in_reply_to, retweeted_user, urls, hashtags.
+      </p>
+
+      <label>Social Media Data File (CSV or XLSX)</label>
+      <div class="inline">
+        <button class="btn" id="btn-social-file">Choose File</button>
+        <span class="file-name" id="social-file-name">No file selected</span>
+        <input type="file" id="social-file-input" style="display:none" accept=".csv,.xlsx,.xlsm,.xls,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
+      </div>
+
+      <label for="social-sheet">Excel Sheet (name or index, for XLSX only)</label>
+      <input id="social-sheet" type="text" value="0" placeholder="0 (first sheet)"/>
+
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px">
+        <input type="checkbox" id="social-hashtags" style="width:auto;margin:0"/>
+        <span>Extract hashtag edges (user→#hashtag)</span>
+      </label>
+
+      <div class="controls">
+        <button class="btn primary" id="run-social">Extract Network Edges</button>
+      </div>
+      <div id="status-social" class="status"></div>
+
+      <!-- Results display -->
+      <div id="social-results" style="display:none;margin-top:16px">
+        <div class="card" style="background:#0f1117;padding:12px">
+          <h3 style="font-size:14px;margin:0 0 10px">Extracted Network Edges</h3>
+          <div id="social-stats" style="font-size:12px;color:var(--muted);margin-bottom:12px"></div>
+
+          <div style="display:grid;gap:8px">
+            <button class="btn" id="download-mention-edges">Download Mention Edges</button>
+            <button class="btn" id="download-reply-edges">Download Reply Edges</button>
+            <button class="btn" id="download-retweet-edges">Download Retweet Edges</button>
+            <button class="btn" id="download-quote-edges">Download Quote Edges</button>
+            <button class="btn" id="download-domain-edges">Download Domain Edges</button>
+            <button class="btn" id="download-hashtag-edges">Download Hashtag Edges</button>
+            <button class="btn" id="download-nodes">Download All Nodes</button>
+            <button class="btn primary" id="download-all-edges">Download All (JSON)</button>
+          </div>
+
+          <p style="font-size:11px;color:var(--muted);margin-top:12px">
+            💡 Tip: Download specific edge types and upload them above for analysis (PageRank, degrees, etc.)
+          </p>
+        </div>
+      </div>
+    </div>
     </div><!-- End Graph Tab -->
 
     <!-- Audio Deepfake Detection Tab Content -->
@@ -1350,6 +1402,131 @@
         });
       });
     }
+
+    // --- Social Media Edge Extraction ---
+    const btnSocialFile = document.getElementById('btn-social-file');
+    const socialFileInput = document.getElementById('social-file-input');
+    const socialFileName = document.getElementById('social-file-name');
+    const statusSocial = document.getElementById('status-social');
+    let extractedEdges = null;
+
+    btnSocialFile.onclick = () => socialFileInput.click();
+    socialFileInput.onchange = () => {
+      const file = socialFileInput.files?.[0];
+      socialFileName.textContent = file ? file.name : 'No file selected';
+    };
+
+    document.getElementById('run-social').onclick = async ()=>{
+      const file = socialFileInput.files?.[0];
+      if(!file){ setStatus(statusSocial, 'Choose a file first.', 'warn'); return; }
+
+      const sheet = document.getElementById('social-sheet').value.trim() || '0';
+      const extractHashtags = document.getElementById('social-hashtags').checked;
+
+      setStatus(statusSocial, 'Extracting network edges…');
+
+      try{
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        const qs = `?sheet=${encodeURIComponent(sheet)}&extract_hashtags=${extractHashtags}`;
+        const res = await fetch('/api/graph/prepare' + qs, {
+          method: 'POST',
+          body: fd
+        });
+
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+
+        const response = await res.json();
+        extractedEdges = response;
+
+        // Show results
+        document.getElementById('social-results').style.display = 'block';
+
+        const stats = response.stats;
+        const statsDiv = document.getElementById('social-stats');
+        statsDiv.innerHTML = `
+          <strong>Extracted Edges:</strong><br>
+          • Mentions: ${stats.mention_count}<br>
+          • Replies: ${stats.reply_count}<br>
+          • Retweets: ${stats.retweet_count}<br>
+          • Quotes: ${stats.quote_count}<br>
+          • Domains: ${stats.domain_count}<br>
+          • Hashtags: ${stats.hashtag_count}<br>
+          • Total Nodes: ${stats.node_count}
+        `;
+
+        setStatus(statusSocial, `Successfully extracted ${stats.node_count} nodes and ${stats.mention_count + stats.reply_count + stats.retweet_count + stats.quote_count + stats.domain_count + stats.hashtag_count} edges`, 'ok');
+      }catch(e){
+        setStatus(statusSocial, 'Error: '+(e?.message||e), 'err');
+      }
+    };
+
+    // Download handlers for social media edges
+    function downloadEdgeCSV(edges, filename){
+      if(!edges || edges.length === 0){
+        alert('No edges of this type were found.');
+        return;
+      }
+      const csv = 'src,dst\n' + edges.map(e => `${e.src},${e.dst}`).join('\n');
+      const blob = new Blob([csv], {type: 'text/csv'});
+      downloadBlob(blob, filename);
+    }
+
+    function downloadNodesCSV(nodes, filename){
+      if(!nodes || nodes.length === 0){
+        alert('No nodes were found.');
+        return;
+      }
+      const csv = 'id,type\n' + nodes.map(n => `${n.id},${n.type}`).join('\n');
+      const blob = new Blob([csv], {type: 'text/csv'});
+      downloadBlob(blob, filename);
+    }
+
+    document.getElementById('download-mention-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.mention_edges, 'mention_edges.csv');
+    };
+
+    document.getElementById('download-reply-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.reply_edges, 'reply_edges.csv');
+    };
+
+    document.getElementById('download-retweet-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.retweet_edges, 'retweet_edges.csv');
+    };
+
+    document.getElementById('download-quote-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.quote_edges, 'quote_edges.csv');
+    };
+
+    document.getElementById('download-domain-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.domain_edges, 'domain_edges.csv');
+    };
+
+    document.getElementById('download-hashtag-edges').onclick = () => {
+      if(!extractedEdges) return;
+      downloadEdgeCSV(extractedEdges.edges.hashtag_edges, 'hashtag_edges.csv');
+    };
+
+    document.getElementById('download-nodes').onclick = () => {
+      if(!extractedEdges) return;
+      downloadNodesCSV(extractedEdges.edges.nodes, 'nodes.csv');
+    };
+
+    document.getElementById('download-all-edges').onclick = () => {
+      if(!extractedEdges) return;
+      const json = JSON.stringify(extractedEdges, null, 2);
+      const blob = new Blob([json], {type: 'application/json'});
+      downloadBlob(blob, 'social_media_edges.json');
+    };
 
     // --- Audio Deepfake Detection ---
     const btnAudio = document.getElementById('btn-audio');
