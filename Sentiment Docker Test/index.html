@@ -246,6 +246,7 @@
         <div class="graph-controls">
           <button class="btn" id="graph-fit">Fit to Screen</button>
           <button class="btn" id="graph-physics-toggle">Toggle Physics</button>
+          <button class="btn" id="graph-export-image">Export as Image</button>
           <label style="margin-left:16px">Color by:</label>
           <select id="graph-centrality-select" style="padding:8px;border-radius:8px;background:#0f1117;color:var(--fg);border:1px solid var(--border)">
             <option value="none">Default</option>
@@ -305,6 +306,7 @@
         <div class="graph-controls">
           <button class="btn" id="ego-fit">Fit to Screen</button>
           <button class="btn" id="ego-physics-toggle">Toggle Physics</button>
+          <button class="btn" id="ego-export-image">Export as Image</button>
           <label style="margin-left:16px">Color by:</label>
           <select id="ego-centrality-select" style="padding:8px;border-radius:8px;background:#0f1117;color:var(--fg);border:1px solid var(--border)">
             <option value="none">Default</option>
@@ -934,6 +936,30 @@
       };
       updatePhysicsButton('graph-physics-toggle', true); // Initially enabled during stabilization
 
+      // Wire up export image button
+      document.getElementById('graph-export-image').onclick = () => {
+        if(!currentGraphNetwork) return;
+
+        // Get the canvas element from vis.js
+        const canvas = document.querySelector('#graph-container canvas');
+        if(!canvas) {
+          alert('No graph canvas found. Make sure a graph is loaded.');
+          return;
+        }
+
+        // Convert canvas to blob and download
+        canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `graph-${Date.now()}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        });
+      };
+
       // Wire up centrality dropdown
       const centralitySelect = document.getElementById('graph-centrality-select');
       centralitySelect.value = 'none';
@@ -1538,6 +1564,30 @@
         updatePhysicsButton('ego-physics-toggle', currentEgoPhysicsEnabled);
       };
       updatePhysicsButton('ego-physics-toggle', true); // Initially enabled during stabilization
+
+      // Wire up export image button
+      document.getElementById('ego-export-image').onclick = () => {
+        if(!currentEgoNetwork) return;
+
+        // Get the canvas element from vis.js
+        const canvas = document.querySelector('#ego-container canvas');
+        if(!canvas) {
+          alert('No ego network canvas found. Make sure an ego network is loaded.');
+          return;
+        }
+
+        // Convert canvas to blob and download
+        canvas.toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `ego-network-${Date.now()}.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+        });
+      };
 
       // Show truncation note
       if(data.nodes.length > maxNodes){
