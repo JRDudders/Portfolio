@@ -6,6 +6,7 @@ Shared module for fetching files from URLs with:
 - Timeout protection
 - Proper error handling
 - Content type validation
+- Wayback Machine fallback for failed requests
 """
 
 import httpx
@@ -20,30 +21,105 @@ MAX_DOWNLOAD_SIZE = 500 * 1024 * 1024  # 500MB in bytes
 TIMEOUT_SECONDS = 3600
 
 
+async def get_wayback_snapshot(url: str) -> Optional[str]:
+    """
+    Query Wayback Machine API to find the most recent snapshot of a URL.
+
+    Args:
+        url: Original URL to search for
+
+    Returns:
+        Wayback Machine URL if snapshot exists, None otherwise
+    """
+    try:
+        api_url = f"http://archive.org/wayback/available?url={url}"
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(api_url)
+            response.raise_for_status()
+            data = response.json()
+
+            # Check if snapshot is available
+            if data.get('archived_snapshots', {}).get('closest', {}).get('available'):
+                snapshot_url = data['archived_snapshots']['closest']['url']
+                timestamp = data['archived_snapshots']['closest']['timestamp']
+                print(f"[url_fetch] Found Wayback Machine snapshot from {timestamp[:4]}-{timestamp[4:6]}-{timestamp[6:8]}")
+                return snapshot_url
+
+            return None
+    except Exception as e:
+        print(f"[url_fetch] Wayback Machine query failed: {e}")
+        return None
+
+
 async def fetch_url(
     url: str,
     max_size: int = MAX_DOWNLOAD_SIZE,
-    timeout: int = TIMEOUT_SECONDS
+    timeout: int = TIMEOUT_SECONDS,
+    try_wayback: bool = True
 ) -> Tuple[bytes, Optional[str]]:
     """
-    Fetch file content from URL.
+    Fetch file content from URL with Wayback Machine fallback.
 
     Args:
         url: URL to fetch
         max_size: Maximum file size in bytes (default 500MB)
-        timeout: Timeout in seconds (default 300s)
+        timeout: Timeout in seconds (default 3600s)
+        try_wayback: If True, try Wayback Machine on failure (default True)
 
     Returns:
         Tuple of (file_bytes, content_type)
 
     Raises:
         ValueError: If URL is invalid or file too large
-        httpx.HTTPError: If download fails
+        httpx.HTTPError: If download fails (and Wayback Machine unavailable)
     """
     # Validate URL scheme
     if not url.startswith(('http://', 'https://')):
         raise ValueError("URL must start with http:// or https://")
 
+    # Try original URL first
+    try:
+        return await _fetch_from_url(url, max_size, timeout)
+    except (httpx.HTTPError, Exception) as e:
+        print(f"[url_fetch] Failed to fetch {url}: {e}")
+
+        # Try Wayback Machine as fallback
+        if try_wayback and not url.startswith('https://web.archive.org/'):
+            print(f"[url_fetch] Attempting Wayback Machine fallback...")
+            wayback_url = await get_wayback_snapshot(url)
+
+            if wayback_url:
+                try:
+                    print(f"[url_fetch] Fetching from archive: {wayback_url}")
+                    return await _fetch_from_url(wayback_url, max_size, timeout)
+                except Exception as wayback_error:
+                    print(f"[url_fetch] Wayback Machine fetch also failed: {wayback_error}")
+
+        # Re-raise original error if fallback didn't work
+        raise
+
+
+async def _fetch_from_url(
+    url: str,
+    max_size: int,
+    timeout: int
+) -> Tuple[bytes, Optional[str]]:
+    """
+    Internal function to fetch content from a specific URL.
+
+    Args:
+        url: URL to fetch
+        max_size: Maximum file size in bytes
+        timeout: Timeout in seconds
+
+    Returns:
+        Tuple of (file_bytes, content_type)
+
+    Raises:
+        httpx.HTTPError: If download fails
+        ValueError: If file too large
+    """
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         # First, do a HEAD request to check content length
         try:
