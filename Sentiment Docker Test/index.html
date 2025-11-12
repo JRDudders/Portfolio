@@ -172,6 +172,50 @@
         </div>
         <div id="status-file-url" class="status"></div>
       </div>
+
+      <!-- STANCE DETECTION -->
+      <div class="card">
+        <h2>Stance Detection (NLI-based)</h2>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Classify text stance towards a claim: SUPPORT, OPPOSE, or NEUTRAL. Uses Natural Language Inference without training data.</p>
+
+        <label for="stance-claim">Claim/Hypothesis</label>
+        <input id="stance-claim" type="text" placeholder="e.g., Climate change is caused by human activity"/>
+
+        <label for="stance-texts">Texts (one per line)</label>
+        <textarea id="stance-texts" rows="6" placeholder="Enter texts to classify, one per line&#10;Example:&#10;Climate change is the defining crisis of our time&#10;The climate has always changed naturally&#10;Scientists agree on human-caused warming"></textarea>
+
+        <label for="stance-preset">Model</label>
+        <select id="stance-preset">
+          <option value="stance-deberta" selected>DeBERTa-v3-base (fast, ~50ms/text)</option>
+          <option value="stance-deberta-large">DeBERTa-v3-large (accurate, ~150ms/text)</option>
+        </select>
+
+        <div class="controls">
+          <button class="btn primary" id="run-stance">Detect Stance</button>
+          <button class="btn" id="download-stance" style="display:none">Download Results (JSON)</button>
+        </div>
+        <div id="status-stance" class="status"></div>
+
+        <!-- Results Table -->
+        <div id="stance-results" style="display:none;margin-top:16px">
+          <h3 style="font-size:14px;margin-bottom:8px">Results</h3>
+          <div style="overflow-x:auto">
+            <table id="stance-results-table" style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--bg-secondary);border-bottom:2px solid var(--border)">
+                  <th style="padding:8px;text-align:left">Text</th>
+                  <th style="padding:8px;text-align:center;width:100px">Stance</th>
+                  <th style="padding:8px;text-align:right;width:80px">Confidence</th>
+                  <th style="padding:8px;text-align:right;width:80px">SUPPORT</th>
+                  <th style="padding:8px;text-align:right;width:80px">OPPOSE</th>
+                  <th style="padding:8px;text-align:right;width:80px">NEUTRAL</th>
+                </tr>
+              </thead>
+              <tbody id="stance-results-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
     </div><!-- End NLP Tab -->
 
@@ -567,6 +611,11 @@
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
     function parseLabels(s){ return (s||'').split(',').map(x=>x.trim()).filter(Boolean); }
+    function escapeHtml(text){
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
 
     // --- Wire up File tab ---
     const selFile = document.getElementById('preset-file');
@@ -667,6 +716,82 @@
       }catch(e){
         setStatus(statusUrl, 'Error: '+(e?.message||e), 'err');
       }
+    };
+
+    // --- Stance Detection ---
+    const statusStance = document.getElementById('status-stance');
+    let stanceResultsData = null;
+
+    document.getElementById('run-stance').onclick = async ()=>{
+      const claim = document.getElementById('stance-claim').value.trim();
+      const textsInput = document.getElementById('stance-texts').value.trim();
+      const preset = document.getElementById('stance-preset').value;
+
+      if(!claim){ setStatus(statusStance, 'Enter a claim/hypothesis.', 'warn'); return; }
+      if(!textsInput){ setStatus(statusStance, 'Enter at least one text.', 'warn'); return; }
+
+      // Split by newlines and filter empty
+      const texts = textsInput.split('\n').map(t => t.trim()).filter(t => t);
+      if(texts.length === 0){ setStatus(statusStance, 'No valid texts found.', 'warn'); return; }
+
+      setStatus(statusStance, `Processing ${texts.length} text(s)…`);
+
+      try{
+        const res = await fetch('/api/nlp/stance', {
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify({ texts, claim, preset })
+        });
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+        const data = await res.json();
+        stanceResultsData = data;
+
+        // Render results table
+        const tbody = document.getElementById('stance-results-body');
+        tbody.innerHTML = '';
+
+        data.results.forEach((result, idx) => {
+          const text = texts[idx];
+          const stance = result.stance;
+          const scores = result.scores;
+          const confidence = scores[stance];
+
+          // Color code stance
+          let stanceColor = '#888';
+          if(stance === 'SUPPORT') stanceColor = '#4caf50';
+          else if(stance === 'OPPOSE') stanceColor = '#f44336';
+          else if(stance === 'NEUTRAL') stanceColor = '#ff9800';
+
+          const row = document.createElement('tr');
+          row.style.borderBottom = '1px solid var(--border)';
+          row.innerHTML = `
+            <td style="padding:8px;max-width:300px;word-wrap:break-word">${escapeHtml(text)}</td>
+            <td style="padding:8px;text-align:center;font-weight:bold;color:${stanceColor}">${stance}</td>
+            <td style="padding:8px;text-align:right">${(confidence*100).toFixed(1)}%</td>
+            <td style="padding:8px;text-align:right">${(scores.SUPPORT*100).toFixed(1)}%</td>
+            <td style="padding:8px;text-align:right">${(scores.OPPOSE*100).toFixed(1)}%</td>
+            <td style="padding:8px;text-align:right">${(scores.NEUTRAL*100).toFixed(1)}%</td>
+          `;
+          tbody.appendChild(row);
+        });
+
+        // Show results and download button
+        document.getElementById('stance-results').style.display = 'block';
+        document.getElementById('download-stance').style.display = 'inline-block';
+
+        setStatus(statusStance, `✓ Analyzed ${texts.length} text(s)`, 'ok');
+      }catch(e){
+        setStatus(statusStance, 'Error: '+(e?.message||e), 'err');
+      }
+    };
+
+    document.getElementById('download-stance').onclick = () => {
+      if(!stanceResultsData) return;
+      const blob = new Blob([JSON.stringify(stanceResultsData, null, 2)], {type:'application/json'});
+      downloadBlob(blob, `stance-results-${Date.now()}.json`);
     };
 
     // --- Wire up Graph Analytics ---
