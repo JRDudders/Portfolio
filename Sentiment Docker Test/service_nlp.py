@@ -205,6 +205,14 @@ class TextAnalysisRequest(BaseModel):
     tasks: List[str] = ["sentiment", "entities"]
 
 
+class StanceDetectionRequest(BaseModel):
+    """Request model for stance detection"""
+    texts: List[str]
+    claim: str
+    preset: Optional[str] = "stance-deberta"
+    hypothesis_template: Optional[str] = "{}"
+
+
 class URLAnalysisRequest(BaseModel):
     """Request model for URL analysis with full adapter support"""
     url: HttpUrl
@@ -552,6 +560,47 @@ async def topics_only(request: TextAnalysisRequest):
     try:
         result = analyze_topics(request.text)
         return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/stance")
+async def stance_detection(request: StanceDetectionRequest):
+    """
+    NLI-based stance detection (arxiv:2305.01723)
+
+    Classifies each text's stance towards a claim as:
+    - SUPPORT: Text entails/agrees with the claim
+    - OPPOSE: Text contradicts the claim
+    - NEUTRAL: No clear stance
+
+    Uses pre-trained NLI models (DeBERTa-v3-base/large-mnli) to classify
+    textual entailment without requiring task-specific training data.
+
+    Example:
+        {
+            "texts": ["Climate change is real and urgent", "Weather changes naturally"],
+            "claim": "Climate change is caused by humans",
+            "preset": "stance-deberta"
+        }
+    """
+    try:
+        # Preprocess texts
+        processed_texts = [preprocess_for_task(t, "stance-detection") for t in request.texts]
+
+        # Run stance detection
+        results = run_task(
+            processed_texts,
+            preset=request.preset,
+            claim=request.claim
+        )
+
+        return {
+            "success": True,
+            "claim": request.claim,
+            "preset": request.preset,
+            "results": results
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

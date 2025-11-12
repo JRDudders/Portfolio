@@ -199,6 +199,86 @@ def _hf_zero_shot(
     return results
 
 
+def _hf_stance_detection(
+    texts: List[str],
+    *,
+    model_id: str,
+    claim: str,
+    hypothesis_template: str = "{}",
+) -> List[Dict[str, Any]]:
+    """
+    NLI-based stance detection (arxiv:2305.01723).
+
+    Uses Natural Language Inference to classify stance:
+    - ENTAILMENT -> SUPPORT
+    - CONTRADICTION -> OPPOSE
+    - NEUTRAL -> NEUTRAL
+
+    Args:
+        texts: List of texts to classify
+        model_id: NLI model (e.g., microsoft/deberta-v3-base-mnli)
+        claim: The claim/hypothesis to classify stance towards
+        hypothesis_template: Template for formatting hypothesis (default: "{}")
+
+    Returns:
+        List of dicts with stance labels and confidence scores
+    """
+    task = "zero-shot-classification"
+    pipe = _hf_pipeline_cache(task, model_id)
+
+    # NLI uses entailment/contradiction/neutral labels
+    nli_labels = ["entailment", "contradiction", "neutral"]
+
+    # Format the hypothesis using template
+    hypothesis = hypothesis_template.format(claim)
+
+    results: List[Dict[str, Any]] = []
+    for t in texts:
+        # Chunk long texts to avoid length errors
+        chunks = _chunks_for_classification(t, _CLASSIFY_MAX_WORDS)
+        per_label_probs: List[Dict[str, float]] = []
+
+        for ch in chunks:
+            # Run NLI classification
+            out = pipe(
+                ch,
+                candidate_labels=nli_labels,
+                multi_label=False,  # Single stance per text
+                hypothesis_template=hypothesis,
+            )
+            # Collect probabilities for each NLI label
+            per_label_probs.append({
+                lbl: float(scr)
+                for lbl, scr in zip(out["labels"], out["scores"])
+            })
+
+        # Average probabilities across chunks
+        avg = _avg_scores(per_label_probs)
+
+        # Map NLI labels to stance labels
+        stance_map = {
+            "entailment": "SUPPORT",
+            "contradiction": "OPPOSE",
+            "neutral": "NEUTRAL"
+        }
+
+        stance_scores = {
+            stance_map[nli_label]: score
+            for nli_label, score in avg.items()
+        }
+
+        # Get predicted stance (highest score)
+        predicted_stance = max(stance_scores.items(), key=lambda x: x[1])[0]
+
+        results.append({
+            "stance": predicted_stance,
+            "scores": stance_scores,
+            "claim": claim
+        })
+
+    return results
+
+
 def _hf_token_classification(
     texts: List[str],
     *,
@@ -225,6 +305,10 @@ PRESETS: Dict[str, Tuple[str, Optional[str], Dict[str, Any]]] = {
     # Zero-shot (English + Multilingual)
     "zeroshot-bart":     ("zero-shot-classification", "facebook/bart-large-mnli", {}),
     "zeroshot-mdeberta": ("zero-shot-classification", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli", {}),
+
+    # Stance Detection (NLI-based) - See arxiv:2305.01723
+    "stance-deberta":    ("stance-detection", "microsoft/deberta-v3-base-mnli", {}),
+    "stance-deberta-large": ("stance-detection", "microsoft/deberta-v3-large-mnli", {}),
 
     # NER (HF)
     "ner-conll":         ("token-classification", "dslim/bert-base-NER", {"aggregation_strategy": "simple"}),
@@ -272,12 +356,14 @@ def run_task(
     task: Optional[str] = None,
     preset: Optional[str] = None,
     labels: Optional[List[str]] = None,
+    claim: Optional[str] = None,
 ) -> List[Any]:
     """
     Unified entry point.
     Returns:
       - text/zero-shot classification: list[{"topics": {label: score, ...}}]
       - token-classification (NER):   list[list[ent-dict]]
+      - stance-detection:             list[{"stance": str, "scores": {...}, "claim": str}]
       - spaCy/Stanza POS/DEP/LEMMA:   list[dict]
       - SBERT embeddings:             list[{"text":..,"embedding":[...]}]
       - BERTopic:                      dict wrapped in a one-element list
@@ -298,7 +384,7 @@ def run_task(
 
     # Default task/model if still missing
     task = task or MODEL_TASK
-    model_id = model_id or (MODEL_ID if task in {"text-classification", "zero-shot-classification", "token-classification"} else None)
+    model_id = model_id or (MODEL_ID if task in {"text-classification", "zero-shot-classification", "token-classification", "stance-detection"} else None)
 
     # ---------------- HF transformers ----------------
     if task in {"text-classification", "sentiment-analysis"}:
@@ -310,6 +396,12 @@ def run_task(
     if task == "token-classification":
         agg = kwargs.get("aggregation_strategy", "simple")
         return _hf_token_classification(texts, model_id=model_id, aggregation_strategy=agg)  # type: ignore[arg-type]
+
+    if task == "stance-detection":
+        if not claim:
+            raise ValueError("stance-detection requires a 'claim' parameter")
+        hypothesis_template = kwargs.get("hypothesis_template", "{}")
+        return _hf_stance_detection(texts, model_id=model_id, claim=claim, hypothesis_template=hypothesis_template)  # type: ignore[arg-type]
 
     # NOTE: The following tasks are disabled (missing implementation files):
     # - spacy-ner, spacy-posdep, spacy-sents (needs spacy_tasks.py)
