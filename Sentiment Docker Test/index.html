@@ -89,6 +89,11 @@
         <label for="preset-file">Preset</label>
         <select id="preset-file"></select>
 
+        <div id="claim-file-section" style="display:none">
+          <label for="claim-file">Claim/Hypothesis (required for stance detection)</label>
+          <input id="claim-file" type="text" placeholder="e.g., Climate change is caused by human activity"/>
+        </div>
+
         <label for="labels-file">Labels (comma-separated, for zero-shot)</label>
         <input id="labels-file" type="text" placeholder="e.g., politics, economy, health"/>
 
@@ -110,6 +115,11 @@
 
         <label for="preset-url">Preset</label>
         <select id="preset-url"></select>
+
+        <div id="claim-url-section" style="display:none">
+          <label for="claim-url">Claim/Hypothesis (required for stance detection)</label>
+          <input id="claim-url" type="text" placeholder="e.g., Climate change is caused by human activity"/>
+        </div>
 
         <label for="labels-url">Labels (comma-separated, for zero-shot)</label>
         <input id="labels-url" type="text" placeholder="e.g., politics, economy, health"/>
@@ -159,6 +169,11 @@
 
         <label for="preset-file-url">Preset</label>
         <select id="preset-file-url"></select>
+
+        <div id="claim-file-url-section" style="display:none">
+          <label for="claim-file-url">Claim/Hypothesis (required for stance detection)</label>
+          <input id="claim-file-url" type="text" placeholder="e.g., Climate change is caused by human activity"/>
+        </div>
 
         <label for="labels-file-url">Labels (comma-separated, for zero-shot)</label>
         <input id="labels-file-url" type="text" placeholder="e.g., politics, economy, health"/>
@@ -579,6 +594,8 @@
       "sentiment-twitter","sentiment-sst2",
       // Zero-shot Classification
       "zeroshot-bart","zeroshot-mdeberta",
+      // Stance Detection (NLI-based)
+      "stance-deberta","stance-deberta-large",
       // Named Entity Recognition
       "ner-conll","ner-bertbase",
       // Topic Modeling (tf-idf based)
@@ -623,6 +640,15 @@
     const selFileUrl = document.getElementById('preset-file-url');
     populatePresets(selFile); populatePresets(selUrl); populatePresets(selFileUrl);
 
+    // Show/hide claim field for stance detection presets
+    function toggleClaimField(selectEl, sectionId) {
+      const isStance = selectEl.value.startsWith('stance-');
+      document.getElementById(sectionId).style.display = isStance ? 'block' : 'none';
+    }
+    selFile.onchange = () => toggleClaimField(selFile, 'claim-file-section');
+    selUrl.onchange = () => toggleClaimField(selUrl, 'claim-url-section');
+    selFileUrl.onchange = () => toggleClaimField(selFileUrl, 'claim-file-url-section');
+
     const fileBtn = document.getElementById('btn-file');
     const fileIn  = document.getElementById('file-input');
     const fileName= document.getElementById('file-name');
@@ -639,10 +665,12 @@
       const labels = parseLabels(document.getElementById('labels-file').value);
       const includeStop = document.getElementById('stopwords-file').checked;
       const preset = selFile.value;
+      const claim = document.getElementById('claim-file').value.trim();
 
       const qs = new URLSearchParams();
       if(preset) qs.set('preset', preset);
       if(labels.length) qs.set('labels', labels.join(','));
+      if(claim) qs.set('claim', claim);
       if(includeStop) qs.set('include_stopwords','true');
 
       const fd = new FormData();
@@ -689,12 +717,14 @@
       const labels = parseLabels(document.getElementById('labels-url').value);
       const includeStop = document.getElementById('stopwords-url').checked;
       const preset = selUrl.value;
+      const claim = document.getElementById('claim-url').value.trim();
 
       const body = {
         url, render, renderer,
         wait_selector, scroll_passes, render_timeout_ms,
         cookies, extra_headers,
         preset, labels: labels.length ? labels : null,
+        claim: claim || null,
         include_stopwords: includeStop
       };
 
