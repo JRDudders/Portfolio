@@ -206,6 +206,20 @@ def _hf_zero_shot(
     return results
 
 
+@lru_cache(maxsize=4)
+def _load_nli_model(model_id: str):
+    """Cache NLI model and tokenizer for stance detection."""
+    import torch
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+    # Get HuggingFace token from environment
+    hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
+
+    tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+    model = AutoModelForSequenceClassification.from_pretrained(model_id, token=hf_token)
+    return tokenizer, model
+
+
 def _hf_stance_detection(
     texts: List[str],
     *,
@@ -216,62 +230,81 @@ def _hf_stance_detection(
     """
     NLI-based stance detection (arxiv:2305.01723).
 
-    Uses Natural Language Inference to classify stance:
+    Uses Natural Language Inference to classify stance by treating:
+    - Premise: the text to classify
+    - Hypothesis: the claim
     - ENTAILMENT -> SUPPORT
     - CONTRADICTION -> OPPOSE
     - NEUTRAL -> NEUTRAL
 
     Args:
         texts: List of texts to classify
-        model_id: NLI model (e.g., microsoft/deberta-v3-base-mnli)
+        model_id: NLI model (e.g., MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli)
         claim: The claim/hypothesis to classify stance towards
         hypothesis_template: Template for formatting hypothesis (default: "{}")
 
     Returns:
         List of dicts with stance labels and confidence scores
     """
-    task = "zero-shot-classification"
-    pipe = _hf_pipeline_cache(task, model_id)
+    import torch
 
-    # NLI uses entailment/contradiction/neutral labels
-    nli_labels = ["entailment", "contradiction", "neutral"]
+    # Load cached model and tokenizer
+    tokenizer, model = _load_nli_model(model_id)
 
-    # Format the hypothesis using template
+    # Format the hypothesis (claim) using template
     hypothesis = hypothesis_template.format(claim)
 
+    # NLI models typically use these labels
+    # Check model config for actual label mapping
+    label_mapping = {
+        0: "contradiction",
+        1: "neutral",
+        2: "entailment"
+    }
+
+    # Stance mapping from NLI labels
+    stance_map = {
+        "entailment": "SUPPORT",
+        "contradiction": "OPPOSE",
+        "neutral": "NEUTRAL"
+    }
+
     results: List[Dict[str, Any]] = []
-    for t in texts:
+    for text in texts:
         # Chunk long texts to avoid length errors
-        chunks = _chunks_for_classification(t, _CLASSIFY_MAX_WORDS)
+        chunks = _chunks_for_classification(text, _CLASSIFY_MAX_WORDS)
         per_label_probs: List[Dict[str, float]] = []
 
-        for ch in chunks:
-            # Run NLI classification
-            out = pipe(
-                ch,
-                candidate_labels=nli_labels,
-                multi_label=False,  # Single stance per text
-                hypothesis_template=hypothesis,
+        for chunk in chunks:
+            # Encode text pair: (premise=chunk, hypothesis=claim)
+            inputs = tokenizer(
+                chunk,
+                hypothesis,
+                truncation=True,
+                padding=True,
+                return_tensors="pt"
             )
-            # Collect probabilities for each NLI label
-            per_label_probs.append({
-                lbl: float(scr)
-                for lbl, scr in zip(out["labels"], out["scores"])
-            })
+
+            # Get model predictions
+            with torch.no_grad():
+                outputs = model(**inputs)
+                probs = torch.nn.functional.softmax(outputs.logits, dim=-1)[0]
+
+            # Map to NLI labels
+            nli_probs = {
+                label_mapping.get(i, f"label_{i}"): float(probs[i])
+                for i in range(len(probs))
+            }
+            per_label_probs.append(nli_probs)
 
         # Average probabilities across chunks
-        avg = _avg_scores(per_label_probs)
+        avg_nli = _avg_scores(per_label_probs)
 
         # Map NLI labels to stance labels
-        stance_map = {
-            "entailment": "SUPPORT",
-            "contradiction": "OPPOSE",
-            "neutral": "NEUTRAL"
-        }
-
         stance_scores = {
-            stance_map[nli_label]: score
-            for nli_label, score in avg.items()
+            stance_map.get(nli_label, "NEUTRAL"): score
+            for nli_label, score in avg_nli.items()
+            if nli_label in stance_map
         }
 
         # Get predicted stance (highest score)
