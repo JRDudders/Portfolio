@@ -18,6 +18,10 @@ Design:
 Notes:
 - Long text is chunked for *classification* tasks to avoid max-length issues, then averaged.
 - NER is NOT chunked to preserve spans.
+
+Authentication:
+- Some models may require HuggingFace authentication. Set environment variable:
+  export HUGGINGFACE_API_KEY='your_token_here'  OR  export HF_TOKEN='your_token_here'
 """
 
 from functools import lru_cache
@@ -77,15 +81,18 @@ def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     """
     from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
 
+    # Get HuggingFace token from environment (needed for some models like DeBERTa-MNLI)
+    hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
+
     if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
-        tok = AutoTokenizer.from_pretrained(model_id)
-        mdl = AutoModelForSequenceClassification.from_pretrained(model_id)
+        tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+        mdl = AutoModelForSequenceClassification.from_pretrained(model_id, token=hf_token)
         return pipeline("text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
                         model=mdl, tokenizer=tok, device=-1)
 
     if task == "token-classification":
-        tok = AutoTokenizer.from_pretrained(model_id)
-        mdl = AutoModelForTokenClassification.from_pretrained(model_id)
+        tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+        mdl = AutoModelForTokenClassification.from_pretrained(model_id, token=hf_token)
         # aggregation handled at call-time via kwargs
         return pipeline("token-classification", model=mdl, tokenizer=tok, device=-1)
 
@@ -307,8 +314,9 @@ PRESETS: Dict[str, Tuple[str, Optional[str], Dict[str, Any]]] = {
     "zeroshot-mdeberta": ("zero-shot-classification", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli", {}),
 
     # Stance Detection (NLI-based) - See arxiv:2305.01723
-    "stance-deberta":    ("stance-detection", "microsoft/deberta-v3-base-mnli", {}),
-    "stance-deberta-large": ("stance-detection", "microsoft/deberta-v3-large-mnli", {}),
+    # Using publicly available NLI models (no authentication required)
+    "stance-deberta":    ("stance-detection", "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli", {}),
+    "stance-deberta-large": ("stance-detection", "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli", {}),
 
     # NER (HF)
     "ner-conll":         ("token-classification", "dslim/bert-base-NER", {"aggregation_strategy": "simple"}),
