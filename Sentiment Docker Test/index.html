@@ -236,6 +236,7 @@
 
     <!-- Graph Analytics Tab Content -->
     <div id="tab-graph" class="tab-content">
+    <div class="row">
     <div class="card">
       <h2>Graph Analytics</h2>
 
@@ -320,7 +321,7 @@
     </div>
 
     <!-- GRAPH FROM URL -->
-    <div class="card" style="margin-top:16px">
+    <div class="card">
       <h2>Load Graph from URL</h2>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Load graph directly from hosted data URLs</p>
 
@@ -335,9 +336,11 @@
       </div>
       <div id="status-graph-url" class="status"></div>
     </div>
+    </div><!-- End row 1 -->
 
+    <div class="row">
     <!-- EGO NETWORK (Multi-File Upload) -->
-    <div class="card" style="margin-top:16px">
+    <div class="card">
       <h2>Ego Network (Multiple Files)</h2>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Upload multiple related files at once (.edges, .circles, .feat, .egofeat, .featnames, .node)</p>
 
@@ -380,7 +383,7 @@
     </div>
 
     <!-- EGO NETWORK FROM URLs -->
-    <div class="card" style="margin-top:16px">
+    <div class="card">
       <h2>Ego Network from URLs</h2>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Load ego network from hosted data URLs (e.g., SNAP datasets)</p>
 
@@ -407,9 +410,11 @@
       </div>
       <div id="status-ego-url" class="status"></div>
     </div>
+    </div><!-- End row 2 -->
 
+    <div class="row">
     <!-- SOCIAL MEDIA EDGE EXTRACTION -->
-    <div class="card" style="margin-top:16px">
+    <div class="card" style="grid-column:1/-1">
       <h2>Social Media Network Extractor</h2>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">
         Upload Twitter/social media CSV or Excel file to automatically extract network edges (mentions, replies, retweets, quotes, domains, hashtags).
@@ -459,6 +464,7 @@
         </div>
       </div>
     </div>
+    </div><!-- End row 3 -->
     </div><!-- End Graph Tab -->
 
     <!-- Node Info Panel (overlay) -->
@@ -505,6 +511,7 @@
 
     <!-- Audio Deepfake Detection Tab Content -->
     <div id="tab-audio" class="tab-content">
+    <div class="row">
       <div class="card">
         <h2>Audio Deepfake Detection</h2>
         <p style="font-size:13px;color:var(--muted);margin:4px 0 16px">
@@ -533,7 +540,7 @@
       </div>
 
       <!-- Audio from URL -->
-      <div class="card" style="margin-top:16px">
+      <div class="card">
         <h2>Analyze Audio from URL</h2>
         <p style="font-size:13px;color:var(--muted);margin:4px 0 16px">
           Provide a URL to an audio file to analyze for deepfakes. Supports WAV, FLAC, MP3 formats.
@@ -547,15 +554,18 @@
         </div>
         <div id="status-audio-url" class="status"></div>
       </div>
+    </div><!-- End row 1 -->
 
+    <div class="row">
       <!-- Model Status Card -->
-      <div class="card" style="margin-top:16px">
+      <div class="card" style="grid-column:1/-1">
         <h2>Model Status</h2>
         <div id="model-status" style="font-size:13px;color:var(--muted)">
           Checking model availability...
         </div>
         <button class="btn" id="download-model" style="display:none;margin-top:10px">Download Pre-trained Model</button>
       </div>
+    </div><!-- End row 2 -->
     </div><!-- End Audio Tab -->
 
   </div>
