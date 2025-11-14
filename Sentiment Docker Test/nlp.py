@@ -211,13 +211,43 @@ def _load_nli_model(model_id: str):
     """Cache NLI model and tokenizer for stance detection."""
     import torch
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    import time
 
     # Get HuggingFace token from environment
     hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
 
-    tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
-    model = AutoModelForSequenceClassification.from_pretrained(model_id, token=hf_token)
-    return tokenizer, model
+    # Retry logic for model loading (handles connection issues)
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id,
+                token=hf_token,
+                resume_download=True,  # Resume partial downloads
+                local_files_only=False  # Allow downloading
+            )
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_id,
+                token=hf_token,
+                resume_download=True,
+                local_files_only=False
+            )
+            return tokenizer, model
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[nlp] Model loading attempt {attempt + 1} failed: {e}. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                raise RuntimeError(
+                    f"Failed to load model {model_id} after {max_retries} attempts. "
+                    f"This may be due to: (1) network connectivity issues, "
+                    f"(2) the model being too large to download quickly, or "
+                    f"(3) HuggingFace API issues. Try again later or check your connection. "
+                    f"Original error: {e}"
+                )
 
 
 def _hf_stance_detection(
@@ -348,6 +378,7 @@ PRESETS: Dict[str, Tuple[str, Optional[str], Dict[str, Any]]] = {
 
     # Stance Detection (NLI-based) - See arxiv:2305.01723
     # Using publicly available NLI models (no authentication required)
+    # Note: First-time use downloads models (~500MB for base, ~1.5GB for large)
     "stance-deberta":    ("stance-detection", "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli", {}),
     "stance-deberta-large": ("stance-detection", "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli", {}),
 
