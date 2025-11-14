@@ -53,8 +53,8 @@ RUN python3.12 -m ensurepip --upgrade && \
 COPY requirements-nlp.txt .
 
 # Install PyTorch with GPU support (CUDA 12.1)
-# Using 2.5.1 until transformers supports it (currently requires 2.6 which isn't released)
-RUN pip install --no-cache-dir torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+# Using latest stable version with CUDA support
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Install remaining Python dependencies
 RUN pip install --no-cache-dir -r requirements-nlp.txt
