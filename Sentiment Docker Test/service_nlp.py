@@ -21,6 +21,16 @@ import json
 import pandas as pd
 from bs4 import BeautifulSoup
 import trafilatura
+import logging
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Import URL fetch utility
 from url_fetch import fetch_url, guess_file_extension
@@ -244,10 +254,12 @@ class URLAnalysisRequest(BaseModel):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    logger.info("Health check requested")
     return {
         "service": "nlp",
         "status": "healthy",
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 
@@ -355,6 +367,7 @@ async def analyze_file(
 
     Returns annotated JSON file with predictions
     """
+    logger.info(f"File analysis started: {file.filename}, preset={preset}, claim={claim}")
     try:
         b = await file.read()
         original_filename = file.filename or "input.json"
@@ -409,6 +422,8 @@ async def analyze_file(
         # Run NLP task
         predictions = run_task(processed_texts, preset=preset, labels=lbls, claim=claim)
 
+        logger.info(f"File analysis completed: {len(original_texts)} texts processed")
+
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
             # NER: keep entities format
@@ -428,6 +443,7 @@ async def analyze_file(
         return _make_download(output_filename, payload, "application/json")
 
     except Exception as e:
+        logger.error(f"File processing failed: {str(e)}")
         raise HTTPException(status_code=400, detail=f"File processing failed: {str(e)}")
 
 
@@ -599,6 +615,7 @@ async def stance_detection(request: StanceDetectionRequest):
             "preset": "stance-deberta"
         }
     """
+    logger.info(f"Stance detection started: {len(request.texts)} texts, claim='{request.claim}', preset={request.preset}")
     try:
         # Preprocess texts
         processed_texts = [preprocess_for_task(t, "stance-detection") for t in request.texts]
@@ -610,6 +627,8 @@ async def stance_detection(request: StanceDetectionRequest):
             claim=request.claim
         )
 
+        logger.info(f"Stance detection completed: {len(results)} texts processed")
+
         return {
             "success": True,
             "claim": request.claim,
@@ -617,18 +636,21 @@ async def stance_detection(request: StanceDetectionRequest):
             "results": results
         }
     except Exception as e:
+        logger.error(f"Stance detection failed: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
     port = int(os.getenv("SERVICE_PORT", 8001))
 
-    print("=" * 70)
-    print("CiceroWatch NLP Service")
-    print("=" * 70)
-    print(f"Listening on: http://0.0.0.0:{port}")
-    print("Features: Sentiment, Entities, Topics, URL Analysis")
-    print("=" * 70)
+    logger.info("=" * 70)
+    logger.info("CiceroWatch NLP Service")
+    logger.info("=" * 70)
+    logger.info(f"Listening on: http://0.0.0.0:{port}")
+    logger.info("Features: Sentiment, Entities, Topics, URL Analysis, Stance Detection")
+    logger.info("Batch processing enabled: CLASSIFY_BATCH_SIZE=16, ZEROSHOT_BATCH_SIZE=8, STANCE_BATCH_SIZE=32")
+    logger.info("Health checks: every 10 minutes")
+    logger.info("=" * 70)
 
     uvicorn.run(
         app,

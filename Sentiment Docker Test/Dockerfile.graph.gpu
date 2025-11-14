@@ -41,7 +41,7 @@ RUN mkdir -p /app/temp
 EXPOSE 8002
 
 # Health check - activate conda environment first
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+HEALTHCHECK --interval=600s --timeout=10s --start-period=60s --retries=3 \
   CMD bash -c "source /opt/conda/etc/profile.d/conda.sh && conda activate base && python -c \"import requests; requests.get('http://localhost:8002/health').raise_for_status()\""
 
 # Run the Graph service with conda environment activated
