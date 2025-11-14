@@ -6,6 +6,8 @@ import json
 import os
 import typing as T
 from urllib.parse import urlparse
+import logging
+from datetime import datetime
 
 import pandas as pd
 import requests
@@ -15,6 +17,14 @@ from starlette.middleware.cors import CORSMiddleware
 
 from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
 from graph_tasks import load_graph_from_bytes, run_graph_metrics
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 # Optional render/extraction
 from bs4 import BeautifulSoup
@@ -227,10 +237,12 @@ def home():
 
 @app.get("/healthz")
 def healthz():
+    logger.info("Health check requested")
     return {
         "ok": True,
         "presets": sorted(list(PRESETS.keys())),
         "playwright": PLAYWRIGHT_AVAILABLE,
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 
@@ -242,6 +254,7 @@ async def predict_file(
     labels: str | None = Query(None, description="Comma-separated labels for zero-shot"),
     include_stopwords: bool | None = Query(False),
 ):
+    logger.info(f"File prediction started: {file.filename}, preset={preset}")
     try:
         b = await file.read()
         original_filename = file.filename or "input.json"
@@ -278,6 +291,8 @@ async def predict_file(
         # Run task on processed texts
         predictions = run_task(processed_texts, preset=preset, labels=lbls)
 
+        logger.info(f"File prediction completed: {len(original_texts)} texts processed")
+
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
             # NER: keep entities format
@@ -295,6 +310,7 @@ async def predict_file(
         output_filename = _get_predictions_filename(original_filename)
         return _make_download(output_filename, payload, "application/json")
     except Exception as e:
+        logger.error(f"File processing failed: {str(e)}")
         raise HTTPException(status_code=400, detail=f"File processing failed: {e}")
 
 
