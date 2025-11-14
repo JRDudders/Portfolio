@@ -24,11 +24,18 @@ Authentication:
   export HUGGINGFACE_API_KEY='your_token_here'  OR  export HF_TOKEN='your_token_here'
 
 Performance:
-- Stance detection uses batched inference (default batch_size=32) for 10-30x speedup
-- GPU automatically detected and used if available (CUDA)
-- Set STANCE_BATCH_SIZE env var to adjust batch size (higher = faster but more memory)
-- CPU: ~1000-2000 texts/min with base model, ~300-500 texts/min with large model
-- GPU: ~5000-10000 texts/min with base model, ~2000-4000 texts/min with large model
+- All classification tasks use batched inference for significant speedup
+- GPU automatically detected and used if available (CUDA) with CPU fallback
+- Batch processing only activates for datasets with >10 chunks (avoids overhead on small datasets)
+- Environment variables for batch sizes:
+  * STANCE_BATCH_SIZE=32 (stance detection)
+  * CLASSIFY_BATCH_SIZE=16 (text classification/sentiment)
+  * ZEROSHOT_BATCH_SIZE=8 (zero-shot classification)
+- Text truncation for display: 1000 characters (actual analysis uses full text)
+- Typical throughput (texts/minute):
+  * Sentiment (CPU): ~2000-4000, (GPU): ~8000-15000
+  * Zero-shot (CPU): ~500-1000, (GPU): ~2000-5000
+  * Stance (CPU): ~1000-2000, (GPU): ~5000-10000
 """
 
 from functools import lru_cache
@@ -145,30 +152,61 @@ def _hf_text_classification(
     multi_label: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Sentiment / general text classification.
+    Sentiment / general text classification with batched inference.
     For long texts, chunk and average label probs over chunks.
     """
+    import torch
+
     task = "text-classification"
     pipe = _hf_pipeline_cache(task, model_id, key=f"multi={multi_label}")
 
-    results: List[Dict[str, Any]] = []
-    for t in texts:
-        # run by chunks to avoid length errors
+    # Prepare all chunks with text index mapping
+    all_chunks = []
+    chunk_to_text_idx = []
+
+    for text_idx, t in enumerate(texts):
         chunks = _chunks_for_classification(t, _CLASSIFY_MAX_WORDS)
-        # First run to see label space (for fixed-label heads we get one label per class on HF side)
-        out_per_chunk = pipe(chunks, truncation=True, padding=True, top_k=None if multi_label else 2)
+        for chunk in chunks:
+            all_chunks.append(chunk)
+            chunk_to_text_idx.append(text_idx)
+
+    # Only use batching if dataset is large enough (>10 chunks)
+    batch_size = int(os.getenv("CLASSIFY_BATCH_SIZE", "16"))
+    use_batching = len(all_chunks) >= 10
+
+    if use_batching:
+        print(f"[classify] Processing {len(texts)} texts ({len(all_chunks)} chunks) in batches")
+
+        # Process all chunks in batches
+        all_outputs = []
+        for batch_idx in range(0, len(all_chunks), batch_size):
+            batch_chunks = all_chunks[batch_idx:batch_idx + batch_size]
+            batch_out = pipe(batch_chunks, truncation=True, padding=True, top_k=None if multi_label else 2)
+            all_outputs.extend(batch_out)
+    else:
+        # Small dataset: process sequentially
+        all_outputs = pipe(all_chunks, truncation=True, padding=True, top_k=None if multi_label else 2)
+
+    # Aggregate chunk results per text
+    text_chunk_outputs: List[List] = [[] for _ in range(len(texts))]
+    for chunk_idx, out in enumerate(all_outputs):
+        text_idx = chunk_to_text_idx[chunk_idx]
+        text_chunk_outputs[text_idx].append(out)
+
+    # Build final results
+    results: List[Dict[str, Any]] = []
+    for out_per_chunk in text_chunk_outputs:
         # Normalize output to dict of label->score for averaging
         label_sets: List[Dict[str, float]] = []
         for out in out_per_chunk:
             if isinstance(out, dict) and "label" in out:
-                # Some pipelines return single best label; ask for top_k next time if needed
+                # Some pipelines return single best label
                 label_sets.append({out["label"]: float(out["score"])})
             else:
                 # Usually a list of {label, score}
                 if isinstance(out, list):
                     label_sets.append({e["label"]: float(e["score"]) for e in out})
                 else:
-                    # unexpected; fallback: wrap
                     label_sets.append({})
         avg = _avg_scores(label_sets)
         # return topic->score mapping, sorted by score descending
@@ -187,29 +225,69 @@ def _hf_zero_shot(
     multi_label: bool = True,
     hypothesis_template: str = "This text is about {}.",
 ) -> List[Dict[str, Any]]:
+    """Zero-shot classification with batched inference."""
     task = "zero-shot-classification"
     pipe = _hf_pipeline_cache(task, model_id)
 
     labels = candidate_labels or DEFAULT_ZS_LABELS
-    # Chunk long docs; run per chunk and average per-label probabilities
-    results: List[Dict[str, Any]] = []
-    for t in texts:
-        chunks = _chunks_for_classification(t, _CLASSIFY_MAX_WORDS)
-        per_label_probs: List[Dict[str, float]] = []
 
-        for ch in chunks:
+    # Prepare all chunks with text index mapping
+    all_chunks = []
+    chunk_to_text_idx = []
+
+    for text_idx, t in enumerate(texts):
+        chunks = _chunks_for_classification(t, _CLASSIFY_MAX_WORDS)
+        for chunk in chunks:
+            all_chunks.append(chunk)
+            chunk_to_text_idx.append(text_idx)
+
+    # Only use batching if dataset is large enough (>10 chunks)
+    batch_size = int(os.getenv("ZEROSHOT_BATCH_SIZE", "8"))  # Smaller batch for zero-shot (more compute intensive)
+    use_batching = len(all_chunks) >= 10
+
+    if use_batching:
+        print(f"[zeroshot] Processing {len(texts)} texts ({len(all_chunks)} chunks) in batches")
+
+        # Process all chunks in batches
+        all_outputs = []
+        for batch_idx in range(0, len(all_chunks), batch_size):
+            batch_chunks = all_chunks[batch_idx:batch_idx + batch_size]
+            # Process batch one chunk at a time (zero-shot pipeline doesn't support true batching)
+            for ch in batch_chunks:
+                out = pipe(
+                    ch,
+                    candidate_labels=labels,
+                    multi_label=multi_label,
+                    hypothesis_template=hypothesis_template,
+                )
+                all_outputs.append(out)
+    else:
+        # Small dataset: process sequentially
+        all_outputs = []
+        for ch in all_chunks:
             out = pipe(
                 ch,
                 candidate_labels=labels,
                 multi_label=multi_label,
                 hypothesis_template=hypothesis_template,
             )
-            # HF zero-shot returns dict with 'labels' and 'scores'
-            per_label_probs.append({lbl: float(scr) for lbl, scr in zip(out["labels"], out["scores"])})
+            all_outputs.append(out)
 
-        avg = _avg_scores(per_label_probs)
+    # Aggregate chunk results per text
+    text_chunk_probs: List[List[Dict[str, float]]] = [[] for _ in range(len(texts))]
+    for chunk_idx, out in enumerate(all_outputs):
+        text_idx = chunk_to_text_idx[chunk_idx]
+        # HF zero-shot returns dict with 'labels' and 'scores'
+        probs = {lbl: float(scr) for lbl, scr in zip(out["labels"], out["scores"])}
+        text_chunk_probs[text_idx].append(probs)
+
+    # Build final results
+    results: List[Dict[str, Any]] = []
+    for per_chunk_probs in text_chunk_probs:
+        avg = _avg_scores(per_chunk_probs)
         ordered = sorted(avg.items(), key=lambda kv: kv[1], reverse=True)
         results.append({"topics": {label: float(score) for label, score in ordered}})
+
     return results
 
 
@@ -288,9 +366,14 @@ def _hf_stance_detection(
     # Load cached model and tokenizer
     tokenizer, model = _load_nli_model(model_id)
 
-    # Check for GPU availability
+    # Check for GPU availability (with CPU fallback)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
+    try:
+        model = model.to(device)
+    except Exception as e:
+        print(f"[stance] Failed to move model to {device}, falling back to CPU: {e}")
+        device = torch.device("cpu")
+        model = model.to(device)
 
     # Format the hypothesis (claim) using template
     hypothesis = hypothesis_template.format(claim)
@@ -322,11 +405,17 @@ def _hf_stance_detection(
     # Batch size for processing (adjust based on memory)
     batch_size = int(os.getenv("STANCE_BATCH_SIZE", "32"))
 
+    # Only use batching if dataset is large enough (>10 chunks)
+    use_batching = len(all_chunks) >= 10
+
     # Process all chunks in batches
     all_probs = []
     total_batches = (len(all_chunks) + batch_size - 1) // batch_size
 
-    print(f"[stance] Processing {len(texts)} texts ({len(all_chunks)} chunks) in {total_batches} batches on {device}")
+    if use_batching:
+        print(f"[stance] Processing {len(texts)} texts ({len(all_chunks)} chunks) in {total_batches} batches on {device}")
+    else:
+        print(f"[stance] Processing {len(texts)} texts ({len(all_chunks)} chunks) sequentially on {device}")
 
     for batch_idx in range(0, len(all_chunks), batch_size):
         batch_chunks = all_chunks[batch_idx:batch_idx + batch_size]

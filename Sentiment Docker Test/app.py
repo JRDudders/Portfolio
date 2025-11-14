@@ -55,8 +55,8 @@ def _parse_labels_csv(s: str | None) -> T.List[str] | None:
     labels = [x.strip() for x in s.split(",") if x.strip()]
     return labels if labels else None  # More explicit than 'or'
 
-def _truncate_text(text: str, max_length: int = 500) -> str:
-    """Truncate text to max_length characters, adding ellipsis if truncated"""
+def _truncate_text(text: str, max_length: int = 1000) -> str:
+    """Truncate text to max_length characters for display, adding ellipsis if truncated"""
     if len(text) <= max_length:
         return text
     return text[:max_length].rstrip() + "..."
