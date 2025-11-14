@@ -18,6 +18,10 @@ Design:
 Notes:
 - Long text is chunked for *classification* tasks to avoid max-length issues, then averaged.
 - NER is NOT chunked to preserve spans.
+
+Authentication:
+- Some models may require HuggingFace authentication. Set environment variable:
+  export HUGGINGFACE_API_KEY='your_token_here'  OR  export HF_TOKEN='your_token_here'
 """
 
 from functools import lru_cache
@@ -77,15 +81,18 @@ def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     """
     from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
 
+    # Get HuggingFace token from environment (needed for some models like DeBERTa-MNLI)
+    hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
+
     if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
-        tok = AutoTokenizer.from_pretrained(model_id)
-        mdl = AutoModelForSequenceClassification.from_pretrained(model_id)
+        tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+        mdl = AutoModelForSequenceClassification.from_pretrained(model_id, token=hf_token)
         return pipeline("text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
                         model=mdl, tokenizer=tok, device=-1)
 
     if task == "token-classification":
-        tok = AutoTokenizer.from_pretrained(model_id)
-        mdl = AutoModelForTokenClassification.from_pretrained(model_id)
+        tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+        mdl = AutoModelForTokenClassification.from_pretrained(model_id, token=hf_token)
         # aggregation handled at call-time via kwargs
         return pipeline("token-classification", model=mdl, tokenizer=tok, device=-1)
 
@@ -199,6 +206,149 @@ def _hf_zero_shot(
     return results
 
 
+@lru_cache(maxsize=4)
+def _load_nli_model(model_id: str):
+    """Cache NLI model and tokenizer for stance detection."""
+    import torch
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    import time
+
+    # Get HuggingFace token from environment
+    hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
+
+    # Retry logic for model loading (handles connection issues)
+    max_retries = 3
+    retry_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            tokenizer = AutoTokenizer.from_pretrained(
+                model_id,
+                token=hf_token,
+                resume_download=True,  # Resume partial downloads
+                local_files_only=False  # Allow downloading
+            )
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_id,
+                token=hf_token,
+                resume_download=True,
+                local_files_only=False
+            )
+            return tokenizer, model
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"[nlp] Model loading attempt {attempt + 1} failed: {e}. Retrying in {retry_delay}s...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                raise RuntimeError(
+                    f"Failed to load model {model_id} after {max_retries} attempts. "
+                    f"This may be due to: (1) network connectivity issues, "
+                    f"(2) the model being too large to download quickly, or "
+                    f"(3) HuggingFace API issues. Try again later or check your connection. "
+                    f"Original error: {e}"
+                )
+
+
+def _hf_stance_detection(
+    texts: List[str],
+    *,
+    model_id: str,
+    claim: str,
+    hypothesis_template: str = "{}",
+) -> List[Dict[str, Any]]:
+    """
+    NLI-based stance detection (arxiv:2305.01723).
+
+    Uses Natural Language Inference to classify stance by treating:
+    - Premise: the text to classify
+    - Hypothesis: the claim
+    - ENTAILMENT -> SUPPORT
+    - CONTRADICTION -> OPPOSE
+    - NEUTRAL -> NEUTRAL
+
+    Args:
+        texts: List of texts to classify
+        model_id: NLI model (e.g., MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli)
+        claim: The claim/hypothesis to classify stance towards
+        hypothesis_template: Template for formatting hypothesis (default: "{}")
+
+    Returns:
+        List of dicts with stance labels and confidence scores
+    """
+    import torch
+
+    # Load cached model and tokenizer
+    tokenizer, model = _load_nli_model(model_id)
+
+    # Format the hypothesis (claim) using template
+    hypothesis = hypothesis_template.format(claim)
+
+    # NLI models typically use these labels
+    # Check model config for actual label mapping
+    label_mapping = {
+        0: "contradiction",
+        1: "neutral",
+        2: "entailment"
+    }
+
+    # Stance mapping from NLI labels
+    stance_map = {
+        "entailment": "SUPPORT",
+        "contradiction": "OPPOSE",
+        "neutral": "NEUTRAL"
+    }
+
+    results: List[Dict[str, Any]] = []
+    for text in texts:
+        # Chunk long texts to avoid length errors
+        chunks = _chunks_for_classification(text, _CLASSIFY_MAX_WORDS)
+        per_label_probs: List[Dict[str, float]] = []
+
+        for chunk in chunks:
+            # Encode text pair: (premise=chunk, hypothesis=claim)
+            inputs = tokenizer(
+                chunk,
+                hypothesis,
+                truncation=True,
+                padding=True,
+                return_tensors="pt"
+            )
+
+            # Get model predictions
+            with torch.no_grad():
+                outputs = model(**inputs)
+                probs = torch.nn.functional.softmax(outputs.logits, dim=-1)[0]
+
+            # Map to NLI labels
+            nli_probs = {
+                label_mapping.get(i, f"label_{i}"): float(probs[i])
+                for i in range(len(probs))
+            }
+            per_label_probs.append(nli_probs)
+
+        # Average probabilities across chunks
+        avg_nli = _avg_scores(per_label_probs)
+
+        # Map NLI labels to stance labels
+        stance_scores = {
+            stance_map.get(nli_label, "NEUTRAL"): score
+            for nli_label, score in avg_nli.items()
+            if nli_label in stance_map
+        }
+
+        # Get predicted stance (highest score)
+        predicted_stance = max(stance_scores.items(), key=lambda x: x[1])[0]
+
+        results.append({
+            "stance": predicted_stance,
+            "scores": stance_scores,
+            "claim": claim
+        })
+
+    return results
+
+
 def _hf_token_classification(
     texts: List[str],
     *,
@@ -225,6 +375,12 @@ PRESETS: Dict[str, Tuple[str, Optional[str], Dict[str, Any]]] = {
     # Zero-shot (English + Multilingual)
     "zeroshot-bart":     ("zero-shot-classification", "facebook/bart-large-mnli", {}),
     "zeroshot-mdeberta": ("zero-shot-classification", "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli", {}),
+
+    # Stance Detection (NLI-based) - See arxiv:2305.01723
+    # Using publicly available NLI models (no authentication required)
+    # Note: First-time use downloads models (~500MB for base, ~1.5GB for large)
+    "stance-deberta":    ("stance-detection", "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli", {}),
+    "stance-deberta-large": ("stance-detection", "MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli", {}),
 
     # NER (HF)
     "ner-conll":         ("token-classification", "dslim/bert-base-NER", {"aggregation_strategy": "simple"}),
@@ -272,12 +428,14 @@ def run_task(
     task: Optional[str] = None,
     preset: Optional[str] = None,
     labels: Optional[List[str]] = None,
+    claim: Optional[str] = None,
 ) -> List[Any]:
     """
     Unified entry point.
     Returns:
       - text/zero-shot classification: list[{"topics": {label: score, ...}}]
       - token-classification (NER):   list[list[ent-dict]]
+      - stance-detection:             list[{"stance": str, "scores": {...}, "claim": str}]
       - spaCy/Stanza POS/DEP/LEMMA:   list[dict]
       - SBERT embeddings:             list[{"text":..,"embedding":[...]}]
       - BERTopic:                      dict wrapped in a one-element list
@@ -298,7 +456,7 @@ def run_task(
 
     # Default task/model if still missing
     task = task or MODEL_TASK
-    model_id = model_id or (MODEL_ID if task in {"text-classification", "zero-shot-classification", "token-classification"} else None)
+    model_id = model_id or (MODEL_ID if task in {"text-classification", "zero-shot-classification", "token-classification", "stance-detection"} else None)
 
     # ---------------- HF transformers ----------------
     if task in {"text-classification", "sentiment-analysis"}:
@@ -310,6 +468,12 @@ def run_task(
     if task == "token-classification":
         agg = kwargs.get("aggregation_strategy", "simple")
         return _hf_token_classification(texts, model_id=model_id, aggregation_strategy=agg)  # type: ignore[arg-type]
+
+    if task == "stance-detection":
+        if not claim:
+            raise ValueError("stance-detection requires a 'claim' parameter")
+        hypothesis_template = kwargs.get("hypothesis_template", "{}")
+        return _hf_stance_detection(texts, model_id=model_id, claim=claim, hypothesis_template=hypothesis_template)  # type: ignore[arg-type]
 
     # NOTE: The following tasks are disabled (missing implementation files):
     # - spacy-ner, spacy-posdep, spacy-sents (needs spacy_tasks.py)

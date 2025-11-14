@@ -27,7 +27,8 @@ def _pick_text_column(df: pd.DataFrame) -> str:
     raise ValueError("No suitable text column found in CSV")
 
 def process_csv_bytes(csv_bytes: bytes, *, task: Optional[str] = None,
-                      preset: Optional[str] = None, labels: Optional[List[str]] = None) -> bytes:
+                      preset: Optional[str] = None, labels: Optional[List[str]] = None,
+                      claim: Optional[str] = None) -> bytes:
     try:
         df = pd.read_csv(io.BytesIO(csv_bytes))
     except UnicodeDecodeError:
@@ -35,7 +36,7 @@ def process_csv_bytes(csv_bytes: bytes, *, task: Optional[str] = None,
     col = _pick_text_column(df)
     texts = df[col].astype(str).tolist()
     proc = [preprocess_for_task(t, task or "text-classification") for t in texts]
-    preds = run_task(proc, task=task, preset=preset, labels=labels)
+    preds = run_task(proc, task=task, preset=preset, labels=labels, claim=claim)
 
     if (task == "token-classification") or (preset and "ner" in preset):
         df["entities_json"] = [json.dumps(p.get("entities", []), ensure_ascii=False) for p in preds]
@@ -60,14 +61,15 @@ def process_csv_bytes(csv_bytes: bytes, *, task: Optional[str] = None,
     return df.to_csv(index=False).encode("utf-8")
 
 def process_json_bytes(json_bytes: bytes, *, task: Optional[str] = None,
-                       preset: Optional[str] = None, labels: Optional[List[str]] = None) -> bytes:
+                       preset: Optional[str] = None, labels: Optional[List[str]] = None,
+                       claim: Optional[str] = None) -> bytes:
     data = json.loads(json_bytes.decode("utf-8"))
 
     # List of strings
     if isinstance(data, list) and (not data or isinstance(data[0], str)):
         texts = [str(x) for x in data]
         proc = [preprocess_for_task(t, task or "text-classification") for t in texts]
-        preds = run_task(proc, task=task, preset=preset, labels=labels)
+        preds = run_task(proc, task=task, preset=preset, labels=labels, claim=claim)
         if (task == "token-classification") or (preset and "ner" in preset):
             out = [{"text (analyzed in full, truncated for display)": _truncate_text(t), "entities": p.get("entities", [])} for t, p in zip(texts, preds)]
         else:
@@ -85,7 +87,7 @@ def process_json_bytes(json_bytes: bytes, *, task: Optional[str] = None,
             raise ValueError("JSON objects must include a 'text'/'tweet'/'content' field")
         texts = [str(obj.get(key, "")) for obj in data]
         proc = [preprocess_for_task(t, task or "text-classification") for t in texts]
-        preds = run_task(proc, task=task, preset=preset, labels=labels)
+        preds = run_task(proc, task=task, preset=preset, labels=labels, claim=claim)
         out = []
         for obj, p in zip(data, preds):
             new_obj = dict(obj)

@@ -34,6 +34,7 @@ class Adapter(Protocol):
                       wait_selector: Optional[str], scroll_passes: int, render_timeout_ms: int,
                       extra_headers: Optional[Dict[str, str]],
                       task: Optional[str], preset: Optional[str], labels: Optional[List[str]],
+                      claim: Optional[str],
                       include_stopwords: bool) -> AdapterOutput: ...
 
 _REGISTRY: List[Type[Adapter]] = []
@@ -85,13 +86,14 @@ class RedditAdapter:
                       wait_selector: Optional[str], scroll_passes: int, render_timeout_ms: int,
                       extra_headers: Optional[Dict[str, str]],
                       task: Optional[str], preset: Optional[str], labels: Optional[List[str]],
+                      claim: Optional[str],
                       include_stopwords: bool) -> AdapterOutput:
         texts = await fetch_reddit_texts(url)
         if not texts:
             raise RuntimeError("No posts/comments found")
         effective_task = task or "text-classification"
         proc = [preprocess_for_task(t, effective_task) for t in texts]
-        preds = run_task(proc, task=effective_task, preset=preset, labels=labels)
+        preds = run_task(proc, task=effective_task, preset=preset, labels=labels, claim=claim)
         title = (urlparse(url).path.rstrip("/") or "/").split("/")[-1] or "Reddit"
         html = render_annotated_html(title, url, texts, preds, task=effective_task).encode("utf-8")
         name = filename_with_suffix(Path(url).name or "reddit", "html")
@@ -105,6 +107,7 @@ class GenericAdapter:
                       wait_selector: Optional[str], scroll_passes: int, render_timeout_ms: int,
                       extra_headers: Optional[Dict[str, str]],
                       task: Optional[str], preset: Optional[str], labels: Optional[List[str]],
+                      claim: Optional[str],
                       include_stopwords: bool) -> AdapterOutput:
 
         # Crawl mode
@@ -133,7 +136,7 @@ class GenericAdapter:
                     eff_labels = _resolve_zero_shot_labels(labels, html_raw, include_stopwords)
 
                 proc = [preprocess_for_task(p, effective_task) for p in paras]
-                preds = run_task(proc, task=effective_task, preset=preset, labels=eff_labels)
+                preds = run_task(proc, task=effective_task, preset=preset, labels=eff_labels, claim=claim)
                 rendered.append((page_url, paras, preds, effective_task))
             report = render_site_report(rendered).encode("utf-8")
             name = filename_with_suffix(Path(url).name or "site", "html")
@@ -175,12 +178,12 @@ class GenericAdapter:
                     raw, kind = await _render_selenium()
 
         if kind == "json":
-            out = process_json_bytes(raw, task=task, preset=preset, labels=labels)
+            out = process_json_bytes(raw, task=task, preset=preset, labels=labels, claim=claim)
             name = filename_with_suffix(Path(url).name or "input.json", "json")
             return AdapterOutput(out, "application/json; charset=utf-8", name)
 
         if kind == "csv":
-            out = process_csv_bytes(raw, task=task, preset=preset, labels=labels)
+            out = process_csv_bytes(raw, task=task, preset=preset, labels=labels, claim=claim)
             name = filename_with_suffix(Path(url).name or "input.csv", "csv")
             return AdapterOutput(out, "text/csv; charset=utf-8", name)
 
@@ -191,7 +194,7 @@ class GenericAdapter:
         if effective_task == "zero-shot-classification" or (preset and preset.startswith("zeroshot-")):
             eff_labels = _resolve_zero_shot_labels(labels, raw, include_stopwords)
         proc = [preprocess_for_task(p, effective_task) for p in paras]
-        preds = run_task(proc, task=effective_task, preset=preset, labels=eff_labels)
+        preds = run_task(proc, task=effective_task, preset=preset, labels=eff_labels, claim=claim)
         title = extract_title(raw) or (Path(url).name or "Scored Page")
         html = render_annotated_html(title, url, paras, preds, task=effective_task).encode("utf-8")
         name = filename_with_suffix(Path(url).name or "page.html", "html")
@@ -205,6 +208,7 @@ async def process_url(
     wait_selector: Optional[str], scroll_passes: int, render_timeout_ms: int,
     extra_headers: Optional[Dict[str, str]],
     task: Optional[str], preset: Optional[str], labels: Optional[List[str]],
+    claim: Optional[str],
     include_stopwords: bool,
 ) -> AdapterOutput:
     adapter = pick_adapter(url)()
@@ -213,7 +217,7 @@ async def process_url(
         crawl=crawl, max_pages=max_pages, max_depth=max_depth, same_host_only=same_host_only, delay_ms=delay_ms,
         wait_selector=wait_selector, scroll_passes=scroll_passes, render_timeout_ms=render_timeout_ms,
         extra_headers=extra_headers,
-        task=task, preset=preset, labels=labels, include_stopwords=include_stopwords,
+        task=task, preset=preset, labels=labels, claim=claim, include_stopwords=include_stopwords,
     )
 
 __all__ = ["process_url", "AdapterOutput", "pick_adapter", "register"]

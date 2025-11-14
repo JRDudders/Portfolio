@@ -89,6 +89,11 @@
         <label for="preset-file">Preset</label>
         <select id="preset-file"></select>
 
+        <div id="claim-file-section" style="display:none">
+          <label for="claim-file">Claim/Hypothesis (required for stance detection)</label>
+          <input id="claim-file" type="text" placeholder="e.g., Climate change is caused by human activity"/>
+        </div>
+
         <label for="labels-file">Labels (comma-separated, for zero-shot)</label>
         <input id="labels-file" type="text" placeholder="e.g., politics, economy, health"/>
 
@@ -110,6 +115,11 @@
 
         <label for="preset-url">Preset</label>
         <select id="preset-url"></select>
+
+        <div id="claim-url-section" style="display:none">
+          <label for="claim-url">Claim/Hypothesis (required for stance detection)</label>
+          <input id="claim-url" type="text" placeholder="e.g., Climate change is caused by human activity"/>
+        </div>
 
         <label for="labels-url">Labels (comma-separated, for zero-shot)</label>
         <input id="labels-url" type="text" placeholder="e.g., politics, economy, health"/>
@@ -160,6 +170,11 @@
         <label for="preset-file-url">Preset</label>
         <select id="preset-file-url"></select>
 
+        <div id="claim-file-url-section" style="display:none">
+          <label for="claim-file-url">Claim/Hypothesis (required for stance detection)</label>
+          <input id="claim-file-url" type="text" placeholder="e.g., Climate change is caused by human activity"/>
+        </div>
+
         <label for="labels-file-url">Labels (comma-separated, for zero-shot)</label>
         <input id="labels-file-url" type="text" placeholder="e.g., politics, economy, health"/>
 
@@ -172,11 +187,56 @@
         </div>
         <div id="status-file-url" class="status"></div>
       </div>
+
+      <!-- STANCE DETECTION -->
+      <div class="card">
+        <h2>Stance Detection (NLI-based)</h2>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Classify text stance towards a claim: SUPPORT, OPPOSE, or NEUTRAL. Uses Natural Language Inference without training data.</p>
+
+        <label for="stance-claim">Claim/Hypothesis</label>
+        <input id="stance-claim" type="text" placeholder="e.g., Climate change is caused by human activity"/>
+
+        <label for="stance-texts">Texts (one per line)</label>
+        <textarea id="stance-texts" rows="6" placeholder="Enter texts to classify, one per line&#10;Example:&#10;Climate change is the defining crisis of our time&#10;The climate has always changed naturally&#10;Scientists agree on human-caused warming"></textarea>
+
+        <label for="stance-preset">Model</label>
+        <select id="stance-preset">
+          <option value="stance-deberta" selected>DeBERTa-v3-base (fast, ~50ms/text)</option>
+          <option value="stance-deberta-large">DeBERTa-v3-large (accurate, ~150ms/text)</option>
+        </select>
+
+        <div class="controls">
+          <button class="btn primary" id="run-stance">Detect Stance</button>
+          <button class="btn" id="download-stance" style="display:none">Download Results (JSON)</button>
+        </div>
+        <div id="status-stance" class="status"></div>
+
+        <!-- Results Table -->
+        <div id="stance-results" style="display:none;margin-top:16px">
+          <h3 style="font-size:14px;margin-bottom:8px">Results</h3>
+          <div style="overflow-x:auto">
+            <table id="stance-results-table" style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="background:var(--bg-secondary);border-bottom:2px solid var(--border)">
+                  <th style="padding:8px;text-align:left">Text</th>
+                  <th style="padding:8px;text-align:center;width:100px">Stance</th>
+                  <th style="padding:8px;text-align:right;width:80px">Confidence</th>
+                  <th style="padding:8px;text-align:right;width:80px">SUPPORT</th>
+                  <th style="padding:8px;text-align:right;width:80px">OPPOSE</th>
+                  <th style="padding:8px;text-align:right;width:80px">NEUTRAL</th>
+                </tr>
+              </thead>
+              <tbody id="stance-results-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
     </div><!-- End NLP Tab -->
 
     <!-- Graph Analytics Tab Content -->
     <div id="tab-graph" class="tab-content">
+    <div class="row">
     <div class="card">
       <h2>Graph Analytics</h2>
 
@@ -261,7 +321,7 @@
     </div>
 
     <!-- GRAPH FROM URL -->
-    <div class="card" style="margin-top:16px">
+    <div class="card">
       <h2>Load Graph from URL</h2>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Load graph directly from hosted data URLs</p>
 
@@ -276,9 +336,11 @@
       </div>
       <div id="status-graph-url" class="status"></div>
     </div>
+    </div><!-- End row 1 -->
 
+    <div class="row">
     <!-- EGO NETWORK (Multi-File Upload) -->
-    <div class="card" style="margin-top:16px">
+    <div class="card">
       <h2>Ego Network (Multiple Files)</h2>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Upload multiple related files at once (.edges, .circles, .feat, .egofeat, .featnames, .node)</p>
 
@@ -321,7 +383,7 @@
     </div>
 
     <!-- EGO NETWORK FROM URLs -->
-    <div class="card" style="margin-top:16px">
+    <div class="card">
       <h2>Ego Network from URLs</h2>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Load ego network from hosted data URLs (e.g., SNAP datasets)</p>
 
@@ -348,9 +410,11 @@
       </div>
       <div id="status-ego-url" class="status"></div>
     </div>
+    </div><!-- End row 2 -->
 
+    <div class="row">
     <!-- SOCIAL MEDIA EDGE EXTRACTION -->
-    <div class="card" style="margin-top:16px">
+    <div class="card" style="grid-column:1/-1">
       <h2>Social Media Network Extractor</h2>
       <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">
         Upload Twitter/social media CSV or Excel file to automatically extract network edges (mentions, replies, retweets, quotes, domains, hashtags).
@@ -400,6 +464,7 @@
         </div>
       </div>
     </div>
+    </div><!-- End row 3 -->
     </div><!-- End Graph Tab -->
 
     <!-- Node Info Panel (overlay) -->
@@ -446,6 +511,7 @@
 
     <!-- Audio Deepfake Detection Tab Content -->
     <div id="tab-audio" class="tab-content">
+    <div class="row">
       <div class="card">
         <h2>Audio Deepfake Detection</h2>
         <p style="font-size:13px;color:var(--muted);margin:4px 0 16px">
@@ -474,7 +540,7 @@
       </div>
 
       <!-- Audio from URL -->
-      <div class="card" style="margin-top:16px">
+      <div class="card">
         <h2>Analyze Audio from URL</h2>
         <p style="font-size:13px;color:var(--muted);margin:4px 0 16px">
           Provide a URL to an audio file to analyze for deepfakes. Supports WAV, FLAC, MP3 formats.
@@ -488,15 +554,18 @@
         </div>
         <div id="status-audio-url" class="status"></div>
       </div>
+    </div><!-- End row 1 -->
 
+    <div class="row">
       <!-- Model Status Card -->
-      <div class="card" style="margin-top:16px">
+      <div class="card" style="grid-column:1/-1">
         <h2>Model Status</h2>
         <div id="model-status" style="font-size:13px;color:var(--muted)">
           Checking model availability...
         </div>
         <button class="btn" id="download-model" style="display:none;margin-top:10px">Download Pre-trained Model</button>
       </div>
+    </div><!-- End row 2 -->
     </div><!-- End Audio Tab -->
 
   </div>
@@ -535,6 +604,8 @@
       "sentiment-twitter","sentiment-sst2",
       // Zero-shot Classification
       "zeroshot-bart","zeroshot-mdeberta",
+      // Stance Detection (NLI-based)
+      "stance-deberta","stance-deberta-large",
       // Named Entity Recognition
       "ner-conll","ner-bertbase",
       // Topic Modeling (tf-idf based)
@@ -567,12 +638,26 @@
       document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
     function parseLabels(s){ return (s||'').split(',').map(x=>x.trim()).filter(Boolean); }
+    function escapeHtml(text){
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
 
     // --- Wire up File tab ---
     const selFile = document.getElementById('preset-file');
     const selUrl  = document.getElementById('preset-url');
     const selFileUrl = document.getElementById('preset-file-url');
     populatePresets(selFile); populatePresets(selUrl); populatePresets(selFileUrl);
+
+    // Show/hide claim field for stance detection presets
+    function toggleClaimField(selectEl, sectionId) {
+      const isStance = selectEl.value.startsWith('stance-');
+      document.getElementById(sectionId).style.display = isStance ? 'block' : 'none';
+    }
+    selFile.onchange = () => toggleClaimField(selFile, 'claim-file-section');
+    selUrl.onchange = () => toggleClaimField(selUrl, 'claim-url-section');
+    selFileUrl.onchange = () => toggleClaimField(selFileUrl, 'claim-file-url-section');
 
     const fileBtn = document.getElementById('btn-file');
     const fileIn  = document.getElementById('file-input');
@@ -590,10 +675,12 @@
       const labels = parseLabels(document.getElementById('labels-file').value);
       const includeStop = document.getElementById('stopwords-file').checked;
       const preset = selFile.value;
+      const claim = document.getElementById('claim-file').value.trim();
 
       const qs = new URLSearchParams();
       if(preset) qs.set('preset', preset);
       if(labels.length) qs.set('labels', labels.join(','));
+      if(claim) qs.set('claim', claim);
       if(includeStop) qs.set('include_stopwords','true');
 
       const fd = new FormData();
@@ -640,12 +727,14 @@
       const labels = parseLabels(document.getElementById('labels-url').value);
       const includeStop = document.getElementById('stopwords-url').checked;
       const preset = selUrl.value;
+      const claim = document.getElementById('claim-url').value.trim();
 
       const body = {
         url, render, renderer,
         wait_selector, scroll_passes, render_timeout_ms,
         cookies, extra_headers,
         preset, labels: labels.length ? labels : null,
+        claim: claim || null,
         include_stopwords: includeStop
       };
 
@@ -667,6 +756,82 @@
       }catch(e){
         setStatus(statusUrl, 'Error: '+(e?.message||e), 'err');
       }
+    };
+
+    // --- Stance Detection ---
+    const statusStance = document.getElementById('status-stance');
+    let stanceResultsData = null;
+
+    document.getElementById('run-stance').onclick = async ()=>{
+      const claim = document.getElementById('stance-claim').value.trim();
+      const textsInput = document.getElementById('stance-texts').value.trim();
+      const preset = document.getElementById('stance-preset').value;
+
+      if(!claim){ setStatus(statusStance, 'Enter a claim/hypothesis.', 'warn'); return; }
+      if(!textsInput){ setStatus(statusStance, 'Enter at least one text.', 'warn'); return; }
+
+      // Split by newlines and filter empty
+      const texts = textsInput.split('\n').map(t => t.trim()).filter(t => t);
+      if(texts.length === 0){ setStatus(statusStance, 'No valid texts found.', 'warn'); return; }
+
+      setStatus(statusStance, `Processing ${texts.length} text(s)…`);
+
+      try{
+        const res = await fetch('/api/nlp/stance', {
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          body: JSON.stringify({ texts, claim, preset })
+        });
+        if(!res.ok){
+          const err = await res.text().catch(()=>res.statusText);
+          throw new Error(err);
+        }
+        const data = await res.json();
+        stanceResultsData = data;
+
+        // Render results table
+        const tbody = document.getElementById('stance-results-body');
+        tbody.innerHTML = '';
+
+        data.results.forEach((result, idx) => {
+          const text = texts[idx];
+          const stance = result.stance;
+          const scores = result.scores;
+          const confidence = scores[stance];
+
+          // Color code stance
+          let stanceColor = '#888';
+          if(stance === 'SUPPORT') stanceColor = '#4caf50';
+          else if(stance === 'OPPOSE') stanceColor = '#f44336';
+          else if(stance === 'NEUTRAL') stanceColor = '#ff9800';
+
+          const row = document.createElement('tr');
+          row.style.borderBottom = '1px solid var(--border)';
+          row.innerHTML = `
+            <td style="padding:8px;max-width:300px;word-wrap:break-word">${escapeHtml(text)}</td>
+            <td style="padding:8px;text-align:center;font-weight:bold;color:${stanceColor}">${stance}</td>
+            <td style="padding:8px;text-align:right">${(confidence*100).toFixed(1)}%</td>
+            <td style="padding:8px;text-align:right">${(scores.SUPPORT*100).toFixed(1)}%</td>
+            <td style="padding:8px;text-align:right">${(scores.OPPOSE*100).toFixed(1)}%</td>
+            <td style="padding:8px;text-align:right">${(scores.NEUTRAL*100).toFixed(1)}%</td>
+          `;
+          tbody.appendChild(row);
+        });
+
+        // Show results and download button
+        document.getElementById('stance-results').style.display = 'block';
+        document.getElementById('download-stance').style.display = 'inline-block';
+
+        setStatus(statusStance, `✓ Analyzed ${texts.length} text(s)`, 'ok');
+      }catch(e){
+        setStatus(statusStance, 'Error: '+(e?.message||e), 'err');
+      }
+    };
+
+    document.getElementById('download-stance').onclick = () => {
+      if(!stanceResultsData) return;
+      const blob = new Blob([JSON.stringify(stanceResultsData, null, 2)], {type:'application/json'});
+      downloadBlob(blob, `stance-results-${Date.now()}.json`);
     };
 
     // --- Wire up Graph Analytics ---

@@ -205,6 +205,14 @@ class TextAnalysisRequest(BaseModel):
     tasks: List[str] = ["sentiment", "entities"]
 
 
+class StanceDetectionRequest(BaseModel):
+    """Request model for stance detection"""
+    texts: List[str]
+    claim: str
+    preset: Optional[str] = "stance-deberta"
+    hypothesis_template: Optional[str] = "{}"
+
+
 class URLAnalysisRequest(BaseModel):
     """Request model for URL analysis with full adapter support"""
     url: HttpUrl
@@ -225,6 +233,7 @@ class URLAnalysisRequest(BaseModel):
     # Analysis options
     preset: Optional[str] = None
     labels: Optional[List[str]] = None
+    claim: Optional[str] = None  # Claim/hypothesis for stance detection
     include_stopwords: bool = False
 
 
@@ -315,6 +324,7 @@ async def analyze_url(request: URLAnalysisRequest):
             task=None,  # Will be determined from preset
             preset=request.preset,
             labels=request.labels,
+            claim=request.claim,
             include_stopwords=request.include_stopwords,
         )
 
@@ -330,6 +340,7 @@ async def analyze_file(
     file: UploadFile = File(...),
     preset: Optional[str] = Query(None, description="Preset name from nlp.PRESETS"),
     labels: Optional[str] = Query(None, description="Comma-separated labels for zero-shot"),
+    claim: Optional[str] = Query(None, description="Claim/hypothesis for stance detection"),
     include_stopwords: Optional[bool] = Query(False),
 ):
     """
@@ -390,8 +401,13 @@ async def analyze_file(
             if not lbls:
                 lbls = DEFAULT_ZS_LABELS
 
+        # Validate claim for stance detection
+        if preset and "stance" in preset:
+            if not claim:
+                raise ValueError("Stance detection requires a 'claim' parameter")
+
         # Run NLP task
-        predictions = run_task(processed_texts, preset=preset, labels=lbls)
+        predictions = run_task(processed_texts, preset=preset, labels=lbls, claim=claim)
 
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
@@ -420,6 +436,7 @@ class FileURLRequest(BaseModel):
     url: HttpUrl
     preset: Optional[str] = None
     labels: Optional[str] = None  # Comma-separated for zero-shot
+    claim: Optional[str] = None  # Claim/hypothesis for stance detection
     include_stopwords: Optional[bool] = False
 
 
@@ -489,13 +506,19 @@ async def analyze_file_from_url(request: FileURLRequest):
         # Parse labels if provided
         labels_list = _parse_labels_csv(request.labels) if request.labels else None
 
+        # Validate claim for stance detection
+        if request.preset and "stance" in request.preset:
+            if not request.claim:
+                raise ValueError("Stance detection requires a 'claim' parameter")
+
         # Run analysis
         if request.preset:
             # Use preset (note: include_stopwords is handled in adapters, not in run_task)
             predictions = run_task(
                 processed_texts,
                 preset=request.preset,
-                labels=labels_list
+                labels=labels_list,
+                claim=request.claim
             )
         else:
             raise ValueError("preset parameter is required")
@@ -552,6 +575,47 @@ async def topics_only(request: TextAnalysisRequest):
     try:
         result = analyze_topics(request.text)
         return {"success": True, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/stance")
+async def stance_detection(request: StanceDetectionRequest):
+    """
+    NLI-based stance detection (arxiv:2305.01723)
+
+    Classifies each text's stance towards a claim as:
+    - SUPPORT: Text entails/agrees with the claim
+    - OPPOSE: Text contradicts the claim
+    - NEUTRAL: No clear stance
+
+    Uses pre-trained NLI models (DeBERTa-v3-base/large-mnli) to classify
+    textual entailment without requiring task-specific training data.
+
+    Example:
+        {
+            "texts": ["Climate change is real and urgent", "Weather changes naturally"],
+            "claim": "Climate change is caused by humans",
+            "preset": "stance-deberta"
+        }
+    """
+    try:
+        # Preprocess texts
+        processed_texts = [preprocess_for_task(t, "stance-detection") for t in request.texts]
+
+        # Run stance detection
+        results = run_task(
+            processed_texts,
+            preset=request.preset,
+            claim=request.claim
+        )
+
+        return {
+            "success": True,
+            "claim": request.claim,
+            "preset": request.preset,
+            "results": results
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
