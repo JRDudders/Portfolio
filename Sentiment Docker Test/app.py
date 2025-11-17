@@ -1125,7 +1125,26 @@ async def batch_process_excel_from_url(
         if len(file_bytes) > 100 * 1024 * 1024:  # 100MB limit
             raise HTTPException(status_code=400, detail="File too large (>100MB)")
 
-        logger.info(f"Downloaded {len(file_bytes)} bytes")
+        logger.info(f"Downloaded {len(file_bytes)} bytes, Content-Type: {content_type}")
+
+        # Validate file is actually a ZIP/Excel file (Excel files are ZIP archives)
+        if len(file_bytes) < 4:
+            raise HTTPException(status_code=400, detail="Downloaded file is too small to be an Excel file")
+
+        # Check ZIP magic bytes (PK header: 50 4B)
+        if file_bytes[0:2] != b'PK':
+            # Try to detect what we actually got
+            preview = file_bytes[:200].decode('utf-8', errors='replace')
+            if preview.strip().startswith('<'):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"URL returned HTML instead of Excel file. Content-Type: {content_type}. Preview: {preview[:100]}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"URL did not return a valid Excel file (not a ZIP archive). Content-Type: {content_type}. First bytes: {file_bytes[:20].hex()}"
+                )
 
         # Parse optional parameters
         parsed_theme_labels = None
