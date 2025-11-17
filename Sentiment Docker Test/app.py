@@ -1059,17 +1059,17 @@ async def batch_process_excel(
 
 @app.post("/batch/excel-from-url")
 async def batch_process_excel_from_url(
-    file_url: str = Body(..., embed=True, description="URL of Excel file to download and process"),
-    extract_sentiment: bool = Body(True, description="Extract sentiment from texts"),
-    extract_themes: bool = Body(True, description="Extract themes using zero-shot classification"),
-    theme_labels: T.Optional[str] = Body(None, description="Comma-separated theme labels (optional, uses defaults if not provided)"),
-    sentiment_preset: str = Body("sentiment-twitter", description="Sentiment analysis preset"),
-    theme_preset: str = Body("zeroshot-bart", description="Zero-shot classification preset"),
-    text_column: T.Optional[str] = Body(None, description="Text column name (auto-detect if not provided)"),
-    sheets_to_process: T.Optional[str] = Body(None, description="Comma-separated sheet names (process all if not provided)"),
-    top_n_themes: int = Body(3, description="Number of top themes to extract", ge=1, le=10),
-    add_confidence_scores: bool = Body(True, description="Include confidence scores in output"),
-    batch_size: int = Body(32, description="Batch size for processing", ge=1, le=128),
+    file_url: str = Query(..., description="URL of Excel file to download and process"),
+    extract_sentiment: bool = Query(True, description="Extract sentiment from texts"),
+    extract_themes: bool = Query(True, description="Extract themes using zero-shot classification"),
+    theme_labels: T.Optional[str] = Query(None, description="Comma-separated theme labels (optional, uses defaults if not provided)"),
+    sentiment_preset: str = Query("sentiment-twitter", description="Sentiment analysis preset"),
+    theme_preset: str = Query("zeroshot-bart", description="Zero-shot classification preset"),
+    text_column: T.Optional[str] = Query(None, description="Text column name (auto-detect if not provided)"),
+    sheets_to_process: T.Optional[str] = Query(None, description="Comma-separated sheet names (process all if not provided)"),
+    top_n_themes: int = Query(3, description="Number of top themes to extract", ge=1, le=10),
+    add_confidence_scores: bool = Query(True, description="Include confidence scores in output"),
+    batch_size: int = Query(32, description="Batch size for processing", ge=1, le=128),
 ):
     """
     Download Excel file from URL and batch process for sentiment and theme extraction
@@ -1085,12 +1085,7 @@ async def batch_process_excel_from_url(
 
     **Example:**
     ```bash
-    curl -X POST http://localhost:8080/batch/excel-from-url \\
-      -H "Content-Type: application/json" \\
-      -d '{
-        "file_url": "https://example.com/data.xlsx",
-        "theme_labels": "UNITAS exercises,military cooperation,regional security"
-      }'
+    curl -X POST "http://localhost:8080/batch/excel-from-url?file_url=https://example.com/data.xlsx&theme_labels=UNITAS%20exercises,military%20cooperation,regional%20security"
     ```
 
     **URL Requirements:**
