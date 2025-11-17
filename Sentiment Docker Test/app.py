@@ -1055,3 +1055,136 @@ async def batch_process_excel(
     except Exception as e:
         logger.error(f"Batch processing failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Batch processing failed: {str(e)}")
+
+
+@app.post("/batch/excel-from-url")
+async def batch_process_excel_from_url(
+    file_url: str = Body(..., embed=True, description="URL of Excel file to download and process"),
+    extract_sentiment: bool = Body(True, description="Extract sentiment from texts"),
+    extract_themes: bool = Body(True, description="Extract themes using zero-shot classification"),
+    theme_labels: T.Optional[str] = Body(None, description="Comma-separated theme labels (optional, uses defaults if not provided)"),
+    sentiment_preset: str = Body("sentiment-twitter", description="Sentiment analysis preset"),
+    theme_preset: str = Body("zeroshot-bart", description="Zero-shot classification preset"),
+    text_column: T.Optional[str] = Body(None, description="Text column name (auto-detect if not provided)"),
+    sheets_to_process: T.Optional[str] = Body(None, description="Comma-separated sheet names (process all if not provided)"),
+    top_n_themes: int = Body(3, description="Number of top themes to extract", ge=1, le=10),
+    add_confidence_scores: bool = Body(True, description="Include confidence scores in output"),
+    batch_size: int = Body(32, description="Batch size for processing", ge=1, le=128),
+):
+    """
+    Download Excel file from URL and batch process for sentiment and theme extraction
+
+    **Features:**
+    - Downloads Excel file from any publicly accessible URL
+    - Processes all sheets (or specify which ones)
+    - Extracts sentiment and/or themes (zero-shot classification)
+    - Optional custom labels for theme detection
+    - Auto-detects text column or specify manually
+    - Preserves original data and adds result columns
+    - Returns enhanced Excel file
+
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8080/batch/excel-from-url \\
+      -H "Content-Type: application/json" \\
+      -d '{
+        "file_url": "https://example.com/data.xlsx",
+        "theme_labels": "UNITAS exercises,military cooperation,regional security"
+      }'
+    ```
+
+    **URL Requirements:**
+    - Must be publicly accessible (no authentication required)
+    - Must be a direct link to Excel file (.xlsx, .xlsm, .xls)
+    - File size limit: 100MB
+
+    **Output:**
+    Same as /batch/excel - enhanced Excel file with sentiment and theme columns
+    """
+    logger.info(f"Batch Excel processing from URL started: {file_url}")
+    logger.info(f"Config: sentiment={extract_sentiment}, themes={extract_themes}, custom_labels={theme_labels is not None}")
+
+    try:
+        # Fetch file from URL
+        logger.info(f"Downloading file from URL: {file_url}")
+
+        # Use simple requests download (similar to existing URL fetch logic)
+        import requests
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+
+        response = requests.get(file_url, headers=headers, timeout=60, stream=True)
+        response.raise_for_status()
+
+        # Check content type
+        content_type = response.headers.get('Content-Type', '').lower()
+        if not any(ext in content_type for ext in ['excel', 'spreadsheet', 'ms-excel']):
+            # Also check URL extension
+            if not file_url.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+                logger.warning(f"URL may not be an Excel file. Content-Type: {content_type}")
+
+        # Download file bytes
+        file_bytes = response.content
+
+        if len(file_bytes) > 100 * 1024 * 1024:  # 100MB limit
+            raise HTTPException(status_code=400, detail="File too large (>100MB)")
+
+        logger.info(f"Downloaded {len(file_bytes)} bytes")
+
+        # Parse optional parameters
+        parsed_theme_labels = None
+        if theme_labels:
+            parsed_theme_labels = [label.strip() for label in theme_labels.split(',') if label.strip()]
+            logger.info(f"Using custom theme labels: {parsed_theme_labels}")
+
+        parsed_sheets = None
+        if sheets_to_process:
+            parsed_sheets = [sheet.strip() for sheet in sheets_to_process.split(',') if sheet.strip()]
+            logger.info(f"Processing specific sheets: {parsed_sheets}")
+
+        # Create configuration
+        config = BatchProcessingConfig(
+            extract_sentiment=extract_sentiment,
+            extract_themes=extract_themes,
+            theme_labels=parsed_theme_labels,
+            sentiment_preset=sentiment_preset,
+            theme_preset=theme_preset,
+            text_column=text_column,
+            sheets_to_process=parsed_sheets,
+            add_confidence_scores=add_confidence_scores,
+            top_n_themes=top_n_themes,
+            batch_size=batch_size
+        )
+
+        # Process Excel file
+        output_bytes, stats = process_excel_file(file_bytes, config)
+
+        logger.info(f"Batch processing complete: {stats['total_sheets']} sheets processed")
+
+        # Generate output filename from URL
+        from pathlib import Path
+        from urllib.parse import urlparse
+        url_path = urlparse(file_url).path
+        original_filename = Path(url_path).name or "downloaded_file.xlsx"
+        output_filename = original_filename.replace('.xlsx', '_analyzed.xlsx').replace('.xls', '_analyzed.xlsx')
+
+        return StreamingResponse(
+            io.BytesIO(output_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{output_filename}"',
+                "X-Processing-Stats": json.dumps(stats),
+                "X-Source-URL": file_url
+            }
+        )
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to download file from URL: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to download file from URL: {str(e)}")
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Batch processing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {str(e)}")
