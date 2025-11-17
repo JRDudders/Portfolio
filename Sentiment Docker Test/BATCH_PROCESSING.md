@@ -172,15 +172,18 @@ The output Excel file preserves all original columns and adds new ones:
 
 If `theme_labels` is not provided, the system uses:
 - politics
-- economics
-- social
-- technology
+- economy
+- **military**
 - health
-- environment
-- education
-- culture
+- science
+- technology
 - sports
 - entertainment
+- climate
+- crime
+- education
+- misinformation
+- opinion
 
 ### Available Presets
 
@@ -252,6 +255,78 @@ curl -X POST http://localhost:8001/batch/excel \
   -F "sentiment_preset=sentiment-twitter" \
   -F "theme_preset=zeroshot-mdeberta"  # Multilingual model
 ```
+
+### 6. Military & Geopolitical Analysis
+
+**Goal:** Track military exercises, defense cooperation, and geopolitical events
+
+```bash
+# General military/defense categorization
+curl -X POST http://localhost:8001/batch/excel \
+  -F "file=@defense_news.xlsx" \
+  -F "theme_labels=military exercises,defense cooperation,arms deals,territorial disputes,peacekeeping,security threats"
+
+# Specific to UNITAS and regional exercises
+curl -X POST http://localhost:8001/batch/excel \
+  -F "file=@latin_america_security.xlsx" \
+  -F "theme_labels=UNITAS exercises,naval cooperation,joint military exercises,humanitarian assistance,disaster relief,maritime security,defense partnerships,regional security"
+
+# Detailed geopolitical analysis with UNITAS as specific category
+curl -X POST http://localhost:8001/batch/excel \
+  -F "file=@regional_events.xlsx" \
+  -F "theme_labels=UNITAS naval exercises,bilateral defense,multilateral cooperation,military modernization,strategic partnerships,China influence,Russia influence,counter-narcotics,humanitarian missions" \
+  -F "top_n_themes=5"
+```
+
+**UNITAS-Specific Categorization:**
+
+UNITAS (Unitas is Latin for "unity") is an annual multinational maritime exercise. To specifically categorize UNITAS exercises:
+
+```python
+import requests
+
+url = "http://localhost:8001/batch/excel"
+
+# Custom labels for UNITAS and regional security analysis
+unitas_labels = [
+    "UNITAS naval exercises",           # Specific to UNITAS
+    "maritime security operations",
+    "anti-submarine warfare training",
+    "humanitarian assistance disaster relief",
+    "joint naval operations",
+    "U.S. naval cooperation",
+    "Latin American naval forces",
+    "Caribbean security",
+    "Pacific fleet exercises",
+    "counter-narcotics operations"
+]
+
+with open("security_reports.xlsx", "rb") as f:
+    response = requests.post(
+        url,
+        files={"file": f},
+        params={
+            "extract_sentiment": True,
+            "extract_themes": True,
+            "theme_labels": ",".join(unitas_labels),
+            "top_n_themes": 5  # Get top 5 to capture multiple aspects
+        }
+    )
+
+with open("security_reports_analyzed.xlsx", "wb") as out:
+    out.write(response.content)
+```
+
+**Example Output for UNITAS Detection:**
+
+Input text: *"The U.S. Navy and Chilean Navy participated in UNITAS 2025 naval exercises focusing on anti-submarine warfare and humanitarian assistance operations in the Pacific."*
+
+Output themes:
+- `theme_1`: UNITAS naval exercises (score: 0.89)
+- `theme_2`: anti-submarine warfare training (score: 0.76)
+- `theme_3`: humanitarian assistance disaster relief (score: 0.65)
+- `theme_4`: U.S. naval cooperation (score: 0.58)
+- `theme_5`: Pacific fleet exercises (score: 0.52)
 
 ---
 
@@ -339,6 +414,16 @@ response = requests.post(url, files=files, params=params)
 **Politics:**
 ```bash
 -F "theme_labels=economy,healthcare,education,environment,foreign policy,social issues"
+```
+
+**Military & Defense (UNITAS-focused):**
+```bash
+-F "theme_labels=UNITAS exercises,PANAMAX exercises,SOUTHCOM operations,naval cooperation,defense partnerships,humanitarian missions,maritime security,counter-narcotics,disaster relief,regional stability,China influence,Russia influence"
+```
+
+**Geopolitical Intelligence:**
+```bash
+-F "theme_labels=military exercises,diplomatic relations,economic sanctions,trade agreements,security threats,territorial disputes,alliance formation,regional conflicts,peacekeeping operations,arms control"
 ```
 
 ### Extract More Themes

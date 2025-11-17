@@ -53,7 +53,7 @@ MODEL_ID = "cardiffnlp/twitter-roberta-base-sentiment-latest"
 
 # Reasonable default label set for zero-shot if the caller provides none
 DEFAULT_ZS_LABELS: List[str] = [
-    "politics", "economy", "health", "science", "technology",
+    "politics", "economy", "military", "health", "science", "technology",
     "sports", "entertainment", "climate", "crime", "education",
     "misinformation", "opinion",
 ]
