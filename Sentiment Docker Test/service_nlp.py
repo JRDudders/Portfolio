@@ -43,6 +43,10 @@ from nlp_processor import (
 )
 from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
 from adapters import process_url
+from batch_processor import (
+    process_excel_file,
+    BatchProcessingConfig
+)
 
 app = FastAPI(
     title="CiceroWatch NLP Service",
@@ -640,6 +644,118 @@ async def stance_detection(request: StanceDetectionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/batch/excel")
+async def batch_process_excel(
+    file: UploadFile = File(...),
+    extract_sentiment: bool = Query(True, description="Extract sentiment from texts"),
+    extract_themes: bool = Query(True, description="Extract themes using zero-shot classification"),
+    theme_labels: Optional[str] = Query(None, description="Comma-separated theme labels (optional, uses defaults if not provided)"),
+    sentiment_preset: str = Query("sentiment-twitter", description="Sentiment analysis preset"),
+    theme_preset: str = Query("zeroshot-bart", description="Zero-shot classification preset"),
+    text_column: Optional[str] = Query(None, description="Text column name (auto-detect if not provided)"),
+    sheets_to_process: Optional[str] = Query(None, description="Comma-separated sheet names (process all if not provided)"),
+    top_n_themes: int = Query(3, description="Number of top themes to extract", ge=1, le=10),
+    add_confidence_scores: bool = Query(True, description="Include confidence scores in output"),
+    batch_size: int = Query(32, description="Batch size for processing", ge=1, le=128),
+):
+    """
+    Batch process Excel file with multiple sheets for sentiment and theme extraction
+
+    **Features:**
+    - Processes all sheets (or specify which ones)
+    - Extracts sentiment and/or themes (zero-shot classification)
+    - Optional custom labels for theme detection
+    - Auto-detects text column or specify manually
+    - Preserves original data and adds result columns
+    - Returns enhanced Excel file
+
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8001/batch/excel \\
+      -F "file=@data.xlsx" \\
+      -F "extract_sentiment=true" \\
+      -F "extract_themes=true" \\
+      -F "theme_labels=politics,economics,social issues,environment,technology"
+    ```
+
+    **Output Columns:**
+    - Original columns (preserved)
+    - `sentiment`: Sentiment label (positive/negative/neutral)
+    - `sentiment_confidence`: Confidence score (if enabled)
+    - `theme_1`, `theme_2`, `theme_3`: Top themes
+    - `theme_1_score`, `theme_2_score`, `theme_3_score`: Theme confidence scores
+
+    **Custom Theme Labels:**
+    If not provided, uses defaults: politics, economics, social, technology, health, environment, education, culture, sports, entertainment
+
+    **Supported Presets:**
+    - Sentiment: sentiment-twitter, sentiment-sst2
+    - Themes: zeroshot-bart, zeroshot-mdeberta
+    """
+    logger.info(f"Batch Excel processing started: {file.filename}")
+    logger.info(f"Config: sentiment={extract_sentiment}, themes={extract_themes}, custom_labels={theme_labels is not None}")
+
+    try:
+        # Validate file type
+        if not file.filename or not file.filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+            raise HTTPException(
+                status_code=400,
+                detail="File must be an Excel file (.xlsx, .xlsm, or .xls)"
+            )
+
+        # Read file bytes
+        file_bytes = await file.read()
+
+        # Parse optional parameters
+        parsed_theme_labels = None
+        if theme_labels:
+            parsed_theme_labels = [label.strip() for label in theme_labels.split(',') if label.strip()]
+            logger.info(f"Using custom theme labels: {parsed_theme_labels}")
+
+        parsed_sheets = None
+        if sheets_to_process:
+            parsed_sheets = [sheet.strip() for sheet in sheets_to_process.split(',') if sheet.strip()]
+            logger.info(f"Processing specific sheets: {parsed_sheets}")
+
+        # Create configuration
+        config = BatchProcessingConfig(
+            extract_sentiment=extract_sentiment,
+            extract_themes=extract_themes,
+            theme_labels=parsed_theme_labels,
+            sentiment_preset=sentiment_preset,
+            theme_preset=theme_preset,
+            text_column=text_column,
+            sheets_to_process=parsed_sheets,
+            add_confidence_scores=add_confidence_scores,
+            top_n_themes=top_n_themes,
+            batch_size=batch_size
+        )
+
+        # Process Excel file
+        output_bytes, stats = process_excel_file(file_bytes, config)
+
+        logger.info(f"Batch processing complete: {stats['total_sheets']} sheets processed")
+
+        # Return enhanced Excel file
+        output_filename = file.filename.replace('.xlsx', '_analyzed.xlsx').replace('.xls', '_analyzed.xlsx')
+
+        return StreamingResponse(
+            io.BytesIO(output_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{output_filename}"',
+                "X-Processing-Stats": json.dumps(stats)
+            }
+        )
+
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Batch processing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {str(e)}")
+
+
 if __name__ == "__main__":
     port = int(os.getenv("SERVICE_PORT", 8001))
 
@@ -648,6 +764,7 @@ if __name__ == "__main__":
     logger.info("=" * 70)
     logger.info(f"Listening on: http://0.0.0.0:{port}")
     logger.info("Features: Sentiment, Entities, Topics, URL Analysis, Stance Detection")
+    logger.info("Batch Excel Processing: /batch/excel (multi-tab with optional zero-shot labels)")
     logger.info("Batch processing enabled: CLASSIFY_BATCH_SIZE=16, ZEROSHOT_BATCH_SIZE=8, STANCE_BATCH_SIZE=32")
     logger.info("Health checks: every 10 minutes")
     logger.info("=" * 70)
