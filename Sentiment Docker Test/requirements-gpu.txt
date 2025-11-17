@@ -2,14 +2,12 @@
 # Requires NVIDIA GPU with CUDA 11.8+ or CUDA 12.0+
 # Use this for GPU-accelerated graph analytics
 
-# Include all base requirements
+# Include all base requirements (which includes PyTorch installation instructions)
 -r req.txt
 
-# PyTorch with CUDA support (for GPU detection)
-# Choose the appropriate index-url based on your CUDA version:
-# For CUDA 11.8: --index-url https://download.pytorch.org/whl/cu118
-# For CUDA 12.1: --index-url https://download.pytorch.org/whl/cu121
-torch>=2.3.0
+# PyTorch with CUDA is installed separately (see req.txt header)
+# Make sure to use the GPU-enabled version:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # RAPIDS cuGraph for GPU-accelerated graph analytics
 # Installation via pip (requires compatible CUDA toolkit)
@@ -39,4 +37,4 @@ torch>=2.3.0
 # Audio Deepfake Detection (GPU-accelerated, Python 3.12 compatible)
 librosa>=0.10.0
 soundfile>=0.12.1
-torchaudio>=2.0.0
+# torchaudio is installed with torch (see instructions above)

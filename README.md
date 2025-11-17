@@ -29,9 +29,22 @@ This is my portfolio showcasing NLP coursework and practical solutions I've deve
 
 ### Getting Started
 
+**Quick Setup (Linux/Mac):**
 ```bash
 cd "Sentiment Docker Test"
-pip install -r req.txt
+bash setup_local.sh cpu          # For CPU-only
+# OR
+bash setup_local.sh cuda121      # For CUDA 12.1 GPU
+```
+
+**Manual Setup:**
+```bash
+cd "Sentiment Docker Test"
+# Install PyTorch first
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# Then install other requirements
+pip install -r requirements-local.txt
+# Run the server
 python run_local.py
 ```
 

@@ -1,15 +1,19 @@
 # Local Development Requirements (Tested Versions)
 # Use this for local development to avoid version conflicts
 
+# IMPORTANT: Install PyTorch FIRST before installing this file
+# For CPU: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# For CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# For CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
 # Core API
 fastapi>=0.111.0,<0.115.0
 uvicorn[standard]>=0.29.0,<0.30.0  # <0.30 to avoid Conda asyncio issue
 python-multipart>=0.0.9
 
 # NLP Core - Compatible versions tested together
-transformers>=4.40.0,<4.45.0
-torch>=2.2.0,<2.5.0
-tokenizers>=0.19.0,<0.20.0
+transformers>=4.40.0
+tokenizers>=0.19.0
 safetensors>=0.4.0
 
 # Data processing
@@ -38,7 +42,7 @@ hypercorn>=0.16.0
 # Audio Deepfake Detection (Python 3.12 compatible)
 librosa>=0.10.0
 soundfile>=0.12.1
-torchaudio>=2.0.0
+# torchaudio - install with torch (see instructions at top of file)
 
 # For development
 # jupyter>=1.0.0

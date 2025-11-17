@@ -1,3 +1,9 @@
+# IMPORTANT: Install PyTorch FIRST before installing this file
+# For CPU: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# For CUDA 11.8: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# For CUDA 12.1: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# Then: pip install -r req.txt
+
 # Core API Framework
 fastapi>=0.111
 uvicorn>=0.30
@@ -6,7 +12,7 @@ python-multipart>=0.0.9
 
 # Machine Learning & NLP Core
 transformers>=4.44
-torch>=2.3
+# torch - install separately (see instructions above)
 sentencepiece>=0.1.99
 sentence-transformers>=3.0
 
