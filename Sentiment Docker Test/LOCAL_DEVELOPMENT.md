@@ -204,6 +204,37 @@ docker-compose restart nlp
 
 ### Install All Dependencies
 
+#### Windows (Recommended: Use Conda)
+
+```bash
+# Create conda environment
+conda create -n cicerowatch python=3.12
+conda activate cicerowatch
+
+# Install numpy via conda first (avoids build issues)
+conda install numpy
+
+# Then install other dependencies
+pip install -r requirements-local.txt
+
+# Or use pip only with the fixed requirements
+pip install -r requirements-local.txt
+```
+
+**Why Conda for Windows?**
+- Pre-built binaries for numpy, scipy, etc.
+- Avoids needing Microsoft Visual Studio C++ compiler
+- Faster and more reliable on Windows
+
+**Alternative (pip only)**:
+If you get numpy build errors with pip, the requirements have been updated to use specific numpy versions with Windows wheels. If issues persist:
+```bash
+pip install numpy==1.26.3  # Or use conda install numpy
+pip install -r requirements-local.txt
+```
+
+#### Linux/Mac
+
 ```bash
 # Core dependencies
 pip install fastapi uvicorn python-multipart pydantic requests
@@ -382,6 +413,42 @@ Each service has interactive API docs:
 ---
 
 ## Common Issues
+
+### "numpy build failed - Unknown compiler" (Windows)
+
+**Symptoms**:
+```
+ERROR: Unknown compiler(s): [['icl'], ['cl'], ['cc'], ['gcc'], ['clang']...]
+Failed to activate VS environment: Could not find vswhere.exe
+```
+
+**Root Cause**: numpy is trying to build from source but can't find a C compiler.
+
+**Solutions** (in order of ease):
+
+1. **Use Conda** (Recommended):
+   ```bash
+   conda install numpy
+   pip install -r requirements-local.txt
+   ```
+
+2. **Use fixed requirements**:
+   The requirements-local.txt has been updated to use specific numpy versions with Windows wheels:
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements-local.txt
+   ```
+
+3. **Install specific numpy version**:
+   ```bash
+   pip install numpy==1.26.3
+   pip install -r requirements-local.txt
+   ```
+
+4. **Install Microsoft Visual Studio Build Tools** (if above don't work):
+   - Download from: https://visualstudio.microsoft.com/downloads/
+   - Install "Desktop development with C++"
+   - Restart terminal and try again
 
 ### "Port already in use"
 
