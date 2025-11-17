@@ -299,8 +299,8 @@ def process_excel_file(
     """
     logger.info("Starting batch Excel processing")
 
-    # Read Excel file
-    excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
+    # Read Excel file (specify engine for better compatibility)
+    excel_file = pd.ExcelFile(io.BytesIO(file_bytes), engine='openpyxl')
     sheet_names = excel_file.sheet_names
 
     logger.info(f"Found {len(sheet_names)} sheets: {sheet_names}")
@@ -324,7 +324,7 @@ def process_excel_file(
 
     for sheet_name in sheets_to_process:
         logger.info(f"Reading sheet: {sheet_name}")
-        df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name)
+        df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name, engine='openpyxl')
 
         # Process sheet
         result_df, sheet_stats = process_sheet(df, config, sheet_name)
