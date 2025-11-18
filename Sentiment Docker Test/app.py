@@ -14,6 +14,7 @@ import requests
 from fastapi import FastAPI, UploadFile, File, Query, Body, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, PlainTextResponse
 from starlette.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
 from graph_tasks import load_graph_from_bytes, run_graph_metrics
@@ -315,34 +316,34 @@ async def predict_file(
 
 
 # ---- Predict from URL ------------------------------------------------------ #
-class UrlBody(T.TypedDict, total=False):
+class UrlBody(BaseModel):
     url: str
-    preset: str
-    labels: T.List[str] | None
-    include_stopwords: bool
-    render: bool
-    renderer: str  # "auto" | "playwright" | "selenium" (selenium not implemented here)
-    wait_selector: str | None
-    scroll_passes: int
-    render_timeout_ms: int
-    cookies: str | None
-    extra_headers: dict | None
+    preset: str | None = None
+    labels: T.List[str] | None = None
+    include_stopwords: bool = False
+    render: bool = False
+    renderer: str = "auto"  # "auto" | "playwright" | "selenium" (selenium not implemented here)
+    wait_selector: str | None = None
+    scroll_passes: int = 8
+    render_timeout_ms: int = 3600000
+    cookies: str | None = None
+    extra_headers: dict | None = None
 
 @app.post("/predict/url")
 async def predict_url(body: UrlBody = Body(...)):
-    url = body.get("url")
+    url = body.url
     if not url:
         raise HTTPException(status_code=400, detail="Missing 'url'")
 
-    preset = body.get("preset")
-    labels = body.get("labels")
-    render = bool(body.get("render", False))
-    renderer = (body.get("renderer") or "auto").lower()
-    wait_selector = body.get("wait_selector")
-    scroll_passes = int(body.get("scroll_passes") or 8)
-    timeout_ms = int(body.get("render_timeout_ms") or 3600000)  # 1 hour default
-    cookies_header = body.get("cookies")
-    extra_headers = body.get("extra_headers") or {}
+    preset = body.preset
+    labels = body.labels
+    render = body.render
+    renderer = (body.renderer or "auto").lower()
+    wait_selector = body.wait_selector
+    scroll_passes = body.scroll_passes
+    timeout_ms = body.render_timeout_ms
+    cookies_header = body.cookies
+    extra_headers = body.extra_headers or {}
 
     # Fetch HTML (rendered or simple)
     try:
@@ -398,11 +399,11 @@ async def predict_url(body: UrlBody = Body(...)):
 
 
 # ---- Batch sentiment analysis ---------------------------------------------- #
-class BatchTextRequest(T.TypedDict, total=False):
+class BatchTextRequest(BaseModel):
     texts: T.List[str]
-    preset: str
-    labels: T.List[str] | None
-    preprocess: bool
+    preset: str = "sentiment-twitter"
+    labels: T.List[str] | None = None
+    preprocess: bool = True
 
 @app.post("/predict/batch")
 async def predict_batch(body: BatchTextRequest = Body(...)):
@@ -410,13 +411,13 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
     Efficiently process multiple texts for sentiment analysis or other NLP tasks.
     Optimized for batch processing with automatic preprocessing.
     """
-    texts = body.get("texts")
+    texts = body.texts
     if not texts or not isinstance(texts, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'texts' array")
 
-    preset = body.get("preset", "sentiment-twitter")
-    labels = body.get("labels")
-    do_preprocess = body.get("preprocess", True)
+    preset = body.preset
+    labels = body.labels
+    do_preprocess = body.preprocess
 
     try:
         # Preprocess if requested
