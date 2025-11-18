@@ -34,6 +34,7 @@ services:
       - SERVICE_NAME=nlp
       - SERVICE_PORT=8001
       - CUDA_VISIBLE_DEVICES=0
+      - HF_TOKEN=${HF_TOKEN:-}
     networks:
       - cicerowatch
     volumes:

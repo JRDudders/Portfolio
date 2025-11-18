@@ -7,6 +7,18 @@ Run with: python run_local.py
 import sys
 import os
 
+# Set HuggingFace token for model access (required for some models)
+# Set your token: export HF_TOKEN=hf_your_token_here
+# Or create a .env file with HF_TOKEN=hf_your_token_here
+if not os.getenv("HF_TOKEN") and not os.getenv("HUGGINGFACE_API_KEY"):
+    # Load from .env file if it exists
+    if os.path.exists(".env"):
+        with open(".env") as f:
+            for line in f:
+                if line.startswith("HF_TOKEN="):
+                    os.environ["HF_TOKEN"] = line.split("=", 1)[1].strip()
+                    break
+
 # Fix 1: Downgrade to uvicorn without loop_factory
 def run_with_basic_uvicorn():
     """Run using basic uvicorn without asyncio patches"""
