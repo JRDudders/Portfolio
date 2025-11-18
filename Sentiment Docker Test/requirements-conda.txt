@@ -1,0 +1,47 @@
+# Conda-Compatible Requirements (Tested & Working)
+# Use this for Conda environments to avoid version conflicts
+# Install with: pip install -r requirements-conda.txt
+
+# Core API - Pinned compatible versions
+fastapi==0.115.5
+uvicorn==0.32.1
+python-multipart==0.0.18
+pydantic==2.10.3
+pydantic-core==2.27.1
+annotated-types==0.7.0
+typing-extensions==4.12.2
+
+# NLP Core - Compatible versions
+transformers==4.47.1
+torch==2.5.1
+tokenizers==0.21.0
+safetensors==0.4.5
+sentencepiece==0.2.0
+sentence-transformers==3.3.1
+
+# Data Processing
+pandas==2.2.3
+numpy==1.26.4
+scikit-learn==1.5.2
+
+# NLP Libraries
+nltk==3.9.1
+spacy==3.8.3
+stanza==1.9.2
+
+# Web Scraping
+beautifulsoup4==4.12.3
+lxml==5.3.0
+trafilatura==1.14.0
+readability-lxml==0.8.1
+requests==2.32.3
+httpx==0.28.1
+
+# Optional: JavaScript rendering (large dependencies)
+# playwright==1.49.1
+# selenium==4.27.1
+
+# Audio Processing (if needed)
+librosa==0.10.2.post1
+soundfile==0.12.1
+torchaudio==2.5.1
