@@ -19,6 +19,13 @@ if not os.getenv("HF_TOKEN") and not os.getenv("HUGGINGFACE_API_KEY"):
                     os.environ["HF_TOKEN"] = line.split("=", 1)[1].strip()
                     break
 
+# Disable SSL verification for HuggingFace downloads (fixes SSL certificate errors)
+# This is necessary in some corporate networks or Conda environments
+# Only affects HuggingFace model downloads, not the API server
+os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
+os.environ["CURL_CA_BUNDLE"] = ""  # Disable certificate verification for requests
+os.environ["REQUESTS_CA_BUNDLE"] = ""
+
 # Fix 1: Downgrade to uvicorn without loop_factory
 def run_with_basic_uvicorn():
     """Run using basic uvicorn without asyncio patches"""

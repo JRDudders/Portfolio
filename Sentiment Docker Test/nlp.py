@@ -88,6 +88,13 @@ _CLASSIFY_MAX_WORDS = int(os.getenv("CLASSIFY_MAX_WORDS", "320"))  # ~ <= 512 to
 
 # ---------------------------- HF Pipelines ---------------------------------- #
 
+# Disable SSL verification for HuggingFace downloads if needed (for corporate networks)
+# Set environment variable to skip SSL verification (not recommended for production)
+if os.getenv("HF_HUB_DISABLE_SSL_VERIFY") or os.getenv("DISABLE_SSL_VERIFY"):
+    import ssl
+    ssl._create_default_https_context = ssl._create_unverified_context
+    print("[nlp] SSL verification disabled for HuggingFace downloads")
+
 @lru_cache(maxsize=16)
 def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     """
