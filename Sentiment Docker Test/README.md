@@ -51,6 +51,8 @@ All services communicate via REST APIs and support live code editing without reb
 
 ## Quick Start
 
+> **Windows Users**: Having issues with numpy build errors or dependencies? See **[WINDOWS_SETUP.md](WINDOWS_SETUP.md)** for step-by-step Windows installation guide.
+
 ### Production Deployment (Stable Build)
 
 **Frozen code, no live editing - recommended for production use:**
@@ -598,6 +600,17 @@ services:
 - ✅ Fixed nginx upload limits (500MB)
 - ✅ Added parameter validation for topic modeling
 - ✅ Removed 7 broken presets (missing dependencies)
+
+---
+
+## Documentation
+
+- **[WINDOWS_SETUP.md](WINDOWS_SETUP.md)** - Complete Windows installation guide (conda, pip, numpy fix)
+- **[LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md)** - Local development without Docker
+- **[GPU_SETUP.md](GPU_SETUP.md)** - GPU setup for Windows/WSL2
+- **[DOCKER_SETUP.md](DOCKER_SETUP.md)** - Docker installation and configuration
+- **[AUDIO_SETUP.md](AUDIO_SETUP.md)** - Audio service setup and fairseq
+- **[MICROSERVICES_ARCHITECTURE.md](MICROSERVICES_ARCHITECTURE.md)** - Architecture details
 
 ---
 
