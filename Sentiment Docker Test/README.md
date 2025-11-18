@@ -109,6 +109,69 @@ docker-compose -f docker-compose.gpu.yml restart frontend
 
 ---
 
+## Local Development (Without Docker)
+
+For development without Docker, you can run `run_local.py` directly.
+
+### Using Virtual Environment (Recommended)
+
+```bash
+cd "Sentiment Docker Test"
+
+# Create and activate virtual environment
+python -m venv venv
+venv\Scripts\activate          # Windows
+source venv/bin/activate       # Linux/Mac
+
+# Install dependencies
+pip install -r requirements-nlp.txt
+
+# For GPU support
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Run server
+python run_local.py
+# Access at http://localhost:8080/docs
+```
+
+### Using Conda Environment
+
+```bash
+# Create environment
+conda create -n cicerowatch python=3.11 -y
+conda activate cicerowatch
+
+# Install PyTorch (Conda channel for better compatibility)
+conda install pytorch torchvision torchaudio pytorch-cuda=12.1 -c pytorch -c nvidia -y
+
+# Install dependencies
+pip install -r requirements-conda.txt
+
+# Run server
+python run_local.py
+```
+
+### Common Issues
+
+**"No module named 'transformers'"**
+- Ensure virtual environment is activated (should see `(venv)` or `(cicerowatch)` in prompt)
+- Reinstall: `pip install -r requirements-nlp.txt`
+
+**"AttributeError: __pydantic_core_schema__" (Conda)**
+- Pydantic version conflict. Fix:
+```bash
+conda activate cicerowatch
+pip uninstall -y pydantic pydantic-core fastapi uvicorn
+pip install -r requirements-conda.txt
+```
+
+**IDE Setup:**
+- **VS Code**: `Ctrl+Shift+P` → "Python: Select Interpreter" → Choose venv
+- **PyCharm**: Settings → Project Interpreter → Add → Select venv
+- **Spyder**: Activate venv first, then launch Spyder from within it
+
+---
+
 ## GPU Setup (Windows/WSL2)
 
 ### Prerequisites
