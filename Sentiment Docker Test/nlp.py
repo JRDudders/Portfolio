@@ -49,7 +49,9 @@ import re
 
 # Default model/task used by /healthz and when callers omit both
 MODEL_TASK = "text-classification"
-MODEL_ID = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+# Use smaller model for corporate firewalls that block large downloads (501MB -> 268MB)
+MODEL_ID = os.getenv("SENTIMENT_MODEL", "distilbert-base-uncased-finetuned-sst-2-english")
+# Alternative: "cardiffnlp/twitter-roberta-base-sentiment-latest" (better accuracy but 501MB)
 
 # Reasonable default label set for zero-shot if the caller provides none
 DEFAULT_ZS_LABELS: List[str] = [
