@@ -158,11 +158,28 @@ python run_local.py
 - Reinstall: `pip install -r requirements-nlp.txt`
 
 **"AttributeError: __pydantic_core_schema__" (Conda)**
-- Pydantic version conflict. Fix:
+- Pydantic version conflict. Run the automated fix:
+```bash
+# Linux/Mac
+conda activate cicerowatch
+bash fix_pydantic.sh
+
+# Windows
+conda activate cicerowatch
+fix_pydantic.bat
+```
+
+Or manually:
 ```bash
 conda activate cicerowatch
-pip uninstall -y pydantic pydantic-core fastapi uvicorn
-pip install -r requirements-conda.txt
+# Uninstall ALL conflicting packages
+pip uninstall -y pydantic pydantic-core pydantic-settings fastapi uvicorn starlette typing-extensions annotated-types
+# Clear cache
+pip cache purge
+# Reinstall with exact versions
+pip install --no-cache-dir pydantic-core==2.27.1 pydantic==2.10.3 fastapi==0.115.5 uvicorn==0.32.1
+# Verify
+python -c "from fastapi import FastAPI; from pydantic import BaseModel; print('OK')"
 ```
 
 **IDE Setup:**
