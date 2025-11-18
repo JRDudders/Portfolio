@@ -92,8 +92,36 @@ _CLASSIFY_MAX_WORDS = int(os.getenv("CLASSIFY_MAX_WORDS", "320"))  # ~ <= 512 to
 # Set environment variable to skip SSL verification (not recommended for production)
 if os.getenv("HF_HUB_DISABLE_SSL_VERIFY") or os.getenv("DISABLE_SSL_VERIFY"):
     import ssl
+    import warnings
+
+    # Disable SSL verification for standard library
     ssl._create_default_https_context = ssl._create_unverified_context
-    print("[nlp] SSL verification disabled for HuggingFace downloads")
+
+    # Disable SSL warnings from urllib3 (used by requests)
+    warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+
+    # Also disable verification for requests library (used by HuggingFace Hub)
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    # Set environment variables for requests library
+    os.environ['REQUESTS_CA_BUNDLE'] = ''
+    os.environ['CURL_CA_BUNDLE'] = ''
+
+    # Monkeypatch requests.Session to always use verify=False
+    try:
+        import requests
+        _original_request = requests.Session.request
+
+        def _unverified_request(self, method, url, **kwargs):
+            kwargs['verify'] = False
+            return _original_request(self, method, url, **kwargs)
+
+        requests.Session.request = _unverified_request
+    except Exception as e:
+        print(f"[nlp] Warning: Could not monkeypatch requests.Session: {e}")
+
+    print("[nlp] ⚠️  SSL verification disabled for HuggingFace downloads (corporate network mode)")
 
 @lru_cache(maxsize=16)
 def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
