@@ -17,7 +17,7 @@ from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
-from graph_tasks import load_graph_from_bytes, run_graph_metrics
+from graph_tasks import load_graph_from_bytes, run_graph_metrics, extract_social_media_edges
 
 # Configure logging
 logging.basicConfig(
@@ -861,6 +861,135 @@ async def graph_ego_network(
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Ego network loading failed: {e}")
+
+
+@app.post("/graph/prepare")
+async def prepare_social_media_graph(
+    file: UploadFile = File(..., description="CSV or XLSX file with social media data"),
+    sheet: str = Query("0", description="Sheet name or index for XLSX files"),
+    extract_hashtags: bool = Query(False, description="Extract hashtag edges (user->hashtag)")
+):
+    """
+    Convert social media CSV/XLSX into network edge lists.
+
+    Automatically detects columns (author, mentions, replies, retweets, quotes, URLs, hashtags)
+    and extracts various types of network relationships:
+
+    - **mention_edges**: User @mentions another user
+    - **reply_edges**: User replies to another user
+    - **retweet_edges**: User retweets another user
+    - **quote_edges**: User quotes another user
+    - **domain_edges**: User shares a URL domain
+    - **hashtag_edges**: User uses a hashtag (optional)
+    - **nodes**: All unique nodes with type annotations (user/domain/hashtag)
+
+    **Column Detection** (case-insensitive, substring matching):
+    - Author: author, username, user, screen_name, from, account
+    - Text: text, full_text, tweet, content, body
+    - Mentions: mentions, mentioned_users, entities_user_mentions
+    - Reply: in_reply_to_screen_name, in_reply_to_user, reply_to
+    - Retweet: retweeted_user, retweeted_username, rt_username
+    - Quote: quoted_user, quoted_username
+    - URLs: urls, entities_urls, links, expanded_urls
+    - Hashtags: hashtags, entities_hashtags
+
+    **Example Usage**:
+    ```bash
+    # CSV
+    curl -F "file=@tweets.csv" http://localhost:8080/graph/prepare
+
+    # XLSX with specific sheet and hashtags
+    curl -F "file=@data.xlsx" "http://localhost:8080/graph/prepare?sheet=0&extract_hashtags=true"
+    ```
+    """
+    try:
+        # Read file
+        file_bytes = await file.read()
+        filename = file.filename or "data.csv"
+
+        # Load DataFrame
+        if filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+            # Parse sheet parameter (could be int or string)
+            try:
+                sheet_param = int(sheet)
+            except ValueError:
+                sheet_param = sheet
+
+            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_param)
+        else:
+            # Assume CSV
+            df = pd.read_csv(io.BytesIO(file_bytes))
+
+        # Extract edges
+        edges = extract_social_media_edges(df, extract_hashtags=extract_hashtags)
+
+        # Convert to dict
+        result = edges.to_dict()
+
+        # Convert DataFrame to records for frontend (limit columns to reduce size)
+        # Include key columns for user content display
+        columns_to_include = []
+        df_cols_lower = {col.lower(): col for col in df.columns}
+
+        # Try to find author column
+        author_col = None
+        for key in ['author', 'username', 'user', 'screen_name', 'from', 'account']:
+            if key in df_cols_lower:
+                author_col = df_cols_lower[key]
+                columns_to_include.append(author_col)
+                break
+
+        # Try to find text column
+        for key in ['text', 'full_text', 'tweet', 'content', 'body']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+                break
+
+        # Try to find timestamp/date column
+        for key in ['created_at', 'timestamp', 'date', 'time', 'datetime']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+                break
+
+        # Add any other interesting columns (mentions, retweets, etc.)
+        for key in ['mentions', 'in_reply_to_screen_name', 'retweeted_user', 'urls', 'hashtags']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+
+        # If we couldn't find key columns, just include first 10 columns
+        if len(columns_to_include) < 2:
+            columns_to_include = df.columns[:10].tolist()
+
+        # Create filtered dataframe and convert to records
+        df_filtered = df[columns_to_include] if columns_to_include else df
+        original_data = df_filtered.fillna('').to_dict('records')
+
+        return {
+            "success": True,
+            "edges": {
+                "mention_edges": result["mention_edges"],
+                "reply_edges": result["reply_edges"],
+                "retweet_edges": result["retweet_edges"],
+                "quote_edges": result["quote_edges"],
+                "domain_edges": result["domain_edges"],
+                "hashtag_edges": result["hashtag_edges"],
+                "nodes": result["nodes"]
+            },
+            "stats": result["stats"],
+            "original_data": original_data,
+            "author_column": author_col  # Tell frontend which column has the username
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not detect required columns: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Social media graph preparation failed: {str(e)}"
+        )
 
 
 # ------------------------------ Audio Anti-Spoofing ------------------------ #
