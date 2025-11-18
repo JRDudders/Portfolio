@@ -128,7 +128,12 @@ def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     """
     Cache HF pipeline objects. `key` encodes kwargs that affect pipeline creation.
     """
+    import sys
     from transformers import pipeline
+    from transformers.utils import logging as hf_logging
+
+    # Enable transformers logging to see download progress
+    hf_logging.set_verbosity_info()
 
     # Get HuggingFace token from environment (needed for some models like DeBERTa-MNLI)
     hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
@@ -142,63 +147,87 @@ def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     # Try loading with safetensors first (newer format), fallback to pytorch
     try:
         if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
-            print(f"[nlp] Loading {model_id} for {task}...")
+            print(f"\n[nlp] Loading {model_id} for {task}...")
+            print(f"[nlp] Note: First download may take 2-5 minutes (~500MB)")
+            print(f"[nlp] If you see no progress for >60s, your firewall may be blocking downloads")
+            sys.stdout.flush()
+
             pipe = pipeline(
                 "text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
                 model=model_id,
                 device=-1,  # CPU
                 **model_kwargs
             )
-            print(f"[nlp] ✓ Model loaded successfully")
+            print(f"[nlp] ✓ Model loaded successfully\n")
             return pipe
 
         if task == "token-classification":
-            print(f"[nlp] Loading {model_id} for {task}...")
+            print(f"\n[nlp] Loading {model_id} for {task}...")
+            print(f"[nlp] Note: First download may take 2-5 minutes (~500MB)")
+            print(f"[nlp] If you see no progress for >60s, your firewall may be blocking downloads")
+            sys.stdout.flush()
+
             pipe = pipeline(
                 "token-classification",
                 model=model_id,
                 device=-1,  # CPU
                 **model_kwargs
             )
-            print(f"[nlp] ✓ Model loaded successfully")
+            print(f"[nlp] ✓ Model loaded successfully\n")
             return pipe
 
         raise ValueError(f"Unsupported HF task: {task}")
 
     except Exception as e:
-        print(f"[nlp] ❌ Error loading model {model_id}: {e}")
+        print(f"\n[nlp] ❌ Error loading model {model_id}")
+        print(f"[nlp] Error details: {str(e)[:200]}")
         print(f"[nlp] Attempting to re-download model (clearing cache)...")
+        sys.stdout.flush()
 
         # Try again with force_download to clear corrupted cache
         try:
             model_kwargs["force_download"] = True
 
             if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
+                print(f"[nlp] Retry attempt with force_download=True...")
+                sys.stdout.flush()
+
                 pipe = pipeline(
                     "text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
                     model=model_id,
                     device=-1,
                     **model_kwargs
                 )
-                print(f"[nlp] ✓ Model re-downloaded and loaded successfully")
+                print(f"[nlp] ✓ Model re-downloaded and loaded successfully\n")
                 return pipe
 
             if task == "token-classification":
+                print(f"[nlp] Retry attempt with force_download=True...")
+                sys.stdout.flush()
+
                 pipe = pipeline(
                     "token-classification",
                     model=model_id,
                     device=-1,
                     **model_kwargs
                 )
-                print(f"[nlp] ✓ Model re-downloaded and loaded successfully")
+                print(f"[nlp] ✓ Model re-downloaded and loaded successfully\n")
                 return pipe
 
         except Exception as retry_error:
-            print(f"[nlp] ❌ Retry failed: {retry_error}")
+            print(f"\n[nlp] ❌ Retry failed: {str(retry_error)[:200]}")
+            print(f"\n[nlp] DIAGNOSIS: Your corporate firewall is likely blocking HuggingFace downloads.")
+            print(f"[nlp] Run 'python test_hf_connection.py' to diagnose the issue.")
+            print(f"[nlp] Possible solutions:")
+            print(f"[nlp]   1. Contact IT to whitelist huggingface.co and cdn.huggingface.co")
+            print(f"[nlp]   2. Use VPN to bypass firewall")
+            print(f"[nlp]   3. Manually clear cache: python clear_model_cache.py")
+            sys.stdout.flush()
+
             raise RuntimeError(
-                f"Failed to load model '{model_id}': {str(retry_error)}. "
-                f"Check your network connection and HuggingFace token. "
-                f"You may need to manually clear cache: rm -rf ~/.cache/huggingface/hub/models--{model_id.replace('/', '--')}"
+                f"Failed to load model '{model_id}'. "
+                f"Your firewall may be blocking downloads. "
+                f"Run 'python test_hf_connection.py' for diagnostics."
             ) from retry_error
 
 
