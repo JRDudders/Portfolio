@@ -128,24 +128,78 @@ def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     """
     Cache HF pipeline objects. `key` encodes kwargs that affect pipeline creation.
     """
-    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
+    from transformers import pipeline
 
     # Get HuggingFace token from environment (needed for some models like DeBERTa-MNLI)
     hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
 
-    if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
-        tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
-        mdl = AutoModelForSequenceClassification.from_pretrained(model_id, token=hf_token)
-        return pipeline("text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
-                        model=mdl, tokenizer=tok, device=-1)
+    # Common kwargs for model loading
+    model_kwargs = {
+        "token": hf_token,
+        "trust_remote_code": False,  # Security: don't execute remote code
+    }
 
-    if task == "token-classification":
-        tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
-        mdl = AutoModelForTokenClassification.from_pretrained(model_id, token=hf_token)
-        # aggregation handled at call-time via kwargs
-        return pipeline("token-classification", model=mdl, tokenizer=tok, device=-1)
+    # Try loading with safetensors first (newer format), fallback to pytorch
+    try:
+        if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
+            print(f"[nlp] Loading {model_id} for {task}...")
+            pipe = pipeline(
+                "text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
+                model=model_id,
+                device=-1,  # CPU
+                **model_kwargs
+            )
+            print(f"[nlp] ✓ Model loaded successfully")
+            return pipe
 
-    raise ValueError(f"Unsupported HF task: {task}")
+        if task == "token-classification":
+            print(f"[nlp] Loading {model_id} for {task}...")
+            pipe = pipeline(
+                "token-classification",
+                model=model_id,
+                device=-1,  # CPU
+                **model_kwargs
+            )
+            print(f"[nlp] ✓ Model loaded successfully")
+            return pipe
+
+        raise ValueError(f"Unsupported HF task: {task}")
+
+    except Exception as e:
+        print(f"[nlp] ❌ Error loading model {model_id}: {e}")
+        print(f"[nlp] Attempting to re-download model (clearing cache)...")
+
+        # Try again with force_download to clear corrupted cache
+        try:
+            model_kwargs["force_download"] = True
+
+            if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
+                pipe = pipeline(
+                    "text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
+                    model=model_id,
+                    device=-1,
+                    **model_kwargs
+                )
+                print(f"[nlp] ✓ Model re-downloaded and loaded successfully")
+                return pipe
+
+            if task == "token-classification":
+                pipe = pipeline(
+                    "token-classification",
+                    model=model_id,
+                    device=-1,
+                    **model_kwargs
+                )
+                print(f"[nlp] ✓ Model re-downloaded and loaded successfully")
+                return pipe
+
+        except Exception as retry_error:
+            print(f"[nlp] ❌ Retry failed: {retry_error}")
+            raise RuntimeError(
+                f"Failed to load model '{model_id}': {str(retry_error)}. "
+                f"Check your network connection and HuggingFace token. "
+                f"You may need to manually clear cache: rm -rf ~/.cache/huggingface/hub/models--{model_id.replace('/', '--')}"
+            ) from retry_error
 
 
 def _avg_scores(label_sets: List[Dict[str, float]]) -> Dict[str, float]:
