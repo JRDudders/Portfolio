@@ -37,10 +37,19 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install corporate certificate (if present)
-# Place your corporate .crt file in the project root as 'corporate-cert.crt'
-COPY corporate-cert.crt* /usr/local/share/ca-certificates/ 2>/dev/null || true
-RUN update-ca-certificates || true
+# Copy certificates directory (may be empty or contain corporate certs)
+# Place your corporate .crt files in certs/ directory before building
+COPY certs /tmp/certs
+
+# Install any corporate certificates found
+RUN if ls /tmp/certs/*.crt 1> /dev/null 2>&1; then \
+        cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ && \
+        update-ca-certificates && \
+        echo "✓ Corporate certificates installed"; \
+    else \
+        echo "ℹ No corporate certificates found (optional - only needed for restrictive firewalls)"; \
+    fi && \
+    rm -rf /tmp/certs
 
 # Configure Python requests to use system certificates
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt

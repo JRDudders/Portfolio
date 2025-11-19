@@ -8,19 +8,23 @@ Ask your IT department for the corporate root CA certificate. It should be a `.c
 
 ## Step 2: Place the Certificate
 
-Rename your certificate file to `corporate-cert.crt` and place it in the project root:
+Place your certificate file(s) in the `certs/` directory:
 
 ```
 Sentiment Docker Test/
-├── corporate-cert.crt    ← Place your certificate here
+├── certs/
+│   ├── README.md         ← Instructions (keep this)
+│   └── corporate.crt     ← Your certificate (any name ending in .crt)
 ├── Dockerfile.nlp
 ├── docker-compose.yml
 └── ...
 ```
 
+**Note:** You can use any filename ending in `.crt`. Multiple certificates are supported.
+
 ## Step 3: Rebuild Docker Images
 
-The Dockerfiles are already configured to automatically install the certificate if present.
+The Dockerfiles are already configured to automatically install all certificates from the `certs/` directory.
 
 ```bash
 # Rebuild the NLP service
@@ -58,25 +62,33 @@ You should see `200` if the certificate is working correctly.
 ## Troubleshooting
 
 **Certificate not found during build:**
-- Make sure the file is named exactly `corporate-cert.crt`
-- Make sure it's in the project root directory
-- Check `.dockerignore` doesn't exclude it
+- Make sure the .crt file is in the `certs/` directory
+- Make sure the filename ends with `.crt`
+- The directory must exist (it should already be in the repo)
 
 **Still getting SSL errors:**
 - Verify the .crt file is valid (open it in a text editor, should start with `-----BEGIN CERTIFICATE-----`)
 - Ask IT if you need multiple certificates (chain of trust)
-- Check if you need to set additional environment variables
+- Try rebuilding without cache: `docker-compose build --no-cache nlp`
 
 **Multiple certificates:**
-If you need to install multiple certificates, you can:
-1. Rename them to `corporate-cert-1.crt`, `corporate-cert-2.crt`, etc.
-2. Update the Dockerfile COPY line to include all of them:
-```dockerfile
-COPY corporate-cert*.crt /usr/local/share/ca-certificates/
+If you have a certificate chain, place all `.crt` files in the `certs/` directory:
 ```
+certs/
+├── README.md
+├── root-ca.crt
+├── intermediate-ca.crt
+└── corporate.crt
+```
+
+All `.crt` files will be automatically installed.
 
 ## Security Note
 
-**DO NOT commit the certificate file to git!** It's already in `.gitignore`.
+**DO NOT commit certificate files to git!** They are already ignored by `.gitignore`.
 
-The certificate is only copied into the Docker image during build and is not exposed outside the container.
+The certificates are only copied into the Docker image during build and are not exposed outside the container.
+
+## No Certificate Needed?
+
+If you don't have corporate firewall restrictions, you can leave the `certs/` directory empty (except for README.md). The Docker build will work fine and simply skip the certificate installation step.
