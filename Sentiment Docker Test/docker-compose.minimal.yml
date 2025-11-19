@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+  # ============================================================
+  # Frontend - Serves UI and acts as reverse proxy
+  # ============================================================
+  frontend:
+    profiles: ["full", "frontend"]
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "80:80"
+    networks:
+      - cicerowatch
+    volumes:
+      # Mount index.html for live editing (no rebuild needed)
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+
+  # ============================================================
+  # NLP Service - Sentiment, Entities, Topics, etc.
+  # ============================================================
+  nlp:
+    profiles: ["full", "core", "nlp"]
+    build:
+      context: .
+      dockerfile: Dockerfile.nlp
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_NAME=nlp
+      - SERVICE_PORT=8001
+      - HF_TOKEN=${HF_TOKEN:-}
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+      # Mount source code for live editing (no rebuild needed)
+      - ./url_fetch.py:/app/url_fetch.py
+      - ./service_nlp.py:/app/service_nlp.py
+      - ./nlp_processor.py:/app/nlp_processor.py
+      - ./nlp.py:/app/nlp.py
+      - ./fetch.py:/app/fetch.py
+      - ./render.py:/app/render.py
+      - ./topics.py:/app/topics.py
+      - ./adapters.py:/app/adapters.py
+      - ./apputils.py:/app/apputils.py
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # ============================================================
+  # Graph Analytics Service - Similarity, Clustering, Networks
+  # ============================================================
+  graph:
+    profiles: ["full", "core", "graph"]
+    build:
+      context: .
+      dockerfile: Dockerfile.graph
+    ports:
+      - "8002:8002"
+    environment:
+      - SERVICE_NAME=graph
+      - SERVICE_PORT=8002
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+      - ./service_graph.py:/app/service_graph.py
+      - ./graph_processor.py:/app/graph_processor.py
+      - ./apputils.py:/app/apputils.py
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ============================================================
+  # Audio Service - Speech-to-Text, Audio Analysis
+  # ============================================================
+  audio:
+    profiles: ["full", "audio"]
+    build:
+      context: .
+      dockerfile: Dockerfile.audio
+    ports:
+      - "8003:8003"
+    environment:
+      - SERVICE_NAME=audio
+      - SERVICE_PORT=8003
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+      - ./service_audio.py:/app/service_audio.py
+      - ./audio_processor.py:/app/audio_processor.py
+      - ./apputils.py:/app/apputils.py
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+networks:
+  cicerowatch:
+    driver: bridge
