@@ -12,7 +12,7 @@ WORKDIR /app
 COPY certs /tmp/certs
 
 # Install corporate certificates BEFORE any apt-get operations
-RUN apt-get update && apt-get install -y ca-certificates && \
+RUN apt-get update && apt-get install -y ca-certificates apt-transport-https && \
     if ls /tmp/certs/*.crt 1> /dev/null 2>&1; then \
         cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ && \
         update-ca-certificates && \
@@ -22,6 +22,9 @@ RUN apt-get update && apt-get install -y ca-certificates && \
     fi && \
     rm -rf /tmp/certs && \
     rm -rf /var/lib/apt/lists/*
+
+# Force apt to use HTTPS instead of HTTP (for corporate firewalls that block HTTP)
+RUN sed -i 's/http:\/\//https:\/\//g' /etc/apt/sources.list || true
 
 # Configure system to use certificates for all operations (Python, curl, Node.js)
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
