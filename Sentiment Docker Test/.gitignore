@@ -52,6 +52,12 @@ logs/
 .env
 .env.local
 
+# Corporate certificates (security-sensitive)
+*.crt
+*.pem
+*.key
+corporate-cert*
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
@@ -59,9 +65,6 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
-
-# Docker
-.dockerignore
 
 # Playwright browsers
 /ms-playwright/

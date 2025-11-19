@@ -26,6 +26,15 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
+# Install corporate certificate (if present)
+# Place your corporate .crt file in the project root as 'corporate-cert.crt'
+COPY corporate-cert.crt* /usr/local/share/ca-certificates/ 2>/dev/null || true
+RUN update-ca-certificates || true
+
+# Configure Python requests to use system certificates
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
 # Set Chrome path for Selenium
 ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
