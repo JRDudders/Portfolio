@@ -19,9 +19,10 @@ RUN apt-get update && apt-get install -y ca-certificates && \
     rm -rf /tmp/certs && \
     rm -rf /var/lib/apt/lists/*
 
-# Configure system to use certificates for all operations
+# Configure system to use certificates for all operations (Python, curl, Node.js)
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # Install system dependencies for Chromium and Playwright
 RUN apt-get update && apt-get install -y \
