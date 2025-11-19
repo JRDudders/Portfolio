@@ -1,6 +1,14 @@
 # Conda-Compatible Requirements (Tested & Working)
-# Use this for Conda environments to avoid version conflicts
-# Install with: pip install -r requirements-conda.txt
+# IMPORTANT: Install PyTorch via conda first, THEN use this file
+#
+# Step 1: Install PyTorch via conda (required):
+#   conda install pytorch torchvision torchaudio cpuonly -c pytorch
+#
+# Step 2: Install remaining packages:
+#   pip install -r requirements-conda.txt
+#
+# OR use the automated script:
+#   install_conda.bat (Windows) or install_conda.sh (Linux/Mac)
 
 # Core API - Pinned compatible versions
 fastapi==0.115.5
@@ -11,9 +19,8 @@ pydantic-core==2.27.1
 annotated-types==0.7.0
 typing-extensions==4.12.2
 
-# NLP Core - Compatible versions
+# NLP Core - Compatible versions (PyTorch installed separately via conda)
 transformers==4.47.1
-torch==2.5.1
 tokenizers==0.21.0
 safetensors==0.4.5
 sentencepiece==0.2.0
@@ -23,6 +30,7 @@ sentence-transformers==3.3.1
 pandas==2.2.3
 numpy==1.26.4
 scikit-learn==1.5.2
+openpyxl>=3.0.0  # Excel file support
 
 # NLP Libraries
 nltk==3.9.1
@@ -41,7 +49,6 @@ httpx==0.28.1
 # playwright==1.49.1
 # selenium==4.27.1
 
-# Audio Processing (if needed)
+# Audio Processing (if needed) - torchaudio installed via conda with pytorch
 librosa==0.10.2.post1
 soundfile==0.12.1
-torchaudio==2.5.1
