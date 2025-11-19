@@ -924,7 +924,7 @@
       fd.append('file', f, f.name);
 
       try{
-        const res = await fetch('/batch/excel?'+qs.toString(), { method:'POST', body: fd });
+        const res = await fetch('/api/nlp/batch/excel?'+qs.toString(), { method:'POST', body: fd });
         if(!res.ok){
           const err = await res.text().catch(()=>res.statusText);
           throw new Error(err);
@@ -983,7 +983,7 @@
       qs.set('batch_size', batchSize);
 
       try{
-        const res = await fetch('/batch/excel-from-url?'+qs.toString(), { method:'POST' });
+        const res = await fetch('/api/nlp/batch/excel-from-url?'+qs.toString(), { method:'POST' });
         if(!res.ok){
           const err = await res.text().catch(()=>res.statusText);
           throw new Error(err);
