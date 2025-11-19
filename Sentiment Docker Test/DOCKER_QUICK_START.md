@@ -18,15 +18,15 @@ This guide shows how to selectively run only the services you need.
 
 ---
 
-## Option 1: Run NLP + Graph (Recommended)
+## Option 1: Run NLP + Graph + Frontend (Recommended)
 
-Build and run only the NLP and Graph services:
+Build and run the core services with UI:
 
 ```bash
-# Build both services
+# Build all core services (NLP, Graph, Frontend)
 docker-compose -f docker-compose.minimal.yml --profile core build
 
-# Start both services
+# Start all core services
 docker-compose -f docker-compose.minimal.yml --profile core up
 
 # Or combine build + start
@@ -34,9 +34,9 @@ docker-compose -f docker-compose.minimal.yml --profile core up --build
 ```
 
 **Access:**
+- Frontend UI: http://localhost (or http://localhost:80)
 - NLP API: http://localhost:8001
 - Graph API: http://localhost:8002
-- Frontend: Open `index.html` in your browser (or use Python: `python -m http.server 8080`)
 
 ---
 
@@ -89,12 +89,12 @@ docker-compose -f docker-compose.minimal.yml --profile full up --build
 
 | Profile | Services Included | Use Case |
 |---------|------------------|----------|
-| `core` | NLP + Graph | Most common - all main features |
+| `core` | Frontend + NLP + Graph | Most common - full UI with main features (no audio) |
 | `nlp` | NLP only | Text analysis and sentiment |
 | `graph` | Graph only | Network analysis |
 | `audio` | Audio only | Speech-to-text |
 | `frontend` | Frontend only | Nginx web server |
-| `full` | All services | Complete deployment |
+| `full` | All services | Complete deployment including audio |
 
 ---
 

@@ -5,7 +5,7 @@ services:
   # Frontend - Serves UI and acts as reverse proxy
   # ============================================================
   frontend:
-    profiles: ["full", "frontend"]
+    profiles: ["full", "core", "frontend"]
     build:
       context: .
       dockerfile: Dockerfile.frontend
