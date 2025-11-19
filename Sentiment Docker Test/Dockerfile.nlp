@@ -79,6 +79,7 @@ COPY adapters.py .
 COPY fetch.py .
 COPY render.py .
 COPY apputils.py .
+COPY batch_processor.py .
 
 # Create temp directory
 RUN mkdir -p /app/temp

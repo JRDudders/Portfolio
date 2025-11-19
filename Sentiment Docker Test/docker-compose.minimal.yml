@@ -48,6 +48,7 @@ services:
       - ./topics.py:/app/topics.py
       - ./adapters.py:/app/adapters.py
       - ./apputils.py:/app/apputils.py
+      - ./batch_processor.py:/app/batch_processor.py
     deploy:
       resources:
         limits:
