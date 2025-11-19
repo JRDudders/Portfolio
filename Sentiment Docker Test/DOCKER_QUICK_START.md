@@ -34,7 +34,7 @@ docker-compose -f docker-compose.minimal.yml --profile core up --build
 ```
 
 **Access:**
-- Frontend UI: http://localhost (or http://localhost:80)
+- Frontend UI: http://localhost:8080
 - NLP API: http://localhost:8001
 - Graph API: http://localhost:8002
 
@@ -78,7 +78,7 @@ docker-compose -f docker-compose.minimal.yml --profile full up --build
 ```
 
 **Access:**
-- Frontend: http://localhost:80
+- Frontend: http://localhost:8080
 - NLP API: http://localhost:8001
 - Graph API: http://localhost:8002
 - Audio API: http://localhost:8003
