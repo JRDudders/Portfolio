@@ -47,6 +47,10 @@ from batch_processor import (
     process_excel_file,
     BatchProcessingConfig
 )
+from excel_utils import (
+    preview_excel_structure,
+    extract_texts_from_excel
+)
 
 app = FastAPI(
     title="CiceroWatch NLP Service",

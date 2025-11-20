@@ -49,6 +49,7 @@ services:
       - ./adapters.py:/app/adapters.py
       - ./apputils.py:/app/apputils.py
       - ./batch_processor.py:/app/batch_processor.py
+      - ./excel_utils.py:/app/excel_utils.py
     deploy:
       resources:
         limits:
