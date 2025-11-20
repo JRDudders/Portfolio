@@ -239,8 +239,16 @@
 
         <div class="inline">
           <button class="btn" id="btn-batch-excel">Choose Excel File</button>
+          <button class="btn" id="btn-preview-excel" style="display:none;margin-left:8px">Preview File Structure</button>
           <span class="file-name" id="batch-excel-name">No file selected</span>
           <input type="file" id="batch-excel-input" style="display:none" accept=".xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
+        </div>
+
+        <!-- Preview Section (hidden until file is previewed) -->
+        <div id="excel-preview-section" style="display:none;margin-top:16px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:4px">
+          <h3 style="margin:0 0 8px">📋 File Preview: <span id="preview-filename"></span></h3>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px">Select sheets and columns to process:</p>
+          <div id="preview-content"></div>
         </div>
 
         <div class="inline" style="margin-top:12px">
@@ -888,9 +896,141 @@
     const batchExcelInput = document.getElementById('batch-excel-input');
     const batchExcelName = document.getElementById('batch-excel-name');
     const statusBatchExcel = document.getElementById('status-batch-excel');
+    const previewExcelBtn = document.getElementById('btn-preview-excel');
+    const previewSection = document.getElementById('excel-preview-section');
+    const previewContent = document.getElementById('preview-content');
+    const previewFilename = document.getElementById('preview-filename');
+
+    let excelPreviewData = null; // Store preview data for processing
 
     batchExcelBtn.onclick = () => batchExcelInput.click();
-    batchExcelInput.onchange = () => batchExcelName.textContent = batchExcelInput.files?.[0]?.name || 'No file selected';
+    batchExcelInput.onchange = () => {
+      const file = batchExcelInput.files?.[0];
+      batchExcelName.textContent = file?.name || 'No file selected';
+      previewExcelBtn.style.display = file ? 'inline-block' : 'none';
+      previewSection.style.display = 'none'; // Hide preview until clicked
+      excelPreviewData = null;
+    };
+
+    // Preview Excel file structure
+    previewExcelBtn.onclick = async () => {
+      const f = batchExcelInput.files?.[0];
+      if(!f) return;
+
+      setStatus(statusBatchExcel, 'Loading file preview...');
+
+      const fd = new FormData();
+      fd.append('file', f, f.name);
+
+      try {
+        const res = await fetch('/api/nlp/batch/excel/preview', { method: 'POST', body: fd });
+        if(!res.ok) {
+          const err = await res.text().catch(() => res.statusText);
+          throw new Error(err);
+        }
+
+        excelPreviewData = await res.json();
+
+        // Display preview
+        previewFilename.textContent = excelPreviewData.filename;
+        previewContent.innerHTML = '';
+
+        excelPreviewData.sheets.forEach((sheet, idx) => {
+          const sheetDiv = document.createElement('div');
+          sheetDiv.style.cssText = 'margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:4px';
+
+          // Sheet header with checkbox
+          const headerDiv = document.createElement('div');
+          headerDiv.style.cssText = 'display:flex;align-items:center;margin-bottom:8px';
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = true;
+          checkbox.id = `sheet-check-${idx}`;
+          checkbox.dataset.sheetName = sheet.sheet_name;
+
+          const label = document.createElement('label');
+          label.htmlFor = `sheet-check-${idx}`;
+          label.style.cssText = 'margin-left:8px;font-weight:bold;flex:1;cursor:pointer';
+          label.textContent = `${sheet.sheet_name} (${sheet.row_count} rows)`;
+
+          headerDiv.appendChild(checkbox);
+          headerDiv.appendChild(label);
+          sheetDiv.appendChild(headerDiv);
+
+          // Column selection
+          const colDiv = document.createElement('div');
+          colDiv.style.cssText = 'margin:8px 0';
+
+          const colLabel = document.createElement('label');
+          colLabel.textContent = 'Text Column: ';
+          colLabel.style.cssText = 'font-size:12px;color:var(--muted)';
+
+          const colSelect = document.createElement('select');
+          colSelect.id = `sheet-col-${idx}`;
+          colSelect.dataset.sheetName = sheet.sheet_name;
+          colSelect.style.cssText = 'margin-left:8px;padding:4px;border:1px solid var(--border);border-radius:4px;background:var(--bg)';
+
+          sheet.columns.forEach(col => {
+            const opt = document.createElement('option');
+            opt.value = col.name;
+            opt.textContent = `${col.name} (${col.type}, ${col.null_percent}% null)`;
+            if (col.name === sheet.detected_text_column) opt.selected = true;
+            colSelect.appendChild(opt);
+          });
+
+          colDiv.appendChild(colLabel);
+          colDiv.appendChild(colSelect);
+          sheetDiv.appendChild(colDiv);
+
+          // Sample data table
+          if (sheet.sample_data && sheet.sample_data.length > 0) {
+            const tableDiv = document.createElement('div');
+            tableDiv.style.cssText = 'margin-top:8px;overflow-x:auto;max-height:200px';
+
+            const table = document.createElement('table');
+            table.style.cssText = 'width:100%;font-size:11px;border-collapse:collapse';
+
+            // Header row
+            const thead = document.createElement('thead');
+            const headerRow = document.createElement('tr');
+            sheet.columns.forEach(col => {
+              const th = document.createElement('th');
+              th.textContent = col.name;
+              th.style.cssText = 'padding:4px;border:1px solid var(--border);background:var(--bg);text-align:left;position:sticky;top:0';
+              headerRow.appendChild(th);
+            });
+            thead.appendChild(headerRow);
+            table.appendChild(thead);
+
+            // Data rows
+            const tbody = document.createElement('tbody');
+            sheet.sample_data.slice(0, 5).forEach(row => {
+              const tr = document.createElement('tr');
+              sheet.columns.forEach(col => {
+                const td = document.createElement('td');
+                const val = row[col.name];
+                td.textContent = val !== null && val !== undefined ? String(val).substring(0, 100) : '';
+                td.style.cssText = 'padding:4px;border:1px solid var(--border);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+                tr.appendChild(td);
+              });
+              tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+
+            tableDiv.appendChild(table);
+            sheetDiv.appendChild(tableDiv);
+          }
+
+          previewContent.appendChild(sheetDiv);
+        });
+
+        previewSection.style.display = 'block';
+        setStatus(statusBatchExcel, `Preview loaded: ${excelPreviewData.sheet_count} sheets`, 'ok');
+      } catch (e) {
+        setStatus(statusBatchExcel, 'Preview failed: ' + (e?.message || e), 'err');
+      }
+    };
 
     document.getElementById('run-batch-excel').onclick = async () => {
       const f = batchExcelInput.files?.[0];
@@ -902,11 +1042,25 @@
       const themeLabels = document.getElementById('batch-theme-labels').value.trim();
       const sentimentPreset = document.getElementById('batch-sentiment-preset').value;
       const themePreset = document.getElementById('batch-theme-preset').value;
-      const textColumn = document.getElementById('batch-text-column').value.trim();
-      const sheets = document.getElementById('batch-sheets').value.trim();
+      let textColumn = document.getElementById('batch-text-column').value.trim();
+      let sheets = document.getElementById('batch-sheets').value.trim();
       const topNThemes = parseInt(document.getElementById('batch-top-themes').value, 10);
       const batchSize = parseInt(document.getElementById('batch-size').value, 10);
       const addConfidence = document.getElementById('batch-confidence').checked;
+
+      // If preview is shown, use selected sheets from checkboxes
+      if (excelPreviewData && previewSection.style.display !== 'none') {
+        const selectedSheets = [];
+        excelPreviewData.sheets.forEach((sheet, idx) => {
+          const checkbox = document.getElementById(`sheet-check-${idx}`);
+          if (checkbox && checkbox.checked) {
+            selectedSheets.push(sheet.sheet_name);
+          }
+        });
+        if (selectedSheets.length > 0) {
+          sheets = selectedSheets.join(',');
+        }
+      }
 
       const qs = new URLSearchParams();
       qs.set('extract_sentiment', extractSentiment);
