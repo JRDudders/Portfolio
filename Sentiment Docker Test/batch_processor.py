@@ -99,29 +99,53 @@ def process_sentiment_batch(
         batch = texts[i:i + batch_size]
         logger.info(f"Processing sentiment batch {i//batch_size + 1} ({len(batch)} texts)")
 
-        # Run sentiment analysis
-        batch_results = run_task(batch, preset=preset)
+        # Filter out empty texts and track their indices
+        non_empty_texts = []
+        non_empty_indices = []
+        for idx, text in enumerate(batch):
+            if text and text.strip():
+                non_empty_texts.append(text)
+                non_empty_indices.append(idx)
 
-        # Format results
-        for result in batch_results:
-            if isinstance(result, dict):
-                labels = result.get("labels", [])
-                scores = result.get("scores", [])
+        # Run sentiment analysis only on non-empty texts
+        if non_empty_texts:
+            batch_results = run_task(non_empty_texts, preset=preset)
+        else:
+            batch_results = []
 
-                if labels and scores:
-                    max_idx = scores.index(max(scores))
-                    sentiment = labels[max_idx]
-                    confidence = scores[max_idx]
+        # Create results array matching original batch size
+        batch_formatted_results = []
+        result_idx = 0
 
-                    results.append({
-                        "sentiment": sentiment,
-                        "confidence": float(confidence),
-                        "scores": {labels[j]: float(scores[j]) for j in range(len(labels))}
-                    })
+        for batch_idx in range(len(batch)):
+            if batch_idx in non_empty_indices:
+                # Process the result from the model
+                result = batch_results[result_idx]
+                result_idx += 1
+
+                if isinstance(result, dict):
+                    labels = result.get("labels", [])
+                    scores = result.get("scores", [])
+
+                    if labels and scores:
+                        max_idx = scores.index(max(scores))
+                        sentiment = labels[max_idx]
+                        confidence = scores[max_idx]
+
+                        batch_formatted_results.append({
+                            "sentiment": sentiment,
+                            "confidence": float(confidence),
+                            "scores": {labels[j]: float(scores[j]) for j in range(len(labels))}
+                        })
+                    else:
+                        batch_formatted_results.append({"sentiment": "unknown", "confidence": 0.0, "scores": {}})
                 else:
-                    results.append({"sentiment": "unknown", "confidence": 0.0, "scores": {}})
+                    batch_formatted_results.append({"sentiment": "unknown", "confidence": 0.0, "scores": {}})
             else:
-                results.append({"sentiment": "unknown", "confidence": 0.0, "scores": {}})
+                # Empty text - create empty result
+                batch_formatted_results.append({"sentiment": "unknown", "confidence": 0.0, "scores": {}})
+
+        results.extend(batch_formatted_results)
 
     return results
 
@@ -154,45 +178,71 @@ def process_themes_batch(
         batch = texts[i:i + batch_size]
         logger.info(f"Processing themes batch {i//batch_size + 1} ({len(batch)} texts)")
 
-        # Run zero-shot classification
-        batch_results = run_task(batch, preset=preset, labels=labels)
+        # Filter out empty texts and track their indices
+        non_empty_texts = []
+        non_empty_indices = []
+        for idx, text in enumerate(batch):
+            if text and text.strip():
+                non_empty_texts.append(text)
+                non_empty_indices.append(idx)
 
-        # Format results
-        for result in batch_results:
-            if isinstance(result, dict):
-                result_labels = result.get("labels", [])
-                result_scores = result.get("scores", [])
+        # Run zero-shot classification only on non-empty texts
+        if non_empty_texts:
+            batch_results = run_task(non_empty_texts, preset=preset, labels=labels)
+        else:
+            batch_results = []
 
-                if result_labels and result_scores:
-                    # Get top N themes
-                    themes = []
-                    for j in range(min(top_n, len(result_labels))):
-                        themes.append({
-                            "theme": result_labels[j],
-                            "score": float(result_scores[j])
-                        })
+        # Create results array matching original batch size
+        batch_formatted_results = []
+        result_idx = 0
 
-                    # Create theme columns
-                    theme_dict = {}
-                    for idx, theme_info in enumerate(themes):
-                        theme_dict[f"theme_{idx+1}"] = theme_info["theme"]
-                        theme_dict[f"theme_{idx+1}_score"] = theme_info["score"]
+        for batch_idx in range(len(batch)):
+            # Check if this position had a non-empty text
+            if batch_idx in non_empty_indices:
+                # Process the result from the model
+                result = batch_results[result_idx]
+                result_idx += 1
 
-                    results.append(theme_dict)
+                if isinstance(result, dict):
+                    # Extract labels/scores from the 'topics' dict
+                    topics = result.get("topics", {})
+
+                    if topics:
+                        # Get top N themes (already sorted by score in run_task)
+                        theme_dict = {}
+                        for idx, (label, score) in enumerate(list(topics.items())[:top_n]):
+                            theme_dict[f"theme_{idx+1}"] = label
+                            theme_dict[f"theme_{idx+1}_score"] = float(score)
+
+                        # Fill remaining slots if fewer than top_n
+                        for idx in range(len(topics), top_n):
+                            theme_dict[f"theme_{idx+1}"] = ""
+                            theme_dict[f"theme_{idx+1}_score"] = 0.0
+
+                        batch_formatted_results.append(theme_dict)
+                    else:
+                        # No topics returned
+                        theme_dict = {}
+                        for idx in range(top_n):
+                            theme_dict[f"theme_{idx+1}"] = ""
+                            theme_dict[f"theme_{idx+1}_score"] = 0.0
+                        batch_formatted_results.append(theme_dict)
                 else:
-                    # Empty result
+                    # Fallback for non-dict results
                     theme_dict = {}
                     for idx in range(top_n):
                         theme_dict[f"theme_{idx+1}"] = ""
                         theme_dict[f"theme_{idx+1}_score"] = 0.0
-                    results.append(theme_dict)
+                    batch_formatted_results.append(theme_dict)
             else:
-                # Empty result
+                # Empty text - create empty result
                 theme_dict = {}
                 for idx in range(top_n):
                     theme_dict[f"theme_{idx+1}"] = ""
                     theme_dict[f"theme_{idx+1}_score"] = 0.0
-                results.append(theme_dict)
+                batch_formatted_results.append(theme_dict)
+
+        results.extend(batch_formatted_results)
 
     return results
 
