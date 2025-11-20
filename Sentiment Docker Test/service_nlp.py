@@ -644,6 +644,87 @@ async def stance_detection(request: StanceDetectionRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/batch/excel/preview")
+async def preview_excel_file(file: UploadFile = File(...)):
+    """
+    Preview Excel file structure before processing
+
+    Returns:
+    - List of sheet names
+    - Columns for each sheet
+    - First 5 rows of each sheet as sample data
+    - Detected text column for each sheet
+
+    This allows users to select which sheets and columns to process.
+    """
+    logger.info(f"Previewing Excel file: {file.filename}")
+
+    try:
+        # Validate file type
+        if not file.filename or not file.filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+            raise HTTPException(
+                status_code=400,
+                detail="File must be an Excel file (.xlsx, .xlsm, or .xls)"
+            )
+
+        # Read file bytes
+        file_bytes = await file.read()
+
+        # Load Excel file
+        import pandas as pd
+        import io
+        from batch_processor import detect_text_column
+
+        excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
+
+        sheets_info = []
+
+        for sheet_name in excel_file.sheet_names:
+            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+
+            # Get column names and types
+            columns = []
+            for col in df.columns:
+                col_type = str(df[col].dtype)
+                non_null_count = df[col].count()
+                total_count = len(df)
+
+                columns.append({
+                    "name": col,
+                    "type": col_type,
+                    "non_null": int(non_null_count),
+                    "total": int(total_count),
+                    "null_percent": round((1 - non_null_count / total_count) * 100, 1) if total_count > 0 else 0
+                })
+
+            # Try to detect text column
+            try:
+                detected_text_col = detect_text_column(df)
+            except:
+                detected_text_col = None
+
+            # Get first 5 rows as sample (convert to dict for JSON)
+            sample_data = df.head(5).fillna("").to_dict('records')
+
+            sheets_info.append({
+                "sheet_name": sheet_name,
+                "row_count": len(df),
+                "columns": columns,
+                "detected_text_column": detected_text_col,
+                "sample_data": sample_data
+            })
+
+        return {
+            "filename": file.filename,
+            "sheet_count": len(excel_file.sheet_names),
+            "sheets": sheets_info
+        }
+
+    except Exception as e:
+        logger.error(f"Excel preview failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to preview Excel file: {str(e)}")
+
+
 @app.post("/batch/excel")
 async def batch_process_excel(
     file: UploadFile = File(...),
