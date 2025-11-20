@@ -30,7 +30,7 @@ def detect_text_column(df: pd.DataFrame) -> str:
             return col
 
     # Check for common text column names
-    text_keywords = ['text', 'comment', 'message', 'content', 'description', 'post', 'tweet']
+    text_keywords = ['text', 'comment', 'message', 'content', 'description', 'post', 'tweet', 'narrative', 'review', 'feedback', 'notes']
     for col in df.columns:
         col_lower = col.lower()
         if any(keyword in col_lower for keyword in text_keywords):

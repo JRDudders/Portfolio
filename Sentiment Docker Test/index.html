@@ -1048,17 +1048,33 @@
       const batchSize = parseInt(document.getElementById('batch-size').value, 10);
       const addConfidence = document.getElementById('batch-confidence').checked;
 
-      // If preview is shown, use selected sheets from checkboxes
+      // If preview is shown, use selected sheets and text columns from preview
       if (excelPreviewData && previewSection.style.display !== 'none') {
         const selectedSheets = [];
+        let firstSelectedColumn = null;
+
         excelPreviewData.sheets.forEach((sheet, idx) => {
           const checkbox = document.getElementById(`sheet-check-${idx}`);
           if (checkbox && checkbox.checked) {
             selectedSheets.push(sheet.sheet_name);
+
+            // Get the selected text column for the first selected sheet
+            if (!firstSelectedColumn) {
+              const colSelect = document.getElementById(`sheet-col-${idx}`);
+              if (colSelect && colSelect.value) {
+                firstSelectedColumn = colSelect.value;
+              }
+            }
           }
         });
+
         if (selectedSheets.length > 0) {
           sheets = selectedSheets.join(',');
+        }
+
+        // Use the selected column from the dropdown (overrides manual input)
+        if (firstSelectedColumn) {
+          textColumn = firstSelectedColumn;
         }
       }
 
