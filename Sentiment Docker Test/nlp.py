@@ -28,14 +28,18 @@ Performance:
 - GPU automatically detected and used if available (CUDA) with CPU fallback
 - Batch processing only activates for datasets with >10 chunks (avoids overhead on small datasets)
 - Environment variables for batch sizes:
-  * STANCE_BATCH_SIZE=32 (stance detection)
-  * CLASSIFY_BATCH_SIZE=16 (text classification/sentiment)
-  * ZEROSHOT_BATCH_SIZE=8 (zero-shot classification)
+  * STANCE_BATCH_SIZE=32 (stance detection) - GPU can handle 64+
+  * CLASSIFY_BATCH_SIZE=16 (text classification/sentiment) - GPU can handle 32+
+  * ZEROSHOT_BATCH_SIZE=8 (zero-shot classification) - GPU can handle 16+
 - Text truncation for display: 1000 characters (actual analysis uses full text)
 - Typical throughput (texts/minute):
   * Sentiment (CPU): ~2000-4000, (GPU): ~8000-15000
   * Zero-shot (CPU): ~500-1000, (GPU): ~2000-5000
   * Stance (CPU): ~1000-2000, (GPU): ~5000-10000
+- For large datasets (3000+ rows):
+  * Use GPU mode for 3-5x speedup
+  * Increase batch sizes via environment variables
+  * Expected time for 3000 rows: 3-20 minutes (GPU) vs 15-60 minutes (CPU)
 """
 
 from functools import lru_cache
@@ -92,23 +96,30 @@ _CLASSIFY_MAX_WORDS = int(os.getenv("CLASSIFY_MAX_WORDS", "320"))  # ~ <= 512 to
 def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     """
     Cache HF pipeline objects. `key` encodes kwargs that affect pipeline creation.
+    Auto-detects and uses GPU (CUDA) if available, falls back to CPU.
     """
     from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
+    import torch
 
     # Get HuggingFace token from environment (needed for some models like DeBERTa-MNLI)
     hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
+
+    # Auto-detect GPU: device=-1 for CPU, 0 for first CUDA device
+    device = 0 if torch.cuda.is_available() else -1
+    device_name = "GPU (CUDA)" if device == 0 else "CPU"
+    print(f"[nlp] Loading {model_id} on {device_name}")
 
     if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
         tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
         mdl = AutoModelForSequenceClassification.from_pretrained(model_id, token=hf_token)
         return pipeline("text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
-                        model=mdl, tokenizer=tok, device=-1)
+                        model=mdl, tokenizer=tok, device=device)
 
     if task == "token-classification":
         tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
         mdl = AutoModelForTokenClassification.from_pretrained(model_id, token=hf_token)
         # aggregation handled at call-time via kwargs
-        return pipeline("token-classification", model=mdl, tokenizer=tok, device=-1)
+        return pipeline("token-classification", model=mdl, tokenizer=tok, device=device)
 
     raise ValueError(f"Unsupported HF task: {task}")
 
