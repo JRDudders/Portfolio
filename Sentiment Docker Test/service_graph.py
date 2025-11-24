@@ -609,6 +609,20 @@ async def prepare_social_media_graph(
         file_bytes = await file.read()
         filename = file.filename or "data.csv"
 
+        # Validate that we received actual file data, not an HTML error page
+        if file_bytes and len(file_bytes) > 0:
+            file_start = file_bytes[:512].lstrip().lower()
+            if (b'<!doctype html' in file_start or
+                b'<html' in file_start or
+                b'<title>error</title>' in file_start or
+                (b'nginx' in file_start and b'error' in file_start)):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Received HTML error page instead of data file. "
+                           "The server may be down, timing out, or the file URL is invalid. "
+                           "Please check the file source and try again."
+                )
+
         # Load DataFrame
         if filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
             # Parse sheet parameter (could be int or string)
@@ -617,10 +631,31 @@ async def prepare_social_media_graph(
             except ValueError:
                 sheet_param = sheet
 
-            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_param)
+            try:
+                df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_param)
+            except Exception as e:
+                # Check if the error is due to invalid Excel format
+                if 'excel' in str(e).lower() or 'zip' in str(e).lower():
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Failed to read Excel file. The file may be corrupted, "
+                               f"not a valid Excel format, or an error page was received instead. "
+                               f"Error: {str(e)}"
+                    )
+                raise
         else:
             # Assume CSV
-            df = pd.read_csv(io.BytesIO(file_bytes))
+            try:
+                df = pd.read_csv(io.BytesIO(file_bytes))
+            except Exception as e:
+                # Check if pandas is failing due to HTML content
+                if 'html' in str(e).lower() or 'DOCTYPE' in str(e):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Failed to parse CSV. The file appears to be HTML (possibly an error page) "
+                               "rather than valid CSV data."
+                    )
+                raise
 
         # Extract edges
         edges = extract_social_media_edges(df, extract_hashtags=extract_hashtags)

@@ -47,12 +47,30 @@ def fetch_url_bytes_sync(url: str, extra_headers: Optional[Dict[str,str]] = None
                 buf += chunk
                 if len(buf) > MAX_DOWNLOAD_BYTES:
                     raise RuntimeError("Download too large (>100MB)")
+
+        content = bytes(buf)
+
+        # Infer kind if not detected from headers/URL
         if kind is None:
-            head = bytes(buf[:2048]).lstrip().lower()
+            head = content[:2048].lstrip().lower()
             if head.startswith((b"{", b"[")): kind = "json"
             elif b"<html" in head or b"<!doctype html" in head: kind = "html"
             else: kind = "csv"
-        return bytes(buf), kind
+
+        # Validate that we didn't receive an HTML error page when expecting data
+        if content and len(content) > 0:
+            content_start = content[:512].lstrip().lower()
+            # Detect nginx or generic HTML error pages
+            if (b'<title>error</title>' in content_start or
+                (b'nginx' in content_start and b'error occurred' in content_start)):
+                error_preview = content[:500].decode('utf-8', errors='ignore')
+                raise RuntimeError(
+                    f"Received nginx/HTML error page instead of data. "
+                    f"The server may be unavailable or timing out. "
+                    f"Server response: {error_preview}..."
+                )
+
+        return content, kind
 
 async def fetch_url_bytes(url: str, extra_headers: Optional[Dict[str,str]] = None) -> Tuple[bytes, str]:
     return await asyncio.to_thread(fetch_url_bytes_sync, url, extra_headers)
@@ -275,7 +293,29 @@ def fetch_reddit_texts_sync(url: str, limit: int = REDDIT_LIMIT) -> List[str]:
     sess = requests.Session(); sess.headers.update(DEFAULT_FETCH_HEADERS)
     for _ in range(20):
         api = _reddit_api_url(url, limit=min(100, max(0, limit - fetched)), after=after)
-        r = sess.get(api, timeout=HTTP_TIMEOUT); r.raise_for_status(); j = r.json()
+        r = sess.get(api, timeout=HTTP_TIMEOUT)
+        r.raise_for_status()
+
+        # Validate response is JSON, not HTML error page
+        content_type = r.headers.get('content-type', '').lower()
+        if 'text/html' in content_type:
+            error_preview = r.text[:500]
+            raise RuntimeError(
+                f"Received HTML instead of JSON from Reddit API. "
+                f"The API may be down or rate-limiting requests. "
+                f"Response: {error_preview}..."
+            )
+
+        try:
+            j = r.json()
+        except ValueError as e:
+            # JSON parsing failed - check if we got HTML
+            if r.text.strip().lower().startswith(('<!doctype', '<html')):
+                raise RuntimeError(
+                    f"Received HTML error page instead of JSON from Reddit API. "
+                    f"Response preview: {r.text[:500]}..."
+                )
+            raise
         if isinstance(j, list) and len(j) >= 2:
             post = j[0]["data"]["children"][0]["data"]
             title = (post.get("title") or "").strip()

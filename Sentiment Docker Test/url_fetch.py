@@ -37,7 +37,18 @@ async def get_wayback_snapshot(url: str) -> Optional[str]:
         async with httpx.AsyncClient(timeout=10) as client:
             response = await client.get(api_url)
             response.raise_for_status()
-            data = response.json()
+
+            # Validate response is JSON, not HTML
+            content_type = response.headers.get('content-type', '').lower()
+            if 'text/html' in content_type:
+                print(f"[url_fetch] Wayback Machine API returned HTML instead of JSON")
+                return None
+
+            try:
+                data = response.json()
+            except ValueError:
+                print(f"[url_fetch] Failed to parse Wayback Machine API response as JSON")
+                return None
 
             # Check if snapshot is available
             if data.get('archived_snapshots', {}).get('closest', {}).get('available'):
@@ -118,7 +129,7 @@ async def _fetch_from_url(
 
     Raises:
         httpx.HTTPError: If download fails
-        ValueError: If file too large
+        ValueError: If file too large or HTML error page received
     """
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         # First, do a HEAD request to check content length
@@ -153,7 +164,28 @@ async def _fetch_from_url(
             )
 
         # Get content type
-        content_type = response.headers.get('content-type')
+        content_type = response.headers.get('content-type', '').lower()
+
+        # Validate that we didn't receive an HTML error page when expecting data
+        if content and len(content) > 0:
+            # Check if content looks like HTML
+            content_start = content[:512].lstrip().lower()
+            if (b'<!doctype html' in content_start or
+                b'<html' in content_start or
+                (b'<head>' in content_start and b'<title>error</title>' in content_start.lower())):
+                # If content-type suggests this should be data (not HTML), raise error
+                if content_type and not content_type.startswith('text/html'):
+                    raise ValueError(
+                        f"Received HTML error page instead of expected data format ({content_type}). "
+                        f"The server may be down, timing out, or blocking requests."
+                    )
+                # Also check for nginx error pages specifically
+                if b'<title>error</title>' in content_start.lower() or b'nginx' in content_start:
+                    error_preview = content[:500].decode('utf-8', errors='ignore')
+                    raise ValueError(
+                        f"Received nginx error page instead of data. "
+                        f"Server response: {error_preview}..."
+                    )
 
         return content, content_type
 

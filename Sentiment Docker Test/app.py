@@ -258,6 +258,22 @@ async def predict_file(
     try:
         b = await file.read()
         original_filename = file.filename or "input.json"
+
+        # Validate that we received actual file data, not an HTML error page
+        if b and len(b) > 0:
+            file_start = b[:512].lstrip().lower()
+            # Only raise error if we're NOT expecting HTML
+            if not original_filename.lower().endswith((".html", ".htm")):
+                if (b'<title>error</title>' in file_start or
+                    (b'nginx' in file_start and b'error occurred' in file_start)):
+                    error_preview = b[:500].decode('utf-8', errors='ignore')
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Received HTML error page instead of data file. "
+                               f"The server may be down, timing out, or the file URL is invalid. "
+                               f"Server response: {error_preview}..."
+                    )
+
         name = original_filename.lower()
         if name.endswith(".json"):
             texts = _texts_from_json_bytes(b)
