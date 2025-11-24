@@ -47,6 +47,7 @@ services:
       - SERVICE_PORT=8001
       - CUDA_VISIBLE_DEVICES=0
       - PYTHONUNBUFFERED=1
+      - HF_TOKEN=${HF_TOKEN:-}
     networks:
       - cicerowatch
     restart: always

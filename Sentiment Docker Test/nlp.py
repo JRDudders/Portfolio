@@ -53,11 +53,13 @@ import re
 
 # Default model/task used by /healthz and when callers omit both
 MODEL_TASK = "text-classification"
-MODEL_ID = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+# Use smaller model for corporate firewalls that block large downloads (501MB -> 268MB)
+MODEL_ID = os.getenv("SENTIMENT_MODEL", "distilbert-base-uncased-finetuned-sst-2-english")
+# Alternative: "cardiffnlp/twitter-roberta-base-sentiment-latest" (better accuracy but 501MB)
 
 # Reasonable default label set for zero-shot if the caller provides none
 DEFAULT_ZS_LABELS: List[str] = [
-    "politics", "economy", "health", "science", "technology",
+    "politics", "economy", "military", "health", "science", "technology",
     "sports", "entertainment", "climate", "crime", "education",
     "misinformation", "opinion",
 ]
@@ -92,14 +94,54 @@ _CLASSIFY_MAX_WORDS = int(os.getenv("CLASSIFY_MAX_WORDS", "320"))  # ~ <= 512 to
 
 # ---------------------------- HF Pipelines ---------------------------------- #
 
+# Disable SSL verification for HuggingFace downloads if needed (for corporate networks)
+# Set environment variable to skip SSL verification (not recommended for production)
+if os.getenv("HF_HUB_DISABLE_SSL_VERIFY") or os.getenv("DISABLE_SSL_VERIFY"):
+    import ssl
+    import warnings
+
+    # Disable SSL verification for standard library
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+    # Disable SSL warnings from urllib3 (used by requests)
+    warnings.filterwarnings('ignore', message='Unverified HTTPS request')
+
+    # Also disable verification for requests library (used by HuggingFace Hub)
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+    # Set environment variables for requests library
+    os.environ['REQUESTS_CA_BUNDLE'] = ''
+    os.environ['CURL_CA_BUNDLE'] = ''
+
+    # Monkeypatch requests.Session to always use verify=False
+    try:
+        import requests
+        _original_request = requests.Session.request
+
+        def _unverified_request(self, method, url, **kwargs):
+            kwargs['verify'] = False
+            return _original_request(self, method, url, **kwargs)
+
+        requests.Session.request = _unverified_request
+    except Exception as e:
+        print(f"[nlp] Warning: Could not monkeypatch requests.Session: {e}")
+
+    print("[nlp] ⚠️  SSL verification disabled for HuggingFace downloads (corporate network mode)")
+
 @lru_cache(maxsize=16)
 def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     """
     Cache HF pipeline objects. `key` encodes kwargs that affect pipeline creation.
     Auto-detects and uses GPU (CUDA) if available, falls back to CPU.
     """
-    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
+    import sys
     import torch
+    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
+    from transformers.utils import logging as hf_logging
+
+    # Enable transformers logging to see download progress
+    hf_logging.set_verbosity_info()
 
     # Get HuggingFace token from environment (needed for some models like DeBERTa-MNLI)
     hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
@@ -107,19 +149,24 @@ def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     # Auto-detect GPU: device=-1 for CPU, 0 for first CUDA device
     device = 0 if torch.cuda.is_available() else -1
     device_name = "GPU (CUDA)" if device == 0 else "CPU"
-    print(f"[nlp] Loading {model_id} on {device_name}")
+    print(f"\n[nlp] Loading {model_id} on {device_name}")
+    print(f"[nlp] Note: First download may take 2-5 minutes (~500MB)")
+    sys.stdout.flush()
 
     if task in {"text-classification", "sentiment-analysis", "zero-shot-classification"}:
         tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
         mdl = AutoModelForSequenceClassification.from_pretrained(model_id, token=hf_token)
-        return pipeline("text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
+        pipe = pipeline("text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
                         model=mdl, tokenizer=tok, device=device)
+        print(f"[nlp] ✓ Model loaded successfully on {device_name}\n")
+        return pipe
 
     if task == "token-classification":
         tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
         mdl = AutoModelForTokenClassification.from_pretrained(model_id, token=hf_token)
-        # aggregation handled at call-time via kwargs
-        return pipeline("token-classification", model=mdl, tokenizer=tok, device=device)
+        pipe = pipeline("token-classification", model=mdl, tokenizer=tok, device=device)
+        print(f"[nlp] ✓ Model loaded successfully on {device_name}\n")
+        return pipe
 
     raise ValueError(f"Unsupported HF task: {task}")
 

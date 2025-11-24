@@ -5,15 +5,12 @@ services:
   # Frontend - Serves UI and acts as reverse proxy
   # ============================================================
   frontend:
+    profiles: ["full", "core", "frontend"]
     build:
       context: .
       dockerfile: Dockerfile.frontend
     ports:
-      - "80:80"
-    depends_on:
-      - nlp
-      - graph
-      - audio
+      - "8080:80"
     networks:
       - cicerowatch
     volumes:
@@ -24,6 +21,7 @@ services:
   # NLP Service - Sentiment, Entities, Topics, etc.
   # ============================================================
   nlp:
+    profiles: ["full", "core", "nlp"]
     build:
       context: .
       dockerfile: Dockerfile.nlp
@@ -33,6 +31,9 @@ services:
       - SERVICE_NAME=nlp
       - SERVICE_PORT=8001
       - HF_TOKEN=${HF_TOKEN:-}
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
     networks:
       - cicerowatch
     volumes:
@@ -47,6 +48,8 @@ services:
       - ./topics.py:/app/topics.py
       - ./adapters.py:/app/adapters.py
       - ./apputils.py:/app/apputils.py
+      - ./batch_processor.py:/app/batch_processor.py
+      - ./excel_utils.py:/app/excel_utils.py
     deploy:
       resources:
         limits:
@@ -56,6 +59,7 @@ services:
   # Graph Analytics Service - Similarity, Clustering, Networks
   # ============================================================
   graph:
+    profiles: ["full", "core", "graph"]
     build:
       context: .
       dockerfile: Dockerfile.graph
@@ -64,25 +68,23 @@ services:
     environment:
       - SERVICE_NAME=graph
       - SERVICE_PORT=8002
-      - FORCE_CPU=1
     networks:
       - cicerowatch
     volumes:
       - ./temp:/app/temp
-      # Mount source code for live editing (no rebuild needed)
-      - ./url_fetch.py:/app/url_fetch.py
       - ./service_graph.py:/app/service_graph.py
       - ./graph_processor.py:/app/graph_processor.py
-      - ./graph_tasks.py:/app/graph_tasks.py
+      - ./apputils.py:/app/apputils.py
     deploy:
       resources:
         limits:
           memory: 2G
 
   # ============================================================
-  # Audio Service - Deepfake Detection (Python 3.10 + fairseq)
+  # Audio Service - Speech-to-Text, Audio Analysis
   # ============================================================
   audio:
+    profiles: ["full", "audio"]
     build:
       context: .
       dockerfile: Dockerfile.audio
@@ -91,27 +93,18 @@ services:
     environment:
       - SERVICE_NAME=audio
       - SERVICE_PORT=8003
-      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
     networks:
       - cicerowatch
     volumes:
       - ./temp:/app/temp
-      - ./models:/app/models
-      # Mount source code for live editing (no rebuild needed)
-      - ./url_fetch.py:/app/url_fetch.py
-      - ./audio_service.py:/app/audio_service.py
-      - ./audio_antispoofing.py:/app/audio_antispoofing.py
+      - ./service_audio.py:/app/service_audio.py
+      - ./audio_processor.py:/app/audio_processor.py
+      - ./apputils.py:/app/apputils.py
     deploy:
       resources:
         limits:
-          memory: 6G
+          memory: 4G
 
 networks:
   cicerowatch:
     driver: bridge
-
-volumes:
-  models:
-    driver: local
-  temp:
-    driver: local

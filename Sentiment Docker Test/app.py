@@ -14,9 +14,11 @@ import requests
 from fastapi import FastAPI, UploadFile, File, Query, Body, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse, PlainTextResponse
 from starlette.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
-from graph_tasks import load_graph_from_bytes, run_graph_metrics
+from graph_tasks import load_graph_from_bytes, run_graph_metrics, extract_social_media_edges
+from batch_processor import process_excel_file, BatchProcessingConfig
 
 # Configure logging
 logging.basicConfig(
@@ -331,34 +333,34 @@ async def predict_file(
 
 
 # ---- Predict from URL ------------------------------------------------------ #
-class UrlBody(T.TypedDict, total=False):
+class UrlBody(BaseModel):
     url: str
-    preset: str
-    labels: T.List[str] | None
-    include_stopwords: bool
-    render: bool
-    renderer: str  # "auto" | "playwright" | "selenium" (selenium not implemented here)
-    wait_selector: str | None
-    scroll_passes: int
-    render_timeout_ms: int
-    cookies: str | None
-    extra_headers: dict | None
+    preset: str | None = None
+    labels: T.List[str] | None = None
+    include_stopwords: bool = False
+    render: bool = False
+    renderer: str = "auto"  # "auto" | "playwright" | "selenium" (selenium not implemented here)
+    wait_selector: str | None = None
+    scroll_passes: int = 8
+    render_timeout_ms: int = 3600000
+    cookies: str | None = None
+    extra_headers: dict | None = None
 
 @app.post("/predict/url")
 async def predict_url(body: UrlBody = Body(...)):
-    url = body.get("url")
+    url = body.url
     if not url:
         raise HTTPException(status_code=400, detail="Missing 'url'")
 
-    preset = body.get("preset")
-    labels = body.get("labels")
-    render = bool(body.get("render", False))
-    renderer = (body.get("renderer") or "auto").lower()
-    wait_selector = body.get("wait_selector")
-    scroll_passes = int(body.get("scroll_passes") or 8)
-    timeout_ms = int(body.get("render_timeout_ms") or 3600000)  # 1 hour default
-    cookies_header = body.get("cookies")
-    extra_headers = body.get("extra_headers") or {}
+    preset = body.preset
+    labels = body.labels
+    render = body.render
+    renderer = (body.renderer or "auto").lower()
+    wait_selector = body.wait_selector
+    scroll_passes = body.scroll_passes
+    timeout_ms = body.render_timeout_ms
+    cookies_header = body.cookies
+    extra_headers = body.extra_headers or {}
 
     # Fetch HTML (rendered or simple)
     try:
@@ -414,11 +416,11 @@ async def predict_url(body: UrlBody = Body(...)):
 
 
 # ---- Batch sentiment analysis ---------------------------------------------- #
-class BatchTextRequest(T.TypedDict, total=False):
+class BatchTextRequest(BaseModel):
     texts: T.List[str]
-    preset: str
-    labels: T.List[str] | None
-    preprocess: bool
+    preset: str = "sentiment-twitter"
+    labels: T.List[str] | None = None
+    preprocess: bool = True
 
 @app.post("/predict/batch")
 async def predict_batch(body: BatchTextRequest = Body(...)):
@@ -426,13 +428,13 @@ async def predict_batch(body: BatchTextRequest = Body(...)):
     Efficiently process multiple texts for sentiment analysis or other NLP tasks.
     Optimized for batch processing with automatic preprocessing.
     """
-    texts = body.get("texts")
+    texts = body.texts
     if not texts or not isinstance(texts, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'texts' array")
 
-    preset = body.get("preset", "sentiment-twitter")
-    labels = body.get("labels")
-    do_preprocess = body.get("preprocess", True)
+    preset = body.preset
+    labels = body.labels
+    do_preprocess = body.preprocess
 
     try:
         # Preprocess if requested
@@ -878,6 +880,135 @@ async def graph_ego_network(
         raise HTTPException(status_code=400, detail=f"Ego network loading failed: {e}")
 
 
+@app.post("/graph/prepare")
+async def prepare_social_media_graph(
+    file: UploadFile = File(..., description="CSV or XLSX file with social media data"),
+    sheet: str = Query("0", description="Sheet name or index for XLSX files"),
+    extract_hashtags: bool = Query(False, description="Extract hashtag edges (user->hashtag)")
+):
+    """
+    Convert social media CSV/XLSX into network edge lists.
+
+    Automatically detects columns (author, mentions, replies, retweets, quotes, URLs, hashtags)
+    and extracts various types of network relationships:
+
+    - **mention_edges**: User @mentions another user
+    - **reply_edges**: User replies to another user
+    - **retweet_edges**: User retweets another user
+    - **quote_edges**: User quotes another user
+    - **domain_edges**: User shares a URL domain
+    - **hashtag_edges**: User uses a hashtag (optional)
+    - **nodes**: All unique nodes with type annotations (user/domain/hashtag)
+
+    **Column Detection** (case-insensitive, substring matching):
+    - Author: author, username, user, screen_name, from, account
+    - Text: text, full_text, tweet, content, body
+    - Mentions: mentions, mentioned_users, entities_user_mentions
+    - Reply: in_reply_to_screen_name, in_reply_to_user, reply_to
+    - Retweet: retweeted_user, retweeted_username, rt_username
+    - Quote: quoted_user, quoted_username
+    - URLs: urls, entities_urls, links, expanded_urls
+    - Hashtags: hashtags, entities_hashtags
+
+    **Example Usage**:
+    ```bash
+    # CSV
+    curl -F "file=@tweets.csv" http://localhost:8080/graph/prepare
+
+    # XLSX with specific sheet and hashtags
+    curl -F "file=@data.xlsx" "http://localhost:8080/graph/prepare?sheet=0&extract_hashtags=true"
+    ```
+    """
+    try:
+        # Read file
+        file_bytes = await file.read()
+        filename = file.filename or "data.csv"
+
+        # Load DataFrame
+        if filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+            # Parse sheet parameter (could be int or string)
+            try:
+                sheet_param = int(sheet)
+            except ValueError:
+                sheet_param = sheet
+
+            df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_param)
+        else:
+            # Assume CSV
+            df = pd.read_csv(io.BytesIO(file_bytes))
+
+        # Extract edges
+        edges = extract_social_media_edges(df, extract_hashtags=extract_hashtags)
+
+        # Convert to dict
+        result = edges.to_dict()
+
+        # Convert DataFrame to records for frontend (limit columns to reduce size)
+        # Include key columns for user content display
+        columns_to_include = []
+        df_cols_lower = {col.lower(): col for col in df.columns}
+
+        # Try to find author column
+        author_col = None
+        for key in ['author', 'username', 'user', 'screen_name', 'from', 'account']:
+            if key in df_cols_lower:
+                author_col = df_cols_lower[key]
+                columns_to_include.append(author_col)
+                break
+
+        # Try to find text column
+        for key in ['text', 'full_text', 'tweet', 'content', 'body']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+                break
+
+        # Try to find timestamp/date column
+        for key in ['created_at', 'timestamp', 'date', 'time', 'datetime']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+                break
+
+        # Add any other interesting columns (mentions, retweets, etc.)
+        for key in ['mentions', 'in_reply_to_screen_name', 'retweeted_user', 'urls', 'hashtags']:
+            if key in df_cols_lower:
+                columns_to_include.append(df_cols_lower[key])
+
+        # If we couldn't find key columns, just include first 10 columns
+        if len(columns_to_include) < 2:
+            columns_to_include = df.columns[:10].tolist()
+
+        # Create filtered dataframe and convert to records
+        df_filtered = df[columns_to_include] if columns_to_include else df
+        original_data = df_filtered.fillna('').to_dict('records')
+
+        return {
+            "success": True,
+            "edges": {
+                "mention_edges": result["mention_edges"],
+                "reply_edges": result["reply_edges"],
+                "retweet_edges": result["retweet_edges"],
+                "quote_edges": result["quote_edges"],
+                "domain_edges": result["domain_edges"],
+                "hashtag_edges": result["hashtag_edges"],
+                "nodes": result["nodes"]
+            },
+            "stats": result["stats"],
+            "original_data": original_data,
+            "author_column": author_col  # Tell frontend which column has the username
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not detect required columns: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Social media graph preparation failed: {str(e)}"
+        )
+
+
 # ------------------------------ Audio Anti-Spoofing ------------------------ #
 
 @app.get("/audio/model-status")
@@ -954,3 +1085,266 @@ async def audio_analyze(file: UploadFile = File(...)):
             except:
                 pass
         raise HTTPException(status_code=500, detail=f"Audio analysis failed: {e}")
+
+
+# ============================================================================
+# Batch Excel Processing
+# ============================================================================
+
+@app.post("/batch/excel")
+async def batch_process_excel(
+    file: UploadFile = File(...),
+    extract_sentiment: bool = Query(True, description="Extract sentiment from texts"),
+    extract_themes: bool = Query(True, description="Extract themes using zero-shot classification"),
+    theme_labels: T.Optional[str] = Query(None, description="Comma-separated theme labels (optional, uses defaults if not provided)"),
+    sentiment_preset: str = Query("sentiment-twitter", description="Sentiment analysis preset"),
+    theme_preset: str = Query("zeroshot-bart", description="Zero-shot classification preset"),
+    text_column: T.Optional[str] = Query(None, description="Text column name (auto-detect if not provided)"),
+    sheets_to_process: T.Optional[str] = Query(None, description="Comma-separated sheet names (process all if not provided)"),
+    top_n_themes: int = Query(3, description="Number of top themes to extract", ge=1, le=10),
+    add_confidence_scores: bool = Query(True, description="Include confidence scores in output"),
+    batch_size: int = Query(32, description="Batch size for processing", ge=1, le=128),
+):
+    """
+    Batch process Excel file with multiple sheets for sentiment and theme extraction
+
+    **Features:**
+    - Processes all sheets (or specify which ones)
+    - Extracts sentiment and/or themes (zero-shot classification)
+    - Optional custom labels for theme detection
+    - Auto-detects text column or specify manually
+    - Preserves original data and adds result columns
+    - Returns enhanced Excel file
+
+    **Example:**
+    ```bash
+    curl -X POST http://localhost:8080/batch/excel \\
+      -F "file=@data.xlsx" \\
+      -F "extract_sentiment=true" \\
+      -F "extract_themes=true" \\
+      -F "theme_labels=politics,economics,social issues,environment,technology"
+    ```
+
+    **Output Columns:**
+    - Original columns (preserved)
+    - `sentiment`: Sentiment label (positive/negative/neutral)
+    - `sentiment_confidence`: Confidence score (if enabled)
+    - `theme_1`, `theme_2`, `theme_3`: Top themes
+    - `theme_1_score`, `theme_2_score`, `theme_3_score`: Theme confidence scores
+
+    **Custom Theme Labels:**
+    If not provided, uses defaults: politics, economy, military, health, science, technology, sports, entertainment, climate, crime, education, misinformation, opinion
+
+    **Supported Presets:**
+    - Sentiment: sentiment-twitter, sentiment-sst2
+    - Themes: zeroshot-bart, zeroshot-mdeberta
+    """
+    logger.info(f"Batch Excel processing started: {file.filename}")
+    logger.info(f"Config: sentiment={extract_sentiment}, themes={extract_themes}, custom_labels={theme_labels is not None}")
+
+    try:
+        # Validate file type
+        if not file.filename or not file.filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+            raise HTTPException(
+                status_code=400,
+                detail="File must be an Excel file (.xlsx, .xlsm, or .xls)"
+            )
+
+        # Read file bytes
+        file_bytes = await file.read()
+
+        # Parse optional parameters
+        parsed_theme_labels = None
+        if theme_labels:
+            parsed_theme_labels = [label.strip() for label in theme_labels.split(',') if label.strip()]
+            logger.info(f"Using custom theme labels: {parsed_theme_labels}")
+
+        parsed_sheets = None
+        if sheets_to_process:
+            parsed_sheets = [sheet.strip() for sheet in sheets_to_process.split(',') if sheet.strip()]
+            logger.info(f"Processing specific sheets: {parsed_sheets}")
+
+        # Create configuration
+        config = BatchProcessingConfig(
+            extract_sentiment=extract_sentiment,
+            extract_themes=extract_themes,
+            theme_labels=parsed_theme_labels,
+            sentiment_preset=sentiment_preset,
+            theme_preset=theme_preset,
+            text_column=text_column,
+            sheets_to_process=parsed_sheets,
+            add_confidence_scores=add_confidence_scores,
+            top_n_themes=top_n_themes,
+            batch_size=batch_size
+        )
+
+        # Process Excel file
+        output_bytes, stats = process_excel_file(file_bytes, config)
+
+        logger.info(f"Batch processing complete: {stats['total_sheets']} sheets processed")
+
+        # Return enhanced Excel file
+        output_filename = file.filename.replace('.xlsx', '_analyzed.xlsx').replace('.xls', '_analyzed.xlsx')
+
+        return StreamingResponse(
+            io.BytesIO(output_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{output_filename}"',
+                "X-Processing-Stats": json.dumps(stats)
+            }
+        )
+
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Batch processing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {str(e)}")
+
+
+@app.post("/batch/excel-from-url")
+async def batch_process_excel_from_url(
+    file_url: str = Query(..., description="URL of Excel file to download and process"),
+    extract_sentiment: bool = Query(True, description="Extract sentiment from texts"),
+    extract_themes: bool = Query(True, description="Extract themes using zero-shot classification"),
+    theme_labels: T.Optional[str] = Query(None, description="Comma-separated theme labels (optional, uses defaults if not provided)"),
+    sentiment_preset: str = Query("sentiment-twitter", description="Sentiment analysis preset"),
+    theme_preset: str = Query("zeroshot-bart", description="Zero-shot classification preset"),
+    text_column: T.Optional[str] = Query(None, description="Text column name (auto-detect if not provided)"),
+    sheets_to_process: T.Optional[str] = Query(None, description="Comma-separated sheet names (process all if not provided)"),
+    top_n_themes: int = Query(3, description="Number of top themes to extract", ge=1, le=10),
+    add_confidence_scores: bool = Query(True, description="Include confidence scores in output"),
+    batch_size: int = Query(32, description="Batch size for processing", ge=1, le=128),
+):
+    """
+    Download Excel file from URL and batch process for sentiment and theme extraction
+
+    **Features:**
+    - Downloads Excel file from any publicly accessible URL
+    - Processes all sheets (or specify which ones)
+    - Extracts sentiment and/or themes (zero-shot classification)
+    - Optional custom labels for theme detection
+    - Auto-detects text column or specify manually
+    - Preserves original data and adds result columns
+    - Returns enhanced Excel file
+
+    **Example:**
+    ```bash
+    curl -X POST "http://localhost:8080/batch/excel-from-url?file_url=https://example.com/data.xlsx&theme_labels=UNITAS%20exercises,military%20cooperation,regional%20security"
+    ```
+
+    **URL Requirements:**
+    - Must be publicly accessible (no authentication required)
+    - Must be a direct link to Excel file (.xlsx, .xlsm, .xls)
+    - File size limit: 100MB
+
+    **Output:**
+    Same as /batch/excel - enhanced Excel file with sentiment and theme columns
+    """
+    logger.info(f"Batch Excel processing from URL started: {file_url}")
+    logger.info(f"Config: sentiment={extract_sentiment}, themes={extract_themes}, custom_labels={theme_labels is not None}")
+
+    try:
+        # Fetch file from URL
+        logger.info(f"Downloading file from URL: {file_url}")
+
+        # Use simple requests download (similar to existing URL fetch logic)
+        import requests
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+
+        response = requests.get(file_url, headers=headers, timeout=60, stream=True)
+        response.raise_for_status()
+
+        # Check content type
+        content_type = response.headers.get('Content-Type', '').lower()
+        if not any(ext in content_type for ext in ['excel', 'spreadsheet', 'ms-excel']):
+            # Also check URL extension
+            if not file_url.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+                logger.warning(f"URL may not be an Excel file. Content-Type: {content_type}")
+
+        # Download file bytes
+        file_bytes = response.content
+
+        if len(file_bytes) > 100 * 1024 * 1024:  # 100MB limit
+            raise HTTPException(status_code=400, detail="File too large (>100MB)")
+
+        logger.info(f"Downloaded {len(file_bytes)} bytes, Content-Type: {content_type}")
+
+        # Validate file is actually a ZIP/Excel file (Excel files are ZIP archives)
+        if len(file_bytes) < 4:
+            raise HTTPException(status_code=400, detail="Downloaded file is too small to be an Excel file")
+
+        # Check ZIP magic bytes (PK header: 50 4B)
+        if file_bytes[0:2] != b'PK':
+            # Try to detect what we actually got
+            preview = file_bytes[:200].decode('utf-8', errors='replace')
+            if preview.strip().startswith('<'):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"URL returned HTML instead of Excel file. Content-Type: {content_type}. Preview: {preview[:100]}"
+                )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"URL did not return a valid Excel file (not a ZIP archive). Content-Type: {content_type}. First bytes: {file_bytes[:20].hex()}"
+                )
+
+        # Parse optional parameters
+        parsed_theme_labels = None
+        if theme_labels:
+            parsed_theme_labels = [label.strip() for label in theme_labels.split(',') if label.strip()]
+            logger.info(f"Using custom theme labels: {parsed_theme_labels}")
+
+        parsed_sheets = None
+        if sheets_to_process:
+            parsed_sheets = [sheet.strip() for sheet in sheets_to_process.split(',') if sheet.strip()]
+            logger.info(f"Processing specific sheets: {parsed_sheets}")
+
+        # Create configuration
+        config = BatchProcessingConfig(
+            extract_sentiment=extract_sentiment,
+            extract_themes=extract_themes,
+            theme_labels=parsed_theme_labels,
+            sentiment_preset=sentiment_preset,
+            theme_preset=theme_preset,
+            text_column=text_column,
+            sheets_to_process=parsed_sheets,
+            add_confidence_scores=add_confidence_scores,
+            top_n_themes=top_n_themes,
+            batch_size=batch_size
+        )
+
+        # Process Excel file
+        output_bytes, stats = process_excel_file(file_bytes, config)
+
+        logger.info(f"Batch processing complete: {stats['total_sheets']} sheets processed")
+
+        # Generate output filename from URL
+        from pathlib import Path
+        from urllib.parse import urlparse
+        url_path = urlparse(file_url).path
+        original_filename = Path(url_path).name or "downloaded_file.xlsx"
+        output_filename = original_filename.replace('.xlsx', '_analyzed.xlsx').replace('.xls', '_analyzed.xlsx')
+
+        return StreamingResponse(
+            io.BytesIO(output_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{output_filename}"',
+                "X-Processing-Stats": json.dumps(stats),
+                "X-Source-URL": file_url
+            }
+        )
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to download file from URL: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to download file from URL: {str(e)}")
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Batch processing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Batch processing failed: {str(e)}")

@@ -7,6 +7,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Copy certificates directory FIRST (before any network operations)
+# Place your corporate .crt files in certs/ directory before building
+COPY certs /tmp/certs
+
+# Install corporate certificates BEFORE any apt-get operations
+RUN apt-get update && apt-get install -y ca-certificates apt-transport-https && \
+    if ls /tmp/certs/*.crt 1> /dev/null 2>&1; then \
+        cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ && \
+        update-ca-certificates && \
+        echo "✓ Corporate certificates installed"; \
+    else \
+        echo "ℹ No corporate certificates found (optional - only needed for restrictive firewalls)"; \
+    fi && \
+    rm -rf /tmp/certs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Force apt to use HTTPS instead of HTTP (for corporate firewalls that block HTTP)
+RUN sed -i 's/http:\/\//https:\/\//g' /etc/apt/sources.list || true
+
+# Configure system to use certificates for all operations (Python, curl, Node.js)
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
 # Install Python 3.12 and browser dependencies
 RUN apt-get update && apt-get install -y \
     software-properties-common \
@@ -20,7 +44,6 @@ RUN apt-get update && apt-get install -y \
     chromium-browser \
     chromium-chromedriver \
     gnupg \
-    ca-certificates \
     fonts-liberation \
     libnss3 \
     libxss1 \
