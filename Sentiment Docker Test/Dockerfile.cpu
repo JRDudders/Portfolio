@@ -8,14 +8,29 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TRANSFORMERS_NO_ADVISORY_WARNINGS=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# System deps (curl for healthcheck; playwright will bring its own libs in install step)
+WORKDIR /app
+
+# Copy certificates directory (may be empty or contain corporate certs)
+COPY certs /tmp/certs
+
+# System deps and certificate installation
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      curl ca-certificates git \
+      curl ca-certificates apt-transport-https git \
       build-essential \
-    && rm -rf /var/lib/apt/lists/*
+    && if ls /tmp/certs/*.crt 1> /dev/null 2>&1; then \
+        cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ && \
+        update-ca-certificates && \
+        echo "✓ Corporate certificates installed"; \
+    else \
+        echo "ℹ No corporate certificates found (optional - only needed for restrictive firewalls)"; \
+    fi && \
+    rm -rf /tmp/certs && \
+    rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Configure Python requests to use system certificates
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 # --- Python deps ---
 # Keep req.txt cache-friendly
