@@ -47,6 +47,7 @@ services:
       - SERVICE_PORT=8001
       - PYTHONUNBUFFERED=1
       - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HUB_DISABLE_SSL_VERIFY=1
     networks:
       - cicerowatch
     restart: always

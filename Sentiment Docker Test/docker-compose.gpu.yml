@@ -35,6 +35,7 @@ services:
       - SERVICE_PORT=8001
       - CUDA_VISIBLE_DEVICES=0
       - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HUB_DISABLE_SSL_VERIFY=1
     networks:
       - cicerowatch
     volumes:
