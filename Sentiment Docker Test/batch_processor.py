@@ -25,7 +25,7 @@ class BatchProcessingConfig:
 
     # Zero-shot configuration
     theme_labels: Optional[List[str]] = None  # Custom labels, or None for defaults
-    sentiment_preset: str = "sentiment-twitter"
+    sentiment_preset: str = "sentiment-sst2"  # Use smaller 268MB model (was "sentiment-twitter" 501MB)
     theme_preset: str = "zeroshot-bart"
 
     # Column configuration
@@ -85,7 +85,7 @@ def detect_text_column(df: pd.DataFrame) -> str:
 
 def process_sentiment_batch(
     texts: List[str],
-    preset: str = "sentiment-twitter",
+    preset: str = "sentiment-sst2",  # Use smaller 268MB model for corporate networks
     batch_size: int = 32
 ) -> List[Dict[str, Any]]:
     """
