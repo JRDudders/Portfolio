@@ -265,8 +265,8 @@
           <div style="margin-top:12px">
             <label for="batch-sentiment-preset">Sentiment Preset</label>
             <select id="batch-sentiment-preset">
-              <option value="sentiment-twitter" selected>Twitter RoBERTa (fast)</option>
-              <option value="sentiment-sst2">SST-2 DistilBERT (accurate)</option>
+              <option value="sentiment-sst2" selected>SST-2 DistilBERT (268MB, works with firewall)</option>
+              <option value="sentiment-twitter">Twitter RoBERTa (501MB, may be blocked)</option>
             </select>
 
             <label for="batch-theme-preset">Theme Preset</label>
@@ -326,8 +326,8 @@
           <div style="margin-top:12px">
             <label for="batch-url-sentiment-preset">Sentiment Preset</label>
             <select id="batch-url-sentiment-preset">
-              <option value="sentiment-twitter" selected>Twitter RoBERTa (fast)</option>
-              <option value="sentiment-sst2">SST-2 DistilBERT (accurate)</option>
+              <option value="sentiment-sst2" selected>SST-2 DistilBERT (268MB, works with firewall)</option>
+              <option value="sentiment-twitter">Twitter RoBERTa (501MB, may be blocked)</option>
             </select>
 
             <label for="batch-url-theme-preset">Theme Preset</label>
@@ -749,8 +749,8 @@
     function populatePresets(sel){
       // Add default option
       const defaultOpt = document.createElement('option');
-      defaultOpt.value = 'sentiment-twitter';  // Default to first preset
-      defaultOpt.textContent = '(default: sentiment-twitter)';
+      defaultOpt.value = 'sentiment-sst2';  // Default to smaller model for corporate networks
+      defaultOpt.textContent = '(default: sentiment-sst2)';
       sel.appendChild(defaultOpt);
 
       // Add all presets

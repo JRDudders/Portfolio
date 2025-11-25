@@ -418,7 +418,7 @@ async def predict_url(body: UrlBody = Body(...)):
 # ---- Batch sentiment analysis ---------------------------------------------- #
 class BatchTextRequest(BaseModel):
     texts: T.List[str]
-    preset: str = "sentiment-twitter"
+    preset: str = "sentiment-sst2"  # Use smaller 268MB model for corporate networks
     labels: T.List[str] | None = None
     preprocess: bool = True
 

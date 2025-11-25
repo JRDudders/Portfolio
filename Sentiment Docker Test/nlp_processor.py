@@ -22,7 +22,7 @@ def analyze_sentiment(text: str) -> Dict[str, Any]:
     Returns:
         Dictionary with sentiment results
     """
-    results = run_task([text], preset="sentiment-twitter")
+    results = run_task([text], preset="sentiment-sst2")
 
     if results and len(results) > 0:
         result = results[0]
