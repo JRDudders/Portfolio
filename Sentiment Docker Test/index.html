@@ -231,6 +231,139 @@
           </div>
         </div>
       </div>
+
+      <!-- BATCH EXCEL PROCESSING -->
+      <div class="card">
+        <h2>📊 Batch Excel Processing</h2>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Automated sentiment and theme extraction from multi-tab Excel files. Supports custom zero-shot labels.</p>
+
+        <div class="inline">
+          <button class="btn" id="btn-batch-excel">Choose Excel File</button>
+          <button class="btn" id="btn-preview-excel" style="display:none;margin-left:8px">Preview File Structure</button>
+          <span class="file-name" id="batch-excel-name">No file selected</span>
+          <input type="file" id="batch-excel-input" style="display:none" accept=".xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/>
+        </div>
+
+        <!-- Preview Section (hidden until file is previewed) -->
+        <div id="excel-preview-section" style="display:none;margin-top:16px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:4px">
+          <h3 style="margin:0 0 8px">📋 File Preview: <span id="preview-filename"></span></h3>
+          <p style="font-size:12px;color:var(--muted);margin:0 0 12px">Select sheets and columns to process:</p>
+          <div id="preview-content"></div>
+        </div>
+
+        <div class="inline" style="margin-top:12px">
+          <label class="checkbox"><input type="checkbox" id="batch-extract-sentiment" checked/> Extract Sentiment</label>
+          <label class="checkbox" style="margin-left:16px"><input type="checkbox" id="batch-extract-themes" checked/> Extract Themes</label>
+        </div>
+
+        <label for="batch-theme-labels">Custom Theme Labels (optional, comma-separated)</label>
+        <input id="batch-theme-labels" type="text" placeholder="e.g., UNITAS exercises,military cooperation,regional security"/>
+        <p style="font-size:11px;color:var(--muted);margin:-4px 0 8px">Leave empty for defaults: politics, economy, military, health, science, technology, sports, entertainment, climate, crime, education, misinformation, opinion</p>
+
+        <details>
+          <summary>Advanced Options</summary>
+          <div style="margin-top:12px">
+            <label for="batch-sentiment-preset">Sentiment Preset</label>
+            <select id="batch-sentiment-preset">
+              <option value="sentiment-twitter" selected>Twitter RoBERTa (fast)</option>
+              <option value="sentiment-sst2">SST-2 DistilBERT (accurate)</option>
+            </select>
+
+            <label for="batch-theme-preset">Theme Preset</label>
+            <select id="batch-theme-preset">
+              <option value="zeroshot-bart" selected>BART-MNLI (fast, English)</option>
+              <option value="zeroshot-mdeberta">mDeBERTa (accurate, multilingual)</option>
+            </select>
+
+            <label for="batch-text-column">Text Column Name (optional, auto-detect if empty)</label>
+            <input id="batch-text-column" type="text" placeholder="e.g., text, comment, feedback"/>
+
+            <label for="batch-sheets">Sheet Names (optional, comma-separated, process all if empty)</label>
+            <input id="batch-sheets" type="text" placeholder="e.g., Sheet1, Q1 Data, Responses"/>
+
+            <div class="inline" style="margin-top:8px">
+              <div style="flex:1">
+                <label for="batch-top-themes">Top N Themes</label>
+                <input id="batch-top-themes" type="number" min="1" max="10" value="3"/>
+              </div>
+              <div style="flex:1;margin-left:8px">
+                <label for="batch-size">Batch Size</label>
+                <input id="batch-size" type="number" min="1" max="128" value="32"/>
+              </div>
+            </div>
+
+            <div class="inline" style="margin-top:8px">
+              <label class="checkbox"><input type="checkbox" id="batch-confidence" checked/> Include Confidence Scores</label>
+            </div>
+          </div>
+        </details>
+
+        <div class="controls">
+          <button class="btn primary" id="run-batch-excel">Process Excel File</button>
+        </div>
+        <div id="status-batch-excel" class="status"></div>
+      </div>
+
+      <!-- BATCH EXCEL FROM URL -->
+      <div class="card">
+        <h2>📊 Batch Excel from URL</h2>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Download and process Excel file from URL with sentiment and theme extraction</p>
+
+        <label for="batch-excel-url">Excel File URL</label>
+        <input id="batch-excel-url" type="text" placeholder="https://example.com/data.xlsx"/>
+
+        <div class="inline" style="margin-top:12px">
+          <label class="checkbox"><input type="checkbox" id="batch-url-extract-sentiment" checked/> Extract Sentiment</label>
+          <label class="checkbox" style="margin-left:16px"><input type="checkbox" id="batch-url-extract-themes" checked/> Extract Themes</label>
+        </div>
+
+        <label for="batch-url-theme-labels">Custom Theme Labels (optional, comma-separated)</label>
+        <input id="batch-url-theme-labels" type="text" placeholder="e.g., UNITAS exercises,military cooperation,regional security"/>
+        <p style="font-size:11px;color:var(--muted);margin:-4px 0 8px">Leave empty for defaults: politics, economy, military, health, science, technology, sports, entertainment, climate, crime, education, misinformation, opinion</p>
+
+        <details>
+          <summary>Advanced Options</summary>
+          <div style="margin-top:12px">
+            <label for="batch-url-sentiment-preset">Sentiment Preset</label>
+            <select id="batch-url-sentiment-preset">
+              <option value="sentiment-twitter" selected>Twitter RoBERTa (fast)</option>
+              <option value="sentiment-sst2">SST-2 DistilBERT (accurate)</option>
+            </select>
+
+            <label for="batch-url-theme-preset">Theme Preset</label>
+            <select id="batch-url-theme-preset">
+              <option value="zeroshot-bart" selected>BART-MNLI (fast, English)</option>
+              <option value="zeroshot-mdeberta">mDeBERTa (accurate, multilingual)</option>
+            </select>
+
+            <label for="batch-url-text-column">Text Column Name (optional, auto-detect if empty)</label>
+            <input id="batch-url-text-column" type="text" placeholder="e.g., text, comment, feedback"/>
+
+            <label for="batch-url-sheets">Sheet Names (optional, comma-separated, process all if empty)</label>
+            <input id="batch-url-sheets" type="text" placeholder="e.g., Sheet1, Q1 Data, Responses"/>
+
+            <div class="inline" style="margin-top:8px">
+              <div style="flex:1">
+                <label for="batch-url-top-themes">Top N Themes</label>
+                <input id="batch-url-top-themes" type="number" min="1" max="10" value="3"/>
+              </div>
+              <div style="flex:1;margin-left:8px">
+                <label for="batch-url-batch-size">Batch Size</label>
+                <input id="batch-url-batch-size" type="number" min="1" max="128" value="32"/>
+              </div>
+            </div>
+
+            <div class="inline" style="margin-top:8px">
+              <label class="checkbox"><input type="checkbox" id="batch-url-confidence" checked/> Include Confidence Scores</label>
+            </div>
+          </div>
+        </details>
+
+        <div class="controls">
+          <button class="btn primary" id="run-batch-excel-url">Process from URL</button>
+        </div>
+        <div id="status-batch-excel-url" class="status"></div>
+      </div>
     </div>
     </div><!-- End NLP Tab -->
 
