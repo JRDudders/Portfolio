@@ -54,6 +54,7 @@ COPY fetch.py .
 COPY render.py .
 COPY apputils.py .
 COPY excel_utils.py .
+COPY file_store.py .
 
 # Create temp directory
 RUN mkdir -p /app/temp

@@ -9,9 +9,9 @@ Handles all NLP-related tasks:
 - URL scraping and analysis
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Query, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from pydantic import BaseModel, HttpUrl
 from typing import List, Optional, Dict, Any
 import uvicorn
@@ -47,12 +47,16 @@ from excel_utils import (
     preview_excel_structure,
     extract_texts_from_excel
 )
+from file_store import FileStore
 
 app = FastAPI(
     title="CiceroWatch NLP Service",
     description="Natural Language Processing microservice",
     version="1.0.0"
 )
+
+# Initialize file store
+file_store = FileStore()
 
 # CORS middleware
 app.add_middleware(
@@ -62,6 +66,97 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---- File Persistence (Optional "Save for Later") ------------------------- #
+
+@app.post("/api/files/save")
+async def save_file_for_later(
+    file: UploadFile = File(...),
+    retention_days: int = Form(..., le=90, ge=1, description="Days to retain file (max 90)")
+):
+    """
+    Save file to persistent storage with expiration date.
+    Only called when user checks "Save for later use".
+    """
+    try:
+        file_bytes = await file.read()
+        file_id = file_store.save_file(file_bytes, file.filename, retention_days)
+        metadata = file_store.get_metadata(file_id)
+        
+        return {
+            "file_id": file_id,
+            "filename": file.filename,
+            "upload_date": metadata["upload_date"],
+            "expiry_date": metadata["expiry_date"],
+            "retention_days": retention_days,
+            "size_bytes": metadata["size_bytes"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+
+@app.get("/api/files/list")
+async def list_saved_files():
+    """List all active (non-expired) saved files"""
+    try:
+        files = file_store.list_active_files()
+        stats = file_store.get_stats()
+        
+        return {
+            "files": files,
+            "stats": stats
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list files: {str(e)}")
+
+
+@app.get("/api/files/{file_id}")
+async def get_saved_file(file_id: str):
+    """Retrieve a saved file by ID"""
+    try:
+        file_bytes = file_store.get_file(file_id)
+        metadata = file_store.get_metadata(file_id)
+        
+        return Response(
+            content=file_bytes,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{metadata["original_filename"]}"'
+            }
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found or expired")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
+
+
+@app.get("/api/files/{file_id}/metadata")
+async def get_file_metadata(file_id: str):
+    """Retrieve metadata for a saved file"""
+    try:
+        return file_store.get_metadata(file_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found or expired")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get metadata: {str(e)}")
+
+
+@app.delete("/api/files/{file_id}")
+async def delete_saved_file(file_id: str):
+    """Delete a saved file before its expiry"""
+    try:
+        if file_store.delete_file(file_id):
+            return {"status": "success", "message": "File deleted"}
+        else:
+            raise HTTPException(status_code=404, detail="File not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
+
+
+@app.get("/api/files/stats")
+async def get_storage_stats():
+    """Get overall storage statistics"""
+    return file_store.get_stats()
 
 
 # ============================================================
