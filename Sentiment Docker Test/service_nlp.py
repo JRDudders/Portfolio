@@ -43,10 +43,6 @@ from nlp_processor import (
 )
 from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
 from adapters import process_url
-from batch_processor import (
-    process_excel_file,
-    BatchProcessingConfig
-)
 from excel_utils import (
     preview_excel_structure,
     extract_texts_from_excel
