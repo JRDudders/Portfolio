@@ -250,6 +250,100 @@ def healthz():
     }
 
 
+# ---- File Persistence (Optional "Save for Later") ------------------------- #
+
+@app.post("/api/files/save")
+async def save_file_for_later(
+    file: UploadFile = File(...),
+    retention_days: int = Form(..., le=90, ge=1, description="Days to retain file (max 90)")
+):
+    """
+    Save file to persistent storage with expiration date.
+    Only called when user checks "Save for later use".
+    """
+    try:
+        file_bytes = await file.read()
+        file_id = file_store.save_file(file_bytes, file.filename, retention_days)
+        metadata = file_store.get_metadata(file_id)
+        
+        return {
+            "file_id": file_id,
+            "filename": file.filename,
+            "upload_date": metadata["upload_date"],
+            "expiry_date": metadata["expiry_date"],
+            "retention_days": retention_days,
+            "size_bytes": metadata["size_bytes"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+
+@app.get("/api/files/list")
+async def list_saved_files():
+    """List all active (non-expired) saved files"""
+    try:
+        files = file_store.list_active_files()
+        stats = file_store.get_stats()
+        
+        return {
+            "files": files,
+            "stats": stats
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list files: {str(e)}")
+
+
+@app.get("/api/files/{file_id}")
+async def get_saved_file(file_id: str):
+    """Retrieve a saved file by ID"""
+    try:
+        file_bytes = file_store.get_file(file_id)
+        metadata = file_store.get_metadata(file_id)
+        
+        return StreamingResponse(
+            io.BytesIO(file_bytes),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{metadata["filename"]}"'}
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
+
+
+@app.get("/api/files/{file_id}/metadata")
+async def get_file_metadata(file_id: str):
+    """Get file metadata without downloading the file"""
+    try:
+        metadata = file_store.get_metadata(file_id)
+        metadata["file_id"] = file_id
+        return metadata
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get metadata: {str(e)}")
+
+
+@app.delete("/api/files/{file_id}")
+async def delete_saved_file(file_id: str):
+    """Delete a saved file before its expiry date"""
+    try:
+        file_store.delete_file(file_id)
+        return {"status": "ok", "message": f"File {file_id} deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
+
+
+@app.get("/api/files/stats")
+async def get_storage_stats():
+    """Get file storage statistics"""
+    try:
+        stats = file_store.get_stats()
+        return stats
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+
+
 # ---- Predict from FILE ----------------------------------------------------- #
 @app.post("/predict/file")
 async def predict_file(
