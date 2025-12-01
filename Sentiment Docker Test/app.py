@@ -17,6 +17,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
 from graph_tasks import load_graph_from_bytes, run_graph_metrics
+from file_store import FileStore
 
 # Configure logging
 logging.basicConfig(
@@ -51,6 +52,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize file store for optional file persistence
+file_store = FileStore(storage_dir="./stored_files")
 
 
 # ------------------------------ Utilities ---------------------------------- #
