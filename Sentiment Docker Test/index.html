@@ -317,6 +317,7 @@
 
         <div class="controls">
           <button class="btn primary" id="run-batch-excel">Process Excel File</button>
+          <button class="btn" id="export-excel-to-graph" style="display:none">Export to Graph (Extract Network)</button>
         </div>
         <div id="status-batch-excel" class="status"></div>
       </div>
@@ -596,9 +597,13 @@
             <button class="btn primary" id="download-all-edges">All (JSON)</button>
           </div>
 
-          <p style="font-size:11px;color:var(--muted);margin-top:12px">
-            Download edge types and upload to Load Graph for analysis
-          </p>
+          <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            <p style="font-size:12px;color:var(--muted);margin:0 0 8px">Visualize extracted network:</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn primary" id="visualize-mention-network">Visualize Mentions</button>
+              <button class="btn" id="visualize-all-network">Visualize All Edges</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -2484,6 +2489,173 @@
         setStatus(statusFileUrl, 'Error: '+(e?.message||e), 'err');
       }
     });
+
+    // --- Batch Excel Processing ---
+    const batchExcelBtn = document.getElementById('btn-batch-excel');
+    const batchExcelInput = document.getElementById('batch-excel-input');
+    const batchExcelName = document.getElementById('batch-excel-name');
+    const exportExcelToGraphBtn = document.getElementById('export-excel-to-graph');
+
+    batchExcelBtn.onclick = () => batchExcelInput.click();
+    batchExcelInput.onchange = () => {
+      const file = batchExcelInput.files?.[0];
+      batchExcelName.textContent = file ? file.name : 'No file selected';
+      // Show/hide export to graph button based on file selection
+      exportExcelToGraphBtn.style.display = file ? 'inline-block' : 'none';
+      // Show preview button if file selected
+      const previewBtn = document.getElementById('btn-preview-excel');
+      if(previewBtn) previewBtn.style.display = file ? 'inline-block' : 'none';
+    };
+
+    // Export Excel to Graph with edge extraction
+    exportExcelToGraphBtn.onclick = async () => {
+      const file = batchExcelInput.files?.[0];
+      if(!file) {
+        alert('Please select an Excel file first.');
+        return;
+      }
+
+      const statusBatch = document.getElementById('status-batch-excel');
+      setStatus(statusBatch, 'Extracting network edges from Excel...');
+      exportExcelToGraphBtn.disabled = true;
+
+      try {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        // Send to graph prepare endpoint (social media edge extraction)
+        const res = await fetch('/api/graph/prepare?extract_hashtags=true', {
+          method: 'POST',
+          body: fd
+        });
+
+        if(!res.ok) {
+          const err = await res.text().catch(() => res.statusText);
+          throw new Error(err);
+        }
+
+        const response = await res.json();
+
+        // Store extracted edges globally
+        extractedEdges = response;
+        socialMediaData = response.original_data || null;
+        socialMediaAuthorColumn = response.author_column || null;
+
+        // Switch to Graph tab
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelector('[data-tab="graph"]').classList.add('active');
+        document.getElementById('tab-graph').classList.add('active');
+
+        // Show results in social media results section
+        document.getElementById('social-results').style.display = 'block';
+
+        const stats = response.stats;
+        const statsDiv = document.getElementById('social-stats');
+        statsDiv.innerHTML = `
+          <strong>Extracted from: ${file.name}</strong><br>
+          <strong>Network Edges:</strong><br>
+          • Mentions: ${stats.mention_count}<br>
+          • Replies: ${stats.reply_count}<br>
+          • Retweets: ${stats.retweet_count}<br>
+          • Quotes: ${stats.quote_count}<br>
+          • Domains: ${stats.domain_count}<br>
+          • Hashtags: ${stats.hashtag_count}<br>
+          • Total Nodes: ${stats.node_count}
+        `;
+
+        // Update social file name display
+        document.getElementById('social-file-name').textContent = file.name + ' (imported from NLP tab)';
+
+        // Also update status in graph tab
+        const statusSocial = document.getElementById('status-social');
+        const totalEdges = stats.mention_count + stats.reply_count + stats.retweet_count +
+                          stats.quote_count + stats.domain_count + stats.hashtag_count;
+        setStatus(statusSocial, `Extracted ${stats.node_count} nodes and ${totalEdges} edges from Excel`, 'ok');
+
+        // Update NLP tab status
+        setStatus(statusBatch, `Network extracted! Switched to Graph tab. ${stats.node_count} nodes, ${totalEdges} edges found.`, 'ok');
+
+        // Scroll to results
+        document.getElementById('social-results').scrollIntoView({ behavior: 'smooth' });
+
+      } catch(e) {
+        setStatus(statusBatch, 'Error extracting network: ' + (e?.message || e), 'err');
+      } finally {
+        exportExcelToGraphBtn.disabled = false;
+      }
+    };
+
+    // --- Visualize extracted network edges ---
+    function visualizeExtractedEdges(edgeType) {
+      if(!extractedEdges || !extractedEdges.edges) {
+        alert('No extracted edges available. Please extract network edges first.');
+        return;
+      }
+
+      const edges = extractedEdges.edges;
+      const nodes = edges.nodes || [];
+
+      // Build combined edges based on type
+      let edgesToVisualize = [];
+      if(edgeType === 'mentions') {
+        edgesToVisualize = edges.mention_edges || [];
+      } else if(edgeType === 'all') {
+        // Combine all edge types
+        edgesToVisualize = [
+          ...(edges.mention_edges || []),
+          ...(edges.reply_edges || []),
+          ...(edges.retweet_edges || []),
+          ...(edges.quote_edges || [])
+        ];
+      }
+
+      if(edgesToVisualize.length === 0) {
+        alert('No edges of type "' + edgeType + '" found in extracted data.');
+        return;
+      }
+
+      // Build unique node set from edges
+      const nodeSet = new Set();
+      edgesToVisualize.forEach(e => {
+        nodeSet.add(e.src);
+        nodeSet.add(e.dst);
+      });
+
+      // Create graph data structure
+      const graphData = {
+        n_nodes: nodeSet.size,
+        n_edges: edgesToVisualize.length,
+        nodes: Array.from(nodeSet).map(id => {
+          // Find node info if available
+          const nodeInfo = nodes.find(n => n.id === id);
+          return {
+            id: id,
+            name: id,
+            label: id,
+            type: nodeInfo?.type || 'user'
+          };
+        }),
+        edges: edgesToVisualize.map(e => ({
+          source: e.src,
+          target: e.dst
+        })),
+        has_node_attributes: false
+      };
+
+      // Display the graph
+      displayGraph(graphData);
+
+      // Scroll to visualization
+      document.getElementById('graph-viz-panel').scrollIntoView({ behavior: 'smooth' });
+
+      // Update status
+      const statusSocial = document.getElementById('status-social');
+      setStatus(statusSocial, `Visualizing ${graphData.n_nodes} nodes, ${graphData.n_edges} edges (${edgeType})`, 'ok');
+    }
+
+    document.getElementById('visualize-mention-network').onclick = () => visualizeExtractedEdges('mentions');
+    document.getElementById('visualize-all-network').onclick = () => visualizeExtractedEdges('all');
   </script>
 </body>
 </html>
