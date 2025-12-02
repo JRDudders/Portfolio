@@ -2505,6 +2505,96 @@
       // Show preview button if file selected
       const previewBtn = document.getElementById('btn-preview-excel');
       if(previewBtn) previewBtn.style.display = file ? 'inline-block' : 'none';
+      // Hide preview section when new file selected
+      document.getElementById('excel-preview-section').style.display = 'none';
+    };
+
+    // Preview Excel file structure
+    document.getElementById('btn-preview-excel').onclick = async () => {
+      const file = batchExcelInput.files?.[0];
+      if(!file) {
+        alert('Please select an Excel file first.');
+        return;
+      }
+
+      const statusBatch = document.getElementById('status-batch-excel');
+      const previewSection = document.getElementById('excel-preview-section');
+      const previewContent = document.getElementById('preview-content');
+
+      setStatus(statusBatch, 'Loading file preview...');
+
+      try {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        const res = await fetch('/api/nlp/preview-excel', {
+          method: 'POST',
+          body: fd
+        });
+
+        if(!res.ok) {
+          const err = await res.text().catch(() => res.statusText);
+          throw new Error(err);
+        }
+
+        const data = await res.json();
+
+        // Display filename
+        document.getElementById('preview-filename').textContent = data.filename || file.name;
+
+        // Build preview HTML
+        let html = '';
+        if(data.sheets && data.sheets.length > 0) {
+          data.sheets.forEach((sheet, idx) => {
+            html += `<div style="margin-bottom:16px;padding:12px;background:#0f1117;border-radius:8px">`;
+            html += `<h4 style="margin:0 0 8px;color:var(--accent)">📋 ${sheet.sheet_name} (${sheet.row_count} rows)</h4>`;
+
+            if(sheet.detected_text_column) {
+              html += `<p style="font-size:12px;color:var(--ok);margin:0 0 8px">✓ Detected text column: <strong>${sheet.detected_text_column}</strong></p>`;
+            }
+
+            html += `<div style="font-size:12px;color:var(--muted)"><strong>Columns:</strong></div>`;
+            html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">`;
+            sheet.columns.forEach(col => {
+              const isTextCol = col.name === sheet.detected_text_column;
+              const style = isTextCol ? 'background:var(--accent);color:#000' : 'background:#21232b;color:var(--fg)';
+              html += `<span style="padding:4px 8px;border-radius:4px;font-size:11px;${style}">${col.name} (${col.type})</span>`;
+            });
+            html += `</div>`;
+
+            // Show sample data if available
+            if(sheet.sample_data && sheet.sample_data.length > 0) {
+              html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Sample rows (${sheet.sample_data.length})</summary>`;
+              html += `<div style="overflow-x:auto;margin-top:8px"><table style="font-size:11px;border-collapse:collapse;width:100%">`;
+              html += `<tr style="background:#21232b">`;
+              Object.keys(sheet.sample_data[0]).forEach(key => {
+                html += `<th style="padding:4px 8px;text-align:left;border:1px solid var(--border)">${key}</th>`;
+              });
+              html += `</tr>`;
+              sheet.sample_data.forEach(row => {
+                html += `<tr>`;
+                Object.values(row).forEach(val => {
+                  const displayVal = val ? String(val).substring(0, 50) : '';
+                  html += `<td style="padding:4px 8px;border:1px solid var(--border)">${displayVal}${val && String(val).length > 50 ? '...' : ''}</td>`;
+                });
+                html += `</tr>`;
+              });
+              html += `</table></div></details>`;
+            }
+
+            html += `</div>`;
+          });
+        } else {
+          html = '<p style="color:var(--muted)">No sheets found in file.</p>';
+        }
+
+        previewContent.innerHTML = html;
+        previewSection.style.display = 'block';
+        setStatus(statusBatch, `Preview loaded: ${data.sheets?.length || 0} sheet(s) found`, 'ok');
+
+      } catch(e) {
+        setStatus(statusBatch, 'Error loading preview: ' + (e?.message || e), 'err');
+      }
     };
 
     // Export Excel to Graph with edge extraction

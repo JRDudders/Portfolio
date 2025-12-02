@@ -362,6 +362,24 @@ async def health_check():
     }
 
 
+@app.post("/preview-excel")
+async def preview_excel(file: UploadFile = File(...)):
+    """
+    Preview Excel file structure before processing.
+
+    Returns sheet names, columns, row counts, and detected text columns.
+    """
+    try:
+        logger.info(f"Previewing Excel file: {file.filename}")
+        result = await preview_excel_structure(file)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error previewing Excel file: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================
 # NLP Endpoints
 # ============================================================
