@@ -16,6 +16,7 @@ sentence-transformers>=3.0
 pandas>=2.2
 numpy>=1.26
 scikit-learn>=1.5
+openpyxl>=3.1  # For Excel file reading (.xlsx)
 
 # NLP Libraries
 nltk>=3.8.1
