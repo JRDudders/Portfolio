@@ -69,7 +69,7 @@ app.add_middleware(
 
 # ---- File Persistence (Optional "Save for Later") ------------------------- #
 
-@app.post("/api/files/save")
+@app.post("/files/save")
 async def save_file_for_later(
     file: UploadFile = File(...),
     retention_days: int = Form(..., le=90, ge=1, description="Days to retain file (max 90)")
@@ -95,7 +95,7 @@ async def save_file_for_later(
         raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
 
 
-@app.get("/api/files/list")
+@app.get("/files/list")
 async def list_saved_files():
     """List all active (non-expired) saved files"""
     try:
@@ -110,7 +110,7 @@ async def list_saved_files():
         raise HTTPException(status_code=500, detail=f"Failed to list files: {str(e)}")
 
 
-@app.get("/api/files/{file_id}")
+@app.get("/files/{file_id}")
 async def get_saved_file(file_id: str):
     """Retrieve a saved file by ID"""
     try:
@@ -130,7 +130,7 @@ async def get_saved_file(file_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve file: {str(e)}")
 
 
-@app.get("/api/files/{file_id}/metadata")
+@app.get("/files/{file_id}/metadata")
 async def get_file_metadata(file_id: str):
     """Retrieve metadata for a saved file"""
     try:
@@ -141,7 +141,7 @@ async def get_file_metadata(file_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to get metadata: {str(e)}")
 
 
-@app.delete("/api/files/{file_id}")
+@app.delete("/files/{file_id}")
 async def delete_saved_file(file_id: str):
     """Delete a saved file before its expiry"""
     try:
@@ -153,7 +153,7 @@ async def delete_saved_file(file_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
 
 
-@app.get("/api/files/stats")
+@app.get("/files/stats")
 async def get_storage_stats():
     """Get overall storage statistics"""
     return file_store.get_stats()
