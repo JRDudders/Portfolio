@@ -75,7 +75,7 @@ services:
       - SERVICE_NAME=graph
       - SERVICE_PORT=8002
       - PYTHONUNBUFFERED=1
-      - FORCE_CPU=0  # Set to 1 to force CPU mode (NetworkX) even if cuGraph is available
+      - FORCE_CPU=1  # Force CPU mode (NetworkX) for CPU-only deployment
     networks:
       - cicerowatch
     restart: always
