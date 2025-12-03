@@ -22,6 +22,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Activate conda environment for all subsequent commands
 SHELL ["/bin/bash", "-c"]
 
+# Switch to root for system operations
+USER root
+
 WORKDIR /app
 
 # Copy certificates directory FIRST (may be empty or contain corporate certs like Zscaler)
