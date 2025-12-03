@@ -93,6 +93,39 @@
 
     <!-- NLP Tab Content -->
     <div id="tab-nlp" class="tab-content active">
+
+    <!-- Full-width NLP Results Panel (like Graph Visualization) -->
+    <div class="graph-viz-panel" id="nlp-results-panel" style="display:none">
+      <h2>Stance Detection Results</h2>
+      <div id="nlp-results-stats" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
+
+      <!-- Results Table -->
+      <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
+        <table id="nlp-results-table" style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead style="position:sticky;top:0;background:var(--bg-secondary)">
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:8px;text-align:left">Text</th>
+              <th style="padding:8px;text-align:center;width:100px">Stance</th>
+              <th style="padding:8px;text-align:right;width:80px">Confidence</th>
+              <th style="padding:8px;text-align:right;width:80px">SUPPORT</th>
+              <th style="padding:8px;text-align:right;width:80px">OPPOSE</th>
+              <th style="padding:8px;text-align:right;width:80px">NEUTRAL</th>
+            </tr>
+          </thead>
+          <tbody id="nlp-results-body"></tbody>
+        </table>
+      </div>
+
+      <div class="graph-controls" style="margin-top:12px">
+        <button class="btn" id="nlp-download-json">Download JSON</button>
+        <button class="btn" id="nlp-download-csv">Download CSV</button>
+        <button class="btn" id="nlp-close-panel">Close</button>
+        <span style="font-size:12px;color:var(--muted);margin-left:auto">
+          <span id="nlp-results-summary"></span>
+        </span>
+      </div>
+    </div>
+
     <div class="row">
       <!-- FILE UPLOAD -->
       <div class="card">
@@ -224,7 +257,8 @@
 
         <div class="controls">
           <button class="btn primary" id="run-stance">Detect Stance</button>
-          <button class="btn" id="download-stance" style="display:none">Download Results (JSON)</button>
+          <button class="btn" id="download-stance" style="display:none">Download JSON</button>
+          <button class="btn" id="download-stance-csv" style="display:none">Download CSV</button>
         </div>
         <div id="status-stance" class="status"></div>
 
@@ -956,11 +990,12 @@
         const data = await res.json();
         stanceResultsData = data;
 
-        // Render results table
-        const tbody = document.getElementById('stance-results-body');
-        tbody.innerHTML = '';
+        // Count stances for summary
+        const stanceCounts = { SUPPORT: 0, OPPOSE: 0, NEUTRAL: 0 };
+        data.results.forEach(r => stanceCounts[r.stance]++);
 
-        data.results.forEach((result, idx) => {
+        // Build rows HTML once for reuse
+        const rowsHtml = data.results.map((result, idx) => {
           const text = texts[idx];
           const stance = result.stance;
           const scores = result.scores;
@@ -972,22 +1007,39 @@
           else if(stance === 'OPPOSE') stanceColor = '#f44336';
           else if(stance === 'NEUTRAL') stanceColor = '#ff9800';
 
-          const row = document.createElement('tr');
-          row.style.borderBottom = '1px solid var(--border)';
-          row.innerHTML = `
-            <td style="padding:8px;max-width:300px;word-wrap:break-word">${escapeHtml(text)}</td>
-            <td style="padding:8px;text-align:center;font-weight:bold;color:${stanceColor}">${stance}</td>
-            <td style="padding:8px;text-align:right">${(confidence*100).toFixed(1)}%</td>
-            <td style="padding:8px;text-align:right">${(scores.SUPPORT*100).toFixed(1)}%</td>
-            <td style="padding:8px;text-align:right">${(scores.OPPOSE*100).toFixed(1)}%</td>
-            <td style="padding:8px;text-align:right">${(scores.NEUTRAL*100).toFixed(1)}%</td>
-          `;
-          tbody.appendChild(row);
-        });
+          return `
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px;max-width:400px;word-wrap:break-word">${escapeHtml(text)}</td>
+              <td style="padding:8px;text-align:center;font-weight:bold;color:${stanceColor}">${stance}</td>
+              <td style="padding:8px;text-align:right">${(confidence*100).toFixed(1)}%</td>
+              <td style="padding:8px;text-align:right">${(scores.SUPPORT*100).toFixed(1)}%</td>
+              <td style="padding:8px;text-align:right">${(scores.OPPOSE*100).toFixed(1)}%</td>
+              <td style="padding:8px;text-align:right">${(scores.NEUTRAL*100).toFixed(1)}%</td>
+            </tr>`;
+        }).join('');
 
-        // Show results and download button
+        // Populate top panel (NLP Results Panel)
+        const nlpPanel = document.getElementById('nlp-results-panel');
+        const nlpTbody = document.getElementById('nlp-results-body');
+        nlpTbody.innerHTML = rowsHtml;
+        document.getElementById('nlp-results-stats').textContent = `Claim: "${claim}" • Model: ${preset}`;
+        document.getElementById('nlp-results-summary').innerHTML =
+          `<span style="color:#4caf50">SUPPORT: ${stanceCounts.SUPPORT}</span> • ` +
+          `<span style="color:#f44336">OPPOSE: ${stanceCounts.OPPOSE}</span> • ` +
+          `<span style="color:#ff9800">NEUTRAL: ${stanceCounts.NEUTRAL}</span>`;
+        nlpPanel.style.display = 'block';
+
+        // Also populate the card table (for backwards compatibility)
+        const tbody = document.getElementById('stance-results-body');
+        tbody.innerHTML = rowsHtml;
+
+        // Show results and download buttons
         document.getElementById('stance-results').style.display = 'block';
         document.getElementById('download-stance').style.display = 'inline-block';
+        document.getElementById('download-stance-csv').style.display = 'inline-block';
+
+        // Scroll to top panel
+        nlpPanel.scrollIntoView({ behavior: 'smooth' });
 
         setStatus(statusStance, `✓ Analyzed ${texts.length} text(s)`, 'ok');
       }catch(e){
@@ -999,6 +1051,56 @@
       if(!stanceResultsData) return;
       const blob = new Blob([JSON.stringify(stanceResultsData, null, 2)], {type:'application/json'});
       downloadBlob(blob, `stance-results-${Date.now()}.json`);
+    };
+
+    document.getElementById('download-stance-csv').onclick = () => {
+      if(!stanceResultsData || !stanceResultsData.results) return;
+      // Build CSV
+      const headers = ['text', 'stance', 'confidence', 'support_score', 'oppose_score', 'neutral_score'];
+      const rows = stanceResultsData.results.map(r => {
+        const scores = r.scores || {};
+        return [
+          `"${(r.text || '').replace(/"/g, '""')}"`,
+          r.stance || '',
+          (scores[r.stance] || 0).toFixed(4),
+          (scores.SUPPORT || 0).toFixed(4),
+          (scores.OPPOSE || 0).toFixed(4),
+          (scores.NEUTRAL || 0).toFixed(4)
+        ].join(',');
+      });
+      const csv = [headers.join(','), ...rows].join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      downloadBlob(blob, `stance-results-${Date.now()}.csv`);
+    };
+
+    // NLP Panel download buttons (reuse same data)
+    document.getElementById('nlp-download-json').onclick = () => {
+      if(!stanceResultsData) return;
+      const blob = new Blob([JSON.stringify(stanceResultsData, null, 2)], {type:'application/json'});
+      downloadBlob(blob, `stance-results-${Date.now()}.json`);
+    };
+
+    document.getElementById('nlp-download-csv').onclick = () => {
+      if(!stanceResultsData || !stanceResultsData.results) return;
+      const headers = ['text', 'stance', 'confidence', 'support_score', 'oppose_score', 'neutral_score'];
+      const rows = stanceResultsData.results.map(r => {
+        const scores = r.scores || {};
+        return [
+          `"${(r.text || '').replace(/"/g, '""')}"`,
+          r.stance || '',
+          (scores[r.stance] || 0).toFixed(4),
+          (scores.SUPPORT || 0).toFixed(4),
+          (scores.OPPOSE || 0).toFixed(4),
+          (scores.NEUTRAL || 0).toFixed(4)
+        ].join(',');
+      });
+      const csv = [headers.join(','), ...rows].join('\n');
+      const blob = new Blob([csv], {type:'text/csv'});
+      downloadBlob(blob, `stance-results-${Date.now()}.csv`);
+    };
+
+    document.getElementById('nlp-close-panel').onclick = () => {
+      document.getElementById('nlp-results-panel').style.display = 'none';
     };
 
     // --- Wire up Graph Analytics ---
