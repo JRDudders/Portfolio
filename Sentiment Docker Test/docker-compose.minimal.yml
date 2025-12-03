@@ -1,0 +1,129 @@
+version: '3.8'
+
+# MINIMAL/PROFILE-BASED BUILD
+# Use profiles to start specific services:
+#   docker compose --profile core up -d    # Frontend + NLP + Graph
+#   docker compose --profile nlp up -d     # NLP only
+#   docker compose --profile full up -d    # All services
+
+services:
+  # ============================================================
+  # Frontend - Serves UI and acts as reverse proxy
+  # ============================================================
+  frontend:
+    profiles: ["full", "core", "frontend"]
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8080:80"
+    networks:
+      - cicerowatch
+    volumes:
+      # Mount index.html for live editing (no rebuild needed)
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+
+  # ============================================================
+  # NLP Service - Sentiment, Entities, Topics, etc.
+  # ============================================================
+  nlp:
+    profiles: ["full", "core", "nlp"]
+    build:
+      context: .
+      dockerfile: Dockerfile.nlp
+    ports:
+      - "8001:8001"
+    environment:
+      - SERVICE_NAME=nlp
+      - SERVICE_PORT=8001
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HUB_DISABLE_SSL_VERIFY=1
+      - REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+      - NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+      # Mount source code for live editing (no rebuild needed)
+      - ./url_fetch.py:/app/url_fetch.py
+      - ./service_nlp.py:/app/service_nlp.py
+      - ./nlp_processor.py:/app/nlp_processor.py
+      - ./nlp.py:/app/nlp.py
+      - ./fetch.py:/app/fetch.py
+      - ./render.py:/app/render.py
+      - ./topics.py:/app/topics.py
+      - ./adapters.py:/app/adapters.py
+      - ./apputils.py:/app/apputils.py
+      - ./excel_utils.py:/app/excel_utils.py
+      - ./file_store.py:/app/file_store.py
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # ============================================================
+  # Graph Analytics Service - Similarity, Clustering, Networks
+  # ============================================================
+  graph:
+    profiles: ["full", "core", "graph"]
+    build:
+      context: .
+      dockerfile: Dockerfile.graph
+    ports:
+      - "8002:8002"
+    environment:
+      - SERVICE_NAME=graph
+      - SERVICE_PORT=8002
+      - FORCE_CPU=1
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+      # Mount source code for live editing (no rebuild needed)
+      - ./url_fetch.py:/app/url_fetch.py
+      - ./service_graph.py:/app/service_graph.py
+      - ./graph_processor.py:/app/graph_processor.py
+      - ./graph_tasks.py:/app/graph_tasks.py
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # ============================================================
+  # Audio Service - Deepfake Detection (Python 3.10 + fairseq)
+  # ============================================================
+  audio:
+    profiles: ["full", "audio"]
+    build:
+      context: .
+      dockerfile: Dockerfile.audio
+    ports:
+      - "8003:8003"
+    environment:
+      - SERVICE_NAME=audio
+      - SERVICE_PORT=8003
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-}
+    networks:
+      - cicerowatch
+    volumes:
+      - ./temp:/app/temp
+      - ./models:/app/models
+      # Mount source code for live editing (no rebuild needed)
+      - ./url_fetch.py:/app/url_fetch.py
+      - ./audio_service.py:/app/audio_service.py
+      - ./audio_antispoofing.py:/app/audio_antispoofing.py
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+
+networks:
+  cicerowatch:
+    driver: bridge
+
+volumes:
+  models:
+    driver: local
+  temp:
+    driver: local
