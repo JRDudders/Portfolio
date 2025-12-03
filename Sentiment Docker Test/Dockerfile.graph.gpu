@@ -6,7 +6,9 @@ FROM rapidsai/base:24.08a-cuda12.5-py3.11
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    CUDA_VISIBLE_DEVICES=0
+    CUDA_VISIBLE_DEVICES=0 \
+    PIP_DEFAULT_TIMEOUT=200 \
+    PIP_RETRIES=5
 
 # Activate conda environment for all subsequent commands
 SHELL ["/bin/bash", "-c"]

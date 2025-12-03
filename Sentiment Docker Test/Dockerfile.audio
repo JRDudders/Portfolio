@@ -1,6 +1,10 @@
 # Audio Deepfake Detection Service - Python 3.10 + fairseq
 FROM python:3.10-slim
 
+# Increase pip timeout for slow networks
+ENV PIP_DEFAULT_TIMEOUT=200
+ENV PIP_RETRIES=5
+
 WORKDIR /app
 
 # Install system dependencies for audio processing
