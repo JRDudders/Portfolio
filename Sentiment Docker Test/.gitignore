@@ -60,8 +60,13 @@ logs/
 .coverage
 htmlcov/
 
-# Docker
-.dockerignore
+# Docker (keep .dockerignore for build context control)
+!.dockerignore
 
 # Playwright browsers
 /ms-playwright/
+
+# Corporate certificates (keep directory, ignore actual certs)
+certs/*.crt
+certs/*.pem
+!certs/.gitkeep
