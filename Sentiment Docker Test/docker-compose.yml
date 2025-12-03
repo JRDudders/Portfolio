@@ -46,6 +46,8 @@ services:
       - ./topics.py:/app/topics.py
       - ./adapters.py:/app/adapters.py
       - ./apputils.py:/app/apputils.py
+      - ./excel_utils.py:/app/excel_utils.py
+      - ./file_store.py:/app/file_store.py
     deploy:
       resources:
         limits:

@@ -3,7 +3,9 @@ FROM nvidia/cuda:12.2.0-runtime-ubuntu22.04
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    PIP_DEFAULT_TIMEOUT=200 \
+    PIP_RETRIES=5
 
 WORKDIR /app
 
@@ -72,6 +74,8 @@ COPY adapters.py .
 COPY fetch.py .
 COPY render.py .
 COPY apputils.py .
+COPY excel_utils.py .
+COPY file_store.py .
 
 # Create temp directory
 RUN mkdir -p /app/temp
