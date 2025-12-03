@@ -2240,6 +2240,303 @@
         setStatus(statusFileUrl, 'Error: '+(e?.message||e), 'err');
       }
     });
+
+    // --- Batch Excel Processing ---
+    const batchExcelBtn = document.getElementById('btn-batch-excel');
+    const batchExcelInput = document.getElementById('batch-excel-input');
+    const batchExcelName = document.getElementById('batch-excel-name');
+    const exportExcelToGraphBtn = document.getElementById('export-excel-to-graph');
+
+    batchExcelBtn.onclick = () => batchExcelInput.click();
+    batchExcelInput.onchange = () => {
+      const file = batchExcelInput.files?.[0];
+      batchExcelName.textContent = file ? file.name : 'No file selected';
+      // Show/hide export to graph button based on file selection
+      exportExcelToGraphBtn.style.display = file ? 'inline-block' : 'none';
+      // Show preview button if file selected
+      const previewBtn = document.getElementById('btn-preview-excel');
+      if(previewBtn) previewBtn.style.display = file ? 'inline-block' : 'none';
+      // Hide preview section when new file selected
+      document.getElementById('excel-preview-section').style.display = 'none';
+    };
+
+    // Preview Excel file structure
+    document.getElementById('btn-preview-excel').onclick = async () => {
+      const file = batchExcelInput.files?.[0];
+      if(!file) {
+        alert('Please select an Excel file first.');
+        return;
+      }
+
+      const statusBatch = document.getElementById('status-batch-excel');
+      const previewSection = document.getElementById('excel-preview-section');
+      const previewContent = document.getElementById('preview-content');
+
+      setStatus(statusBatch, 'Loading file preview...');
+
+      try {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        const res = await fetch('/api/nlp/preview-excel', {
+          method: 'POST',
+          body: fd
+        });
+
+        if(!res.ok) {
+          const err = await res.text().catch(() => res.statusText);
+          throw new Error(err);
+        }
+
+        const data = await res.json();
+
+        // Display filename
+        document.getElementById('preview-filename').textContent = data.filename || file.name;
+
+        // Build preview HTML
+        let html = '';
+        if(data.sheets && data.sheets.length > 0) {
+          data.sheets.forEach((sheet, idx) => {
+            html += `<div style="margin-bottom:16px;padding:12px;background:#0f1117;border-radius:8px">`;
+            html += `<h4 style="margin:0 0 8px;color:var(--accent)">📋 ${sheet.sheet_name} (${sheet.row_count} rows)</h4>`;
+
+            if(sheet.detected_text_column) {
+              html += `<p style="font-size:12px;color:var(--ok);margin:0 0 8px">✓ Detected text column: <strong>${sheet.detected_text_column}</strong></p>`;
+            }
+
+            html += `<div style="font-size:12px;color:var(--muted)"><strong>Columns:</strong></div>`;
+            html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">`;
+            sheet.columns.forEach(col => {
+              const isTextCol = col.name === sheet.detected_text_column;
+              const style = isTextCol ? 'background:var(--accent);color:#000' : 'background:#21232b;color:var(--fg)';
+              html += `<span style="padding:4px 8px;border-radius:4px;font-size:11px;${style}">${col.name} (${col.type})</span>`;
+            });
+            html += `</div>`;
+
+            // Show sample data if available
+            if(sheet.sample_data && sheet.sample_data.length > 0) {
+              html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Sample rows (${sheet.sample_data.length})</summary>`;
+              html += `<div style="overflow-x:auto;margin-top:8px"><table style="font-size:11px;border-collapse:collapse;width:100%">`;
+              html += `<tr style="background:#21232b">`;
+              Object.keys(sheet.sample_data[0]).forEach(key => {
+                html += `<th style="padding:4px 8px;text-align:left;border:1px solid var(--border)">${key}</th>`;
+              });
+              html += `</tr>`;
+              sheet.sample_data.forEach(row => {
+                html += `<tr>`;
+                Object.values(row).forEach(val => {
+                  const displayVal = val ? String(val).substring(0, 50) : '';
+                  html += `<td style="padding:4px 8px;border:1px solid var(--border)">${displayVal}${val && String(val).length > 50 ? '...' : ''}</td>`;
+                });
+                html += `</tr>`;
+              });
+              html += `</table></div></details>`;
+            }
+
+            html += `</div>`;
+          });
+        } else {
+          html = '<p style="color:var(--muted)">No sheets found in file.</p>';
+        }
+
+        previewContent.innerHTML = html;
+        previewSection.style.display = 'block';
+        setStatus(statusBatch, `Preview loaded: ${data.sheets?.length || 0} sheet(s) found`, 'ok');
+
+      } catch(e) {
+        setStatus(statusBatch, 'Error loading preview: ' + (e?.message || e), 'err');
+      }
+    };
+
+    // Export Excel to Graph with edge extraction
+    exportExcelToGraphBtn.onclick = async () => {
+      const file = batchExcelInput.files?.[0];
+      if(!file) {
+        alert('Please select an Excel file first.');
+        return;
+      }
+
+      const statusBatch = document.getElementById('status-batch-excel');
+      setStatus(statusBatch, 'Extracting network edges from Excel...');
+      exportExcelToGraphBtn.disabled = true;
+
+      try {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        // Send to graph prepare endpoint (social media edge extraction)
+        const res = await fetch('/api/graph/prepare?extract_hashtags=true', {
+          method: 'POST',
+          body: fd
+        });
+
+        if(!res.ok) {
+          const err = await res.text().catch(() => res.statusText);
+          throw new Error(err);
+        }
+
+        const response = await res.json();
+
+        // Store extracted edges globally
+        extractedEdges = response;
+        socialMediaData = response.original_data || null;
+        socialMediaAuthorColumn = response.author_column || null;
+
+        // Switch to Graph tab
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.querySelector('[data-tab="graph"]').classList.add('active');
+        document.getElementById('tab-graph').classList.add('active');
+
+        // Show results in social media results section
+        document.getElementById('social-results').style.display = 'block';
+
+        const stats = response.stats;
+        const statsDiv = document.getElementById('social-stats');
+        statsDiv.innerHTML = `
+          <strong>Extracted from: ${file.name}</strong><br>
+          <strong>Network Edges:</strong><br>
+          • Mentions: ${stats.mention_count}<br>
+          • Replies: ${stats.reply_count}<br>
+          • Retweets: ${stats.retweet_count}<br>
+          • Quotes: ${stats.quote_count}<br>
+          • Domains: ${stats.domain_count}<br>
+          • Hashtags: ${stats.hashtag_count}<br>
+          • Total Nodes: ${stats.node_count}
+        `;
+
+        // Update social file name display
+        document.getElementById('social-file-name').textContent = file.name + ' (imported from NLP tab)';
+
+        // Also update status in graph tab
+        const statusSocial = document.getElementById('status-social');
+        const totalEdges = stats.mention_count + stats.reply_count + stats.retweet_count +
+                          stats.quote_count + stats.domain_count + stats.hashtag_count;
+        setStatus(statusSocial, `Extracted ${stats.node_count} nodes and ${totalEdges} edges from Excel`, 'ok');
+
+        // Update NLP tab status
+        setStatus(statusBatch, `Network extracted! Switched to Graph tab. ${stats.node_count} nodes, ${totalEdges} edges found.`, 'ok');
+
+        // Scroll to results
+        document.getElementById('social-results').scrollIntoView({ behavior: 'smooth' });
+
+      } catch(e) {
+        setStatus(statusBatch, 'Error extracting network: ' + (e?.message || e), 'err');
+      } finally {
+        exportExcelToGraphBtn.disabled = false;
+      }
+    };
+
+    // --- Visualize extracted network edges ---
+    async function visualizeExtractedEdges(edgeType) {
+      if(!extractedEdges || !extractedEdges.edges) {
+        alert('No extracted edges available. Please extract network edges first.');
+        return;
+      }
+
+      const edges = extractedEdges.edges;
+      const nodes = edges.nodes || [];
+      const statusSocial = document.getElementById('status-social');
+
+      // Build combined edges based on type
+      let edgesToVisualize = [];
+      if(edgeType === 'mentions') {
+        edgesToVisualize = edges.mention_edges || [];
+      } else if(edgeType === 'all') {
+        // Combine all edge types
+        edgesToVisualize = [
+          ...(edges.mention_edges || []),
+          ...(edges.reply_edges || []),
+          ...(edges.retweet_edges || []),
+          ...(edges.quote_edges || [])
+        ];
+      }
+
+      if(edgesToVisualize.length === 0) {
+        alert('No edges of type "' + edgeType + '" found in extracted data.');
+        return;
+      }
+
+      setStatus(statusSocial, 'Computing centrality measures...', 'ok');
+
+      // Convert edges to CSV format for backend processing
+      const csvLines = ['src,dst'];
+      edgesToVisualize.forEach(e => {
+        csvLines.push(`${e.src},${e.dst}`);
+      });
+      const csvContent = csvLines.join('\n');
+
+      // Create a blob and send to /api/graph/load to compute centrality
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const fd = new FormData();
+      fd.append('edges_file', blob, 'edges.csv');
+
+      try {
+        const res = await fetch('/api/graph/load?compute_centrality=true', { method: 'POST', body: fd });
+        if(!res.ok) {
+          const err = await res.text();
+          throw new Error(err);
+        }
+
+        const data = await res.json();
+
+        // Merge node type info from extracted nodes
+        if(data.nodes) {
+          data.nodes.forEach(node => {
+            const nodeInfo = nodes.find(n => n.id === node.id);
+            if(nodeInfo) {
+              node.type = nodeInfo.type || 'user';
+            }
+          });
+        }
+
+        // Display the graph with centrality data
+        displayGraph(data);
+
+        // Scroll to visualization
+        document.getElementById('graph-viz-panel').scrollIntoView({ behavior: 'smooth' });
+
+        setStatus(statusSocial, `Visualizing ${data.n_nodes} nodes, ${data.n_edges} edges (${edgeType}) with centrality`, 'ok');
+      } catch(e) {
+        // Fallback: display without centrality if backend fails
+        console.warn('Centrality computation failed, displaying without centrality:', e);
+
+        // Build unique node set from edges
+        const nodeSet = new Set();
+        edgesToVisualize.forEach(e => {
+          nodeSet.add(e.src);
+          nodeSet.add(e.dst);
+        });
+
+        // Create graph data structure without centrality
+        const graphData = {
+          n_nodes: nodeSet.size,
+          n_edges: edgesToVisualize.length,
+          nodes: Array.from(nodeSet).map(id => {
+            const nodeInfo = nodes.find(n => n.id === id);
+            return {
+              id: id,
+              name: id,
+              label: id,
+              type: nodeInfo?.type || 'user'
+            };
+          }),
+          edges: edgesToVisualize.map(e => ({
+            source: e.src,
+            target: e.dst
+          })),
+          has_node_attributes: false,
+          centrality: {}
+        };
+
+        displayGraph(graphData);
+        document.getElementById('graph-viz-panel').scrollIntoView({ behavior: 'smooth' });
+        setStatus(statusSocial, `Visualizing ${graphData.n_nodes} nodes, ${graphData.n_edges} edges (${edgeType}) - centrality unavailable`, 'warn');
+      }
+    }
+
+    document.getElementById('visualize-mention-network').onclick = () => visualizeExtractedEdges('mentions');
+    document.getElementById('visualize-all-network').onclick = () => visualizeExtractedEdges('all');
   </script>
 </body>
 </html>
