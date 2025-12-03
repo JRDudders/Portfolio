@@ -1,6 +1,20 @@
 # Frontend - Nginx serving static files with reverse proxy
 FROM nginx:alpine
 
+# Copy certificates directory FIRST (may be empty or contain corporate certs like Zscaler)
+COPY certs/ /tmp/certs/
+
+# Install corporate certificates BEFORE any other operations
+RUN apk add --no-cache ca-certificates && \
+    if ls /tmp/certs/*.crt 1> /dev/null 2>&1; then \
+        cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ && \
+        update-ca-certificates && \
+        echo "✓ Corporate certificates installed"; \
+    else \
+        echo "ℹ No corporate certificates found (optional)"; \
+    fi && \
+    rm -rf /tmp/certs
+
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/nginx.conf
 

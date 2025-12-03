@@ -8,22 +8,43 @@ FROM rapidsai/base:24.08a-cuda12.5-py3.11
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
+    PIP_DEFAULT_TIMEOUT=200 \
+    PIP_RETRIES=5 \
     HF_HOME=/root/.cache/huggingface \
     TRANSFORMERS_NO_ADVISORY_WARNINGS=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    CUDA_VISIBLE_DEVICES=0
+    CUDA_VISIBLE_DEVICES=0 \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
+    NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
 
 # Activate conda environment for all subsequent commands
 SHELL ["/bin/bash", "-c"]
 
+WORKDIR /app
+
+# Copy certificates directory FIRST (may be empty or contain corporate certs like Zscaler)
+COPY certs/ /tmp/certs/
+
+# Install corporate certificates BEFORE any other apt-get operations or downloads
+RUN apt-get update && apt-get install -y ca-certificates apt-transport-https && \
+    if ls /tmp/certs/*.crt 1> /dev/null 2>&1; then \
+        cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ && \
+        update-ca-certificates && \
+        echo "✓ Corporate certificates installed"; \
+    else \
+        echo "ℹ No corporate certificates found (optional - only needed for Zscaler/corporate firewalls)"; \
+    fi && \
+    rm -rf /tmp/certs && \
+    rm -rf /var/lib/apt/lists/*
+
 # System deps (curl for healthcheck; playwright will bring its own libs in install step)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-      curl ca-certificates git \
+      curl git \
       build-essential \
     && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
 
 # --- Python deps ---
 # RAPIDS base already has cudf and cugraph installed in the base conda environment
