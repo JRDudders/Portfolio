@@ -8,12 +8,30 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     CUDA_VISIBLE_DEVICES=0 \
     PIP_DEFAULT_TIMEOUT=200 \
-    PIP_RETRIES=5
+    PIP_RETRIES=5 \
+    REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
+    SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
 # Activate conda environment for all subsequent commands
 SHELL ["/bin/bash", "-c"]
 
 WORKDIR /app
+
+# Copy certificates directory (may be empty or contain corporate certs like Zscaler)
+COPY certs/ /tmp/certs/
+
+# Install corporate certificates BEFORE any other apt-get operations
+RUN apt-get update && apt-get install -y ca-certificates apt-transport-https && \
+    if ls /tmp/certs/*.crt 1> /dev/null 2>&1; then \
+        cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ && \
+        update-ca-certificates && \
+        echo "✓ Corporate certificates installed"; \
+    else \
+        echo "ℹ No corporate certificates found (optional - only needed for Zscaler/corporate firewalls)"; \
+    fi && \
+    rm -rf /tmp/certs && \
+    rm -rf /var/lib/apt/lists/*
 
 # RAPIDS base already has cudf and cugraph installed in the base conda environment
 # Install additional dependencies into the base environment

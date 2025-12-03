@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.pytest_cache
+.coverage
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDEs
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Docker (don't include compose files in build context)
+.dockerignore
+docker-compose*.yml
+
+# Local development
+.env
+.env.local
+temp/
+*.log
+
+# Keep certificate directory for corporate networks (Zscaler, etc.)
+!certs/
+!certs/*
