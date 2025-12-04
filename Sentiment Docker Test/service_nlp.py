@@ -793,6 +793,7 @@ async def batch_excel(
     sheets: Optional[str] = Query(None, description="Comma-separated sheet names to process"),
     extract_sentiment: bool = Query(True, description="Extract sentiment"),
     extract_themes: bool = Query(True, description="Extract themes"),
+    top_themes: int = Query(3, description="Number of top themes to return"),
 ):
     """
     Batch process Excel file with sentiment AND theme extraction.
@@ -869,27 +870,38 @@ async def batch_excel(
 
         # Run theme/topic extraction if requested
         if extract_themes:
-            logger.info(f"Running theme extraction with preset: {theme_preset}")
+            logger.info(f"Running theme extraction with preset: {theme_preset}, top_themes={top_themes}")
             # Parse labels for zero-shot
             lbls = _parse_labels_csv(labels) if labels else DEFAULT_ZS_LABELS
             theme_preds = run_task(texts, preset=theme_preset, labels=lbls)
 
             for i, pred in enumerate(theme_preds):
                 if isinstance(pred, dict):
-                    if 'label' in pred:
+                    if 'labels' in pred and 'scores' in pred:
+                        # Zero-shot format: {'labels': [...], 'scores': [...]}
+                        # Get top N themes sorted by score
+                        paired = list(zip(pred['labels'], pred['scores']))
+                        paired.sort(key=lambda x: x[1], reverse=True)
+                        top_n = paired[:top_themes]
+                        results[i]['Themes'] = ', '.join([p[0] for p in top_n])
+                        results[i]['Themes_Confidence'] = ', '.join([str(round(p[1], 4)) for p in top_n])
+                    elif 'label' in pred:
+                        # Single label format
                         results[i]['Themes'] = pred['label']
                         results[i]['Themes_Confidence'] = _extract_confidence(pred.get('score', pred.get('confidence', 0)))
-                    elif 'labels' in pred and 'scores' in pred:
-                        # Zero-shot format: {'labels': [...], 'scores': [...]}
-                        top_idx = pred['scores'].index(max(pred['scores']))
-                        results[i]['Themes'] = pred['labels'][top_idx]
-                        results[i]['Themes_Confidence'] = round(pred['scores'][top_idx], 4)
                     else:
                         # Format: {'politics': 0.8, 'economy': 0.1, ...} or nested
-                        label, conf = _get_top_from_dict(pred)
-                        if label:
-                            results[i]['Themes'] = label
-                            results[i]['Themes_Confidence'] = conf
+                        scored_items = []
+                        for k, v in pred.items():
+                            if k in ('label', 'score', 'confidence', 'labels', 'scores'):
+                                continue
+                            conf = _extract_confidence(v)
+                            scored_items.append((k, conf))
+                        if scored_items:
+                            scored_items.sort(key=lambda x: x[1], reverse=True)
+                            top_n = scored_items[:top_themes]
+                            results[i]['Themes'] = ', '.join([p[0] for p in top_n])
+                            results[i]['Themes_Confidence'] = ', '.join([str(p[1]) for p in top_n])
 
         logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes}")
 
