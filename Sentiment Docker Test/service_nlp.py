@@ -223,6 +223,40 @@ def _texts_from_csv_bytes(b: bytes) -> List[str]:
     return vals
 
 
+def _texts_from_excel_bytes(b: bytes, sheet_name: Optional[str] = None, text_column: Optional[str] = None) -> List[str]:
+    """Extract texts from Excel bytes"""
+    from excel_utils import detect_text_column
+
+    excel_file = pd.ExcelFile(io.BytesIO(b))
+
+    # Select sheet
+    if sheet_name:
+        if sheet_name not in excel_file.sheet_names:
+            raise ValueError(f"Sheet '{sheet_name}' not found. Available sheets: {', '.join(excel_file.sheet_names)}")
+        df = pd.read_excel(excel_file, sheet_name=sheet_name)
+    else:
+        # Use first sheet
+        df = pd.read_excel(excel_file, sheet_name=0)
+
+    # Detect or validate text column
+    if text_column:
+        if text_column not in df.columns:
+            raise ValueError(f"Column '{text_column}' not found. Available columns: {', '.join(df.columns)}")
+        col = text_column
+    else:
+        col = detect_text_column(df)
+        logger.info(f"Auto-detected text column: {col}")
+
+    # Extract texts
+    texts = df[col].dropna().astype(str).tolist()
+
+    if not texts:
+        raise ValueError(f"No text data found in column '{col}'")
+
+    logger.info(f"Extracted {len(texts)} texts from Excel column '{col}'")
+    return texts
+
+
 def _make_download(name: str, payload: bytes, mime: str = "application/json") -> StreamingResponse:
     """Create downloadable file response"""
     resp = StreamingResponse(io.BytesIO(payload), media_type=mime)
@@ -478,6 +512,7 @@ async def analyze_file(
     Supports:
     - JSON: list of strings or objects with 'text' field
     - CSV: file with 'text' column or first string column
+    - Excel (.xlsx, .xlsm, .xls): auto-detects text column
     - HTML/HTM: extracts text content from HTML file
       * For topic modeling: automatically chunks into paragraphs/sections (great for books!)
       * For other tasks: treats as single document
@@ -498,6 +533,9 @@ async def analyze_file(
             texts = _texts_from_json_bytes(b)
         elif name.endswith(".csv"):
             texts = _texts_from_csv_bytes(b)
+        elif name.endswith((".xlsx", ".xlsm", ".xls")):
+            # Excel file - extract text from auto-detected column
+            texts = _texts_from_excel_bytes(b)
         elif name.endswith((".html", ".htm")):
             # Extract text from HTML
             html = b.decode("utf-8", errors="ignore")
@@ -514,7 +552,7 @@ async def analyze_file(
                 text = _extract_text_from_html(html)
                 texts = [text]
         else:
-            # Try JSON first, then CSV
+            # Try JSON first, then CSV (but not Excel since it's binary)
             try:
                 texts = _texts_from_json_bytes(b)
             except Exception:
