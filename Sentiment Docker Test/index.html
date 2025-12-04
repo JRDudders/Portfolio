@@ -2866,16 +2866,18 @@
         const fd = new FormData();
         fd.append('file', file, file.name);
 
-        // Build query params
+        // Build query params for batch-excel endpoint (runs BOTH sentiment and theme analysis)
         const params = new URLSearchParams();
-        if(extractSentiment) params.append('preset', sentimentPreset);
-        else if(extractThemes) params.append('preset', themePreset);
+        params.append('sentiment_preset', sentimentPreset);
+        params.append('theme_preset', themePreset);
+        params.append('extract_sentiment', extractSentiment);
+        params.append('extract_themes', extractThemes);
 
         if(themeLabels) params.append('labels', themeLabels);
         if(textColumn) params.append('text_column', textColumn);
         if(sheets) params.append('sheets', sheets);
 
-        const res = await fetch(`/api/nlp/analyze/file?${params.toString()}`, {
+        const res = await fetch(`/api/nlp/batch-excel?${params.toString()}`, {
           method: 'POST',
           body: fd
         });

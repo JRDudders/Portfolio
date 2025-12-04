@@ -783,6 +783,106 @@ async def analyze_file(
         raise HTTPException(status_code=400, detail=f"File processing failed: {str(e)}")
 
 
+@app.post("/batch-excel")
+async def batch_excel(
+    file: UploadFile = File(...),
+    sentiment_preset: Optional[str] = Query("sentiment-twitter", description="Sentiment preset"),
+    theme_preset: Optional[str] = Query("zeroshot-bart", description="Theme/zero-shot preset"),
+    labels: Optional[str] = Query(None, description="Comma-separated theme labels"),
+    text_column: Optional[str] = Query(None, description="Column name containing text"),
+    sheets: Optional[str] = Query(None, description="Comma-separated sheet names to process"),
+    extract_sentiment: bool = Query(True, description="Extract sentiment"),
+    extract_themes: bool = Query(True, description="Extract themes"),
+):
+    """
+    Batch process Excel file with sentiment AND theme extraction.
+
+    Returns Excel file with 4 new columns:
+    - Sentiment (POSITIVE/NEGATIVE/NEUTRAL)
+    - Sentiment_Confidence (0-1 score)
+    - Theme (top predicted theme)
+    - Theme_Confidence (0-1 score)
+    """
+    logger.info(f"Batch Excel processing: {file.filename}, sentiment={extract_sentiment}, themes={extract_themes}")
+
+    try:
+        b = await file.read()
+        original_filename = file.filename or "input.xlsx"
+        name = original_filename.lower()
+
+        if not name.endswith((".xlsx", ".xlsm", ".xls")):
+            raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx, .xlsm, .xls)")
+
+        # Extract texts from Excel
+        texts = _texts_from_excel_bytes(b, sheet_names=sheets, text_column=text_column)
+        logger.info(f"Extracted {len(texts)} texts from Excel")
+
+        # Prepare results list - one dict per text row
+        results = [{} for _ in texts]
+
+        # Run sentiment analysis if requested
+        if extract_sentiment:
+            logger.info(f"Running sentiment analysis with preset: {sentiment_preset}")
+            sentiment_preds = run_task(texts, preset=sentiment_preset)
+
+            for i, pred in enumerate(sentiment_preds):
+                if isinstance(pred, dict):
+                    # Find the label with highest score
+                    if 'label' in pred:
+                        results[i]['Sentiment'] = pred['label']
+                        results[i]['Sentiment_Confidence'] = pred.get('score', pred.get('confidence', 0))
+                    else:
+                        # Format: {'POSITIVE': 0.9, 'NEGATIVE': 0.1}
+                        top_label = max(pred.items(), key=lambda x: x[1])
+                        results[i]['Sentiment'] = top_label[0]
+                        results[i]['Sentiment_Confidence'] = round(top_label[1], 4)
+
+        # Run theme/topic extraction if requested
+        if extract_themes:
+            logger.info(f"Running theme extraction with preset: {theme_preset}")
+            # Parse labels for zero-shot
+            lbls = _parse_labels_csv(labels) if labels else DEFAULT_ZS_LABELS
+            theme_preds = run_task(texts, preset=theme_preset, labels=lbls)
+
+            for i, pred in enumerate(theme_preds):
+                if isinstance(pred, dict):
+                    if 'label' in pred:
+                        results[i]['Theme'] = pred['label']
+                        results[i]['Theme_Confidence'] = round(pred.get('score', pred.get('confidence', 0)), 4)
+                    elif 'labels' in pred and 'scores' in pred:
+                        # Zero-shot format: {'labels': [...], 'scores': [...]}
+                        top_idx = pred['scores'].index(max(pred['scores']))
+                        results[i]['Theme'] = pred['labels'][top_idx]
+                        results[i]['Theme_Confidence'] = round(pred['scores'][top_idx], 4)
+                    else:
+                        # Format: {'politics': 0.8, 'economy': 0.1, ...}
+                        top_label = max(pred.items(), key=lambda x: x[1])
+                        results[i]['Theme'] = top_label[0]
+                        results[i]['Theme_Confidence'] = round(top_label[1], 4)
+
+        logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes}")
+
+        # Create annotated Excel
+        excel_bytes = _process_excel_with_predictions(
+            b,
+            results,
+            sheet_names=sheets,
+            text_column=text_column,
+            preset=f"sentiment+themes"
+        )
+
+        output_filename = original_filename.rsplit('.', 1)[0] + '_analyzed.xlsx'
+        return _make_download(
+            output_filename,
+            excel_bytes,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    except Exception as e:
+        logger.error(f"Batch Excel processing failed: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Batch Excel processing failed: {str(e)}")
+
+
 class FileURLRequest(BaseModel):
     """Request model for analyzing file from URL"""
     url: HttpUrl
