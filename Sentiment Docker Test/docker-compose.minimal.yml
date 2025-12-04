@@ -60,7 +60,12 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 8G
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ============================================================
   # Graph Analytics Service - Similarity, Clustering, Networks
