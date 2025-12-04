@@ -309,6 +309,92 @@ def _texts_from_excel_bytes(b: bytes, sheet_names: Optional[str] = None, text_co
     return all_texts
 
 
+def _process_excel_with_predictions(
+    b: bytes,
+    predictions: List[Dict],
+    sheet_names: Optional[str] = None,
+    text_column: Optional[str] = None,
+    preset: Optional[str] = None
+) -> bytes:
+    """Process Excel file and add prediction columns, returning annotated Excel bytes
+
+    Args:
+        b: Original Excel file bytes
+        predictions: List of prediction dicts from run_task
+        sheet_names: Comma-separated sheet names that were processed
+        text_column: Column name containing text
+        preset: Preset used for analysis (for column naming)
+
+    Returns:
+        Annotated Excel file bytes with prediction columns added
+    """
+    from excel_utils import detect_text_column
+
+    excel_file = pd.ExcelFile(io.BytesIO(b))
+
+    # Determine which sheets to process
+    if sheet_names:
+        requested_sheets = [s.strip() for s in sheet_names.split(',') if s.strip()]
+        sheets_to_process = [s for s in requested_sheets if s in excel_file.sheet_names]
+    else:
+        sheets_to_process = list(excel_file.sheet_names)
+
+    # Track prediction index across sheets
+    pred_idx = 0
+    output_sheets = {}
+
+    for sheet in excel_file.sheet_names:
+        df = pd.read_excel(excel_file, sheet_name=sheet)
+
+        if sheet in sheets_to_process and not df.empty:
+            # Detect text column for this sheet
+            if text_column and text_column in df.columns:
+                col = text_column
+            else:
+                try:
+                    col = detect_text_column(df)
+                except ValueError:
+                    # No text column found, keep original
+                    output_sheets[sheet] = df
+                    continue
+
+            # Get indices of non-null text rows
+            valid_mask = df[col].notna()
+            valid_indices = df.index[valid_mask].tolist()
+
+            # Add prediction columns for valid rows
+            num_valid = len(valid_indices)
+            sheet_predictions = predictions[pred_idx:pred_idx + num_valid]
+            pred_idx += num_valid
+
+            # Determine what columns to add based on predictions
+            if sheet_predictions:
+                sample_pred = sheet_predictions[0]
+
+                # Initialize new columns with None
+                for key in sample_pred.keys():
+                    if key not in df.columns:
+                        df[key] = None
+
+                # Fill in predictions for valid rows
+                for i, idx in enumerate(valid_indices):
+                    if i < len(sheet_predictions):
+                        pred = sheet_predictions[i]
+                        for key, value in pred.items():
+                            df.at[idx, key] = value
+
+        output_sheets[sheet] = df
+
+    # Write to Excel bytes
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        for sheet_name, df in output_sheets.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    output.seek(0)
+    return output.read()
+
+
 def _make_download(name: str, payload: bytes, mime: str = "application/json") -> StreamingResponse:
     """Create downloadable file response"""
     resp = StreamingResponse(io.BytesIO(payload), media_type=mime)
@@ -583,12 +669,14 @@ async def analyze_file(
         task = PRESETS.get(preset, (None, None, {}))[0] if preset else None
 
         # Parse file based on type
+        is_excel = False
         if name.endswith(".json"):
             texts = _texts_from_json_bytes(b)
         elif name.endswith(".csv"):
             texts = _texts_from_csv_bytes(b)
         elif name.endswith((".xlsx", ".xlsm", ".xls")):
             # Excel file - extract text from specified or auto-detected column
+            is_excel = True
             texts = _texts_from_excel_bytes(b, sheet_names=sheets, text_column=text_column)
         elif name.endswith((".html", ".htm")):
             # Extract text from HTML
@@ -633,6 +721,24 @@ async def analyze_file(
 
         logger.info(f"File analysis completed: {len(original_texts)} texts processed")
 
+        # For Excel files, return annotated Excel with predictions added as columns
+        if is_excel:
+            # predictions is a list of dicts, add them to original Excel
+            excel_bytes = _process_excel_with_predictions(
+                b,
+                predictions,
+                sheet_names=sheets,
+                text_column=text_column,
+                preset=preset
+            )
+            output_filename = original_filename.rsplit('.', 1)[0] + '_analyzed.xlsx'
+            return _make_download(
+                output_filename,
+                excel_bytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        # For other file types, return JSON
         # Merge original texts with predictions
         if (task == "token-classification") or (preset and "ner" in preset):
             # NER: keep entities format
