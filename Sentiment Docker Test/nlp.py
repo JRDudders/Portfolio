@@ -44,6 +44,26 @@ from typing import Any, Dict, List, Optional, Tuple
 import os
 import math
 import re
+import ssl
+import urllib.request
+
+# Disable SSL verification for corporate firewalls (Zscaler, etc.)
+# This must be done BEFORE importing transformers/huggingface_hub
+if os.getenv("HF_HUB_DISABLE_SSL_VERIFY", "").lower() in ("1", "true", "yes"):
+    # Disable SSL verification globally for urllib
+    ssl._create_default_https_context = ssl._create_unverified_context
+    # Also set environment variables that various libraries check
+    os.environ["CURL_CA_BUNDLE"] = ""
+    os.environ["REQUESTS_CA_BUNDLE"] = ""
+    # Disable requests SSL verification
+    import requests
+    requests.packages.urllib3.disable_warnings()
+    # Monkey-patch requests to disable SSL verification
+    _original_request = requests.Session.request
+    def _patched_request(self, *args, **kwargs):
+        kwargs.setdefault('verify', False)
+        return _original_request(self, *args, **kwargs)
+    requests.Session.request = _patched_request
 
 # ------------------------ Defaults & Presets -------------------------------- #
 
