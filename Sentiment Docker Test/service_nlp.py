@@ -194,7 +194,18 @@ def _parse_labels_csv(s: Optional[str]) -> Optional[List[str]]:
 
 def _texts_from_json_bytes(b: bytes) -> List[str]:
     """Extract texts from JSON bytes"""
-    data = json.loads(b.decode("utf-8"))
+    # Try UTF-8 first (standard), then common alternatives
+    for encoding in ['utf-8', 'utf-8-sig', 'cp1252', 'latin-1']:
+        try:
+            text = b.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        # Last resort: UTF-8 with replacement for invalid chars
+        text = b.decode('utf-8', errors='replace')
+
+    data = json.loads(text)
     if isinstance(data, list):
         if all(isinstance(x, str) for x in data):
             return data
@@ -210,7 +221,17 @@ def _texts_from_json_bytes(b: bytes) -> List[str]:
 
 def _texts_from_csv_bytes(b: bytes) -> List[str]:
     """Extract texts from CSV bytes"""
-    df = pd.read_csv(io.BytesIO(b))
+    # Try UTF-8 first, then fall back to common encodings (Windows, Latin-1)
+    for encoding in ['utf-8', 'utf-8-sig', 'cp1252', 'latin-1']:
+        try:
+            df = pd.read_csv(io.BytesIO(b), encoding=encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        # Last resort: UTF-8 with replacement for invalid chars
+        df = pd.read_csv(io.BytesIO(b), encoding='utf-8', errors='replace')
+
     # Prefer 'text' column; otherwise take the first object dtype column
     if "text" in df.columns:
         col = "text"
