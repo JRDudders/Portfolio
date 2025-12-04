@@ -2796,6 +2796,81 @@
       }
     };
 
+    // Process Excel File - batch sentiment and theme extraction
+    document.getElementById('run-batch-excel').onclick = async () => {
+      const file = batchExcelInput.files?.[0];
+      if(!file) {
+        alert('Please select an Excel file first.');
+        return;
+      }
+
+      const statusBatch = document.getElementById('status-batch-excel');
+      const runBtn = document.getElementById('run-batch-excel');
+
+      // Get options
+      const extractSentiment = document.getElementById('batch-extract-sentiment').checked;
+      const extractThemes = document.getElementById('batch-extract-themes').checked;
+      const themeLabels = document.getElementById('batch-theme-labels').value.trim();
+      const sentimentPreset = document.getElementById('batch-sentiment-preset').value;
+      const themePreset = document.getElementById('batch-theme-preset').value;
+      const textColumn = document.getElementById('batch-text-column').value.trim();
+      const sheets = document.getElementById('batch-sheets').value.trim();
+      const topThemes = document.getElementById('batch-top-themes').value;
+      const includeConfidence = document.getElementById('batch-confidence').checked;
+
+      if(!extractSentiment && !extractThemes) {
+        setStatus(statusBatch, 'Please select at least one analysis type (Sentiment or Themes).', 'warn');
+        return;
+      }
+
+      setStatus(statusBatch, `Processing ${file.name}...`);
+      runBtn.disabled = true;
+
+      try {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        // Build query params
+        const params = new URLSearchParams();
+        if(extractSentiment) params.append('preset', sentimentPreset);
+        else if(extractThemes) params.append('preset', themePreset);
+
+        if(themeLabels) params.append('labels', themeLabels);
+        if(textColumn) params.append('text_column', textColumn);
+        if(sheets) params.append('sheets', sheets);
+
+        const res = await fetch(`/api/nlp/analyze/file?${params.toString()}`, {
+          method: 'POST',
+          body: fd
+        });
+
+        if(!res.ok) {
+          const err = await res.text().catch(() => res.statusText);
+          throw new Error(err);
+        }
+
+        const data = await res.json();
+
+        // Display results summary
+        const resultCount = data.results?.length || 0;
+        setStatus(statusBatch, `✓ Processed ${resultCount} items from ${file.name}`, 'ok');
+
+        // Download results as JSON
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${file.name.replace(/\.[^.]+$/, '')}_analysis_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+
+      } catch(e) {
+        setStatus(statusBatch, 'Error: ' + (e?.message || e), 'err');
+      } finally {
+        runBtn.disabled = false;
+      }
+    };
+
     // --- Visualize extracted network edges ---
     async function visualizeExtractedEdges(edgeType) {
       if(!extractedEdges || !extractedEdges.edges) {
