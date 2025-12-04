@@ -96,24 +96,30 @@
 
     <!-- Full-width NLP Results Panel (like Graph Visualization) -->
     <div class="graph-viz-panel" id="nlp-results-panel" style="display:none">
-      <h2>Stance Detection Results</h2>
+      <h2 id="nlp-panel-title">Stance Detection Results</h2>
       <div id="nlp-results-stats" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
 
-      <!-- Results Table -->
-      <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
-        <table id="nlp-results-table" style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead style="position:sticky;top:0;background:var(--bg-secondary)">
-            <tr style="border-bottom:2px solid var(--border)">
-              <th style="padding:8px;text-align:left">Text</th>
-              <th style="padding:8px;text-align:center;width:100px">Stance</th>
-              <th style="padding:8px;text-align:right;width:80px">Confidence</th>
-              <th style="padding:8px;text-align:right;width:80px">SUPPORT</th>
-              <th style="padding:8px;text-align:right;width:80px">OPPOSE</th>
-              <th style="padding:8px;text-align:right;width:80px">NEUTRAL</th>
-            </tr>
-          </thead>
-          <tbody id="nlp-results-body"></tbody>
-        </table>
+      <!-- Dynamic Results Content Area -->
+      <div id="nlp-results-content">
+        <!-- Results Table (for stance detection) -->
+        <div id="nlp-results-table-container" style="overflow-x:auto;max-height:400px;overflow-y:auto">
+          <table id="nlp-results-table" style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead id="nlp-results-thead" style="position:sticky;top:0;background:var(--bg-secondary)">
+              <tr style="border-bottom:2px solid var(--border)">
+                <th style="padding:8px;text-align:left">Text</th>
+                <th style="padding:8px;text-align:center;width:100px">Stance</th>
+                <th style="padding:8px;text-align:right;width:80px">Confidence</th>
+                <th style="padding:8px;text-align:right;width:80px">SUPPORT</th>
+                <th style="padding:8px;text-align:right;width:80px">OPPOSE</th>
+                <th style="padding:8px;text-align:right;width:80px">NEUTRAL</th>
+              </tr>
+            </thead>
+            <tbody id="nlp-results-body"></tbody>
+          </table>
+        </div>
+
+        <!-- Excel Preview Content (for Excel file preview) -->
+        <div id="nlp-excel-preview-content" style="display:none;max-height:500px;overflow-y:auto"></div>
       </div>
 
       <div class="graph-controls" style="margin-top:12px">
@@ -1021,6 +1027,14 @@
         // Populate top panel (NLP Results Panel)
         const nlpPanel = document.getElementById('nlp-results-panel');
         const nlpTbody = document.getElementById('nlp-results-body');
+
+        // Reset panel to stance detection mode
+        document.getElementById('nlp-panel-title').textContent = 'Stance Detection Results';
+        document.getElementById('nlp-results-table-container').style.display = 'block';
+        document.getElementById('nlp-excel-preview-content').style.display = 'none';
+        document.getElementById('nlp-download-json').style.display = 'inline-block';
+        document.getElementById('nlp-download-csv').style.display = 'inline-block';
+
         nlpTbody.innerHTML = rowsHtml;
         document.getElementById('nlp-results-stats').textContent = `Claim: "${claim}" • Model: ${preset}`;
         document.getElementById('nlp-results-summary').innerHTML =
@@ -2629,7 +2643,7 @@
       document.getElementById('excel-preview-section').style.display = 'none';
     };
 
-    // Preview Excel file structure
+    // Preview Excel file structure - displays in top viewer panel
     document.getElementById('btn-preview-excel').onclick = async () => {
       const file = batchExcelInput.files?.[0];
       if(!file) {
@@ -2638,8 +2652,14 @@
       }
 
       const statusBatch = document.getElementById('status-batch-excel');
-      const previewSection = document.getElementById('excel-preview-section');
-      const previewContent = document.getElementById('preview-content');
+      const nlpPanel = document.getElementById('nlp-results-panel');
+      const panelTitle = document.getElementById('nlp-panel-title');
+      const statsDiv = document.getElementById('nlp-results-stats');
+      const tableContainer = document.getElementById('nlp-results-table-container');
+      const excelPreviewContent = document.getElementById('nlp-excel-preview-content');
+      const downloadJsonBtn = document.getElementById('nlp-download-json');
+      const downloadCsvBtn = document.getElementById('nlp-download-csv');
+      const summarySpan = document.getElementById('nlp-results-summary');
 
       setStatus(statusBatch, 'Loading file preview...');
 
@@ -2659,22 +2679,20 @@
 
         const data = await res.json();
 
-        // Display filename
-        document.getElementById('preview-filename').textContent = data.filename || file.name;
-
         // Build preview HTML
-        let html = '';
+        let html = `<div style="margin-bottom:12px"><strong style="color:var(--accent)">File:</strong> ${data.filename || file.name}</div>`;
+
         if(data.sheets && data.sheets.length > 0) {
           data.sheets.forEach((sheet, idx) => {
             html += `<div style="margin-bottom:16px;padding:12px;background:#0f1117;border-radius:8px">`;
-            html += `<h4 style="margin:0 0 8px;color:var(--accent)">📋 ${sheet.sheet_name} (${sheet.row_count} rows)</h4>`;
+            html += `<h4 style="margin:0 0 8px;color:var(--accent)">Sheet: ${sheet.sheet_name} (${sheet.row_count} rows)</h4>`;
 
             if(sheet.detected_text_column) {
-              html += `<p style="font-size:12px;color:var(--ok);margin:0 0 8px">✓ Detected text column: <strong>${sheet.detected_text_column}</strong></p>`;
+              html += `<p style="font-size:12px;color:var(--ok);margin:0 0 8px">Detected text column: <strong>${sheet.detected_text_column}</strong></p>`;
             }
 
-            html += `<div style="font-size:12px;color:var(--muted)"><strong>Columns:</strong></div>`;
-            html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">`;
+            html += `<div style="font-size:12px;color:var(--muted);margin-bottom:6px"><strong>Columns:</strong></div>`;
+            html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">`;
             sheet.columns.forEach(col => {
               const isTextCol = col.name === sheet.detected_text_column;
               const style = isTextCol ? 'background:var(--accent);color:#000' : 'background:#21232b;color:var(--fg)';
@@ -2682,20 +2700,20 @@
             });
             html += `</div>`;
 
-            // Show sample data if available
+            // Show sample data if available - expanded by default for better visibility
             if(sheet.sample_data && sheet.sample_data.length > 0) {
-              html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Sample rows (${sheet.sample_data.length})</summary>`;
+              html += `<details open style="margin-top:8px"><summary style="cursor:pointer;font-size:12px;color:var(--muted)">Sample rows (${sheet.sample_data.length})</summary>`;
               html += `<div style="overflow-x:auto;margin-top:8px"><table style="font-size:11px;border-collapse:collapse;width:100%">`;
               html += `<tr style="background:#21232b">`;
               Object.keys(sheet.sample_data[0]).forEach(key => {
-                html += `<th style="padding:4px 8px;text-align:left;border:1px solid var(--border)">${key}</th>`;
+                html += `<th style="padding:6px 10px;text-align:left;border:1px solid var(--border)">${key}</th>`;
               });
               html += `</tr>`;
               sheet.sample_data.forEach(row => {
                 html += `<tr>`;
                 Object.values(row).forEach(val => {
-                  const displayVal = val ? String(val).substring(0, 50) : '';
-                  html += `<td style="padding:4px 8px;border:1px solid var(--border)">${displayVal}${val && String(val).length > 50 ? '...' : ''}</td>`;
+                  const displayVal = val ? String(val).substring(0, 80) : '';
+                  html += `<td style="padding:6px 10px;border:1px solid var(--border)">${displayVal}${val && String(val).length > 80 ? '...' : ''}</td>`;
                 });
                 html += `</tr>`;
               });
@@ -2704,12 +2722,30 @@
 
             html += `</div>`;
           });
+
+          // Summary stats
+          const totalRows = data.sheets.reduce((sum, s) => sum + s.row_count, 0);
+          statsDiv.textContent = `${data.sheets.length} sheet(s), ${totalRows.toLocaleString()} total rows`;
+          summarySpan.textContent = `Ready to process`;
+
         } else {
           html = '<p style="color:var(--muted)">No sheets found in file.</p>';
+          statsDiv.textContent = '';
+          summarySpan.textContent = '';
         }
 
-        previewContent.innerHTML = html;
-        previewSection.style.display = 'block';
+        // Configure panel for Excel preview mode
+        panelTitle.textContent = 'Excel File Preview';
+        tableContainer.style.display = 'none';
+        excelPreviewContent.innerHTML = html;
+        excelPreviewContent.style.display = 'block';
+        downloadJsonBtn.style.display = 'none';
+        downloadCsvBtn.style.display = 'none';
+
+        // Show the panel
+        nlpPanel.style.display = 'block';
+        nlpPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
         setStatus(statusBatch, `Preview loaded: ${data.sheets?.length || 0} sheet(s) found`, 'ok');
 
       } catch(e) {
