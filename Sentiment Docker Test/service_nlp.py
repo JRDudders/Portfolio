@@ -343,6 +343,26 @@ def _process_excel_with_predictions(
     pred_idx = 0
     output_sheets = {}
 
+    def flatten_prediction(pred: Dict, prefix: str = "") -> Dict[str, any]:
+        """Flatten nested prediction dict into separate columns"""
+        flat = {}
+        for key, value in pred.items():
+            col_name = f"{prefix}{key}" if prefix else key
+            if isinstance(value, dict):
+                # Nested dict - flatten with key as prefix
+                for sub_key, sub_value in value.items():
+                    flat[f"{col_name}_{sub_key}"] = sub_value
+            elif isinstance(value, list):
+                # List - join as string or take first
+                if value and isinstance(value[0], dict):
+                    # List of dicts (like top themes)
+                    flat[col_name] = ", ".join(str(v.get('label', v)) for v in value[:5])
+                else:
+                    flat[col_name] = ", ".join(str(v) for v in value[:5])
+            else:
+                flat[col_name] = value
+        return flat
+
     for sheet in excel_file.sheet_names:
         df = pd.read_excel(excel_file, sheet_name=sheet)
 
@@ -367,21 +387,22 @@ def _process_excel_with_predictions(
             sheet_predictions = predictions[pred_idx:pred_idx + num_valid]
             pred_idx += num_valid
 
-            # Determine what columns to add based on predictions
+            # Flatten all predictions and collect column names
             if sheet_predictions:
-                sample_pred = sheet_predictions[0]
+                # Flatten first prediction to get column structure
+                flat_sample = flatten_prediction(sheet_predictions[0])
 
                 # Initialize new columns with None
-                for key in sample_pred.keys():
-                    if key not in df.columns:
-                        df[key] = None
+                for col_name in flat_sample.keys():
+                    if col_name not in df.columns:
+                        df[col_name] = None
 
                 # Fill in predictions for valid rows
                 for i, idx in enumerate(valid_indices):
                     if i < len(sheet_predictions):
-                        pred = sheet_predictions[i]
-                        for key, value in pred.items():
-                            df.at[idx, key] = value
+                        flat_pred = flatten_prediction(sheet_predictions[i])
+                        for col_name, value in flat_pred.items():
+                            df.at[idx, col_name] = value
 
         output_sheets[sheet] = df
 
