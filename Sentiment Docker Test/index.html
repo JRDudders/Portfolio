@@ -2885,20 +2885,33 @@
           throw new Error(err);
         }
 
-        const data = await res.json();
+        // Download the response as a file (Excel or JSON depending on input type)
+        const blob = await res.blob();
+        const contentDisposition = res.headers.get('Content-Disposition');
+        let filename = `${file.name.replace(/\.[^.]+$/, '')}_analyzed`;
 
-        // Display results summary
-        const resultCount = data.results?.length || 0;
-        setStatus(statusBatch, `✓ Processed ${resultCount} items from ${file.name}`, 'ok');
+        // Extract filename from Content-Disposition header if available
+        if(contentDisposition) {
+          const match = contentDisposition.match(/filename="?([^"]+)"?/);
+          if(match) filename = match[1];
+        } else {
+          // Guess extension from content type
+          const contentType = res.headers.get('Content-Type') || '';
+          if(contentType.includes('spreadsheet') || contentType.includes('excel')) {
+            filename += '.xlsx';
+          } else {
+            filename += '.json';
+          }
+        }
 
-        // Download results as JSON
-        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `${file.name.replace(/\.[^.]+$/, '')}_analysis_${Date.now()}.json`;
+        a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
+
+        setStatus(statusBatch, `Done - downloaded ${filename}`, 'ok');
 
       } catch(e) {
         setStatus(statusBatch, 'Error: ' + (e?.message || e), 'err');
