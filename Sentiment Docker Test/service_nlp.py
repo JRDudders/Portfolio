@@ -860,16 +860,19 @@ async def batch_excel(
 
             for i, pred in enumerate(sentiment_preds):
                 if isinstance(pred, dict):
+                    # Unwrap "topics" key if present (run_task wraps results)
+                    if 'topics' in pred:
+                        pred = pred['topics']
+
                     # Find the label with highest score
                     if 'label' in pred:
                         results[i]['Sentiment_Score'] = pred['label']
                         results[i]['Sentiment_Confidence'] = _extract_confidence(pred.get('score', pred.get('confidence', 0)))
                     else:
-                        # Format: {'POSITIVE': 0.9, 'NEGATIVE': 0.1} or nested
-                        label, conf = _get_top_from_dict(pred)
-                        if label:
-                            results[i]['Sentiment_Score'] = label
-                            results[i]['Sentiment_Confidence'] = conf
+                        # Format: {'POSITIVE': 0.9, 'NEGATIVE': 0.1}
+                        top_label = max(pred.items(), key=lambda x: x[1] if isinstance(x[1], (int, float)) else 0)
+                        results[i]['Sentiment_Score'] = top_label[0]
+                        results[i]['Sentiment_Confidence'] = round(float(top_label[1]), 4) if isinstance(top_label[1], (int, float)) else 0
 
         # Run theme/topic extraction if requested
         if extract_themes:
@@ -880,9 +883,12 @@ async def batch_excel(
 
             for i, pred in enumerate(theme_preds):
                 if isinstance(pred, dict):
+                    # Unwrap "topics" key if present (run_task wraps results)
+                    if 'topics' in pred:
+                        pred = pred['topics']
+
                     if 'labels' in pred and 'scores' in pred:
                         # Zero-shot format: {'labels': [...], 'scores': [...]}
-                        # Get top N themes sorted by score
                         paired = list(zip(pred['labels'], pred['scores']))
                         paired.sort(key=lambda x: x[1], reverse=True)
                         top_n = paired[:top_themes]
@@ -893,18 +899,13 @@ async def batch_excel(
                         results[i]['Themes'] = pred['label']
                         results[i]['Themes_Confidence'] = _extract_confidence(pred.get('score', pred.get('confidence', 0)))
                     else:
-                        # Format: {'politics': 0.8, 'economy': 0.1, ...} or nested
-                        scored_items = []
-                        for k, v in pred.items():
-                            if k in ('label', 'score', 'confidence', 'labels', 'scores'):
-                                continue
-                            conf = _extract_confidence(v)
-                            scored_items.append((k, conf))
+                        # Format: {'politics': 0.8, 'economy': 0.1, ...}
+                        scored_items = [(k, v) for k, v in pred.items() if isinstance(v, (int, float))]
                         if scored_items:
                             scored_items.sort(key=lambda x: x[1], reverse=True)
                             top_n = scored_items[:top_themes]
                             results[i]['Themes'] = ', '.join([p[0] for p in top_n])
-                            results[i]['Themes_Confidence'] = ', '.join([str(p[1]) for p in top_n])
+                            results[i]['Themes_Confidence'] = ', '.join([str(round(p[1], 4)) for p in top_n])
 
         elapsed_time = time.time() - start_time
         logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes} in {elapsed_time:.2f}s")
