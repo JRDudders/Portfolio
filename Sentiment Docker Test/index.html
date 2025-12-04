@@ -2914,7 +2914,12 @@
         a.click();
         URL.revokeObjectURL(url);
 
-        setStatus(statusBatch, `Done - downloaded ${filename}`, 'ok');
+        // Get processing stats from headers
+        const processingTime = res.headers.get('X-Processing-Time') || '?';
+        const rowsProcessed = res.headers.get('X-Rows-Processed') || '?';
+        const completedAt = new Date().toLocaleTimeString();
+
+        setStatus(statusBatch, `Done - ${rowsProcessed} rows processed in ${processingTime}s at ${completedAt} - downloaded ${filename}`, 'ok');
 
       } catch(e) {
         setStatus(statusBatch, 'Error: ' + (e?.message || e), 'err');

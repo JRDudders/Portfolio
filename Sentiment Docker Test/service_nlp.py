@@ -804,6 +804,9 @@ async def batch_excel(
     - Theme (top predicted theme)
     - Theme_Confidence (0-1 score)
     """
+    import time
+    start_time = time.time()
+
     logger.info(f"Batch Excel processing: {file.filename}, sentiment={extract_sentiment}, themes={extract_themes}")
 
     try:
@@ -903,7 +906,8 @@ async def batch_excel(
                             results[i]['Themes'] = ', '.join([p[0] for p in top_n])
                             results[i]['Themes_Confidence'] = ', '.join([str(p[1]) for p in top_n])
 
-        logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes}")
+        elapsed_time = time.time() - start_time
+        logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes} in {elapsed_time:.2f}s")
 
         # Create annotated Excel
         excel_bytes = _process_excel_with_predictions(
@@ -915,11 +919,14 @@ async def batch_excel(
         )
 
         output_filename = original_filename.rsplit('.', 1)[0] + '_analyzed.xlsx'
-        return _make_download(
+        response = _make_download(
             output_filename,
             excel_bytes,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+        response.headers["X-Processing-Time"] = f"{elapsed_time:.2f}"
+        response.headers["X-Rows-Processed"] = str(len(texts))
+        return response
 
     except Exception as e:
         logger.error(f"Batch Excel processing failed: {str(e)}")
