@@ -87,6 +87,13 @@ RUN mkdir -p /app/temp
 # Pre-download HuggingFace models during build (avoids runtime download issues with corporate firewalls)
 # This caches models in /root/.cache/huggingface/ inside the image
 ENV HF_HUB_DISABLE_SSL_VERIFY=1
+ENV HF_HUB_DISABLE_TELEMETRY=1
+ENV HF_HUB_DISABLE_XET=1
+ENV HF_HUB_ENABLE_HF_TRANSFER=0
+
+# Accept HF_TOKEN as build arg for authenticated downloads
+ARG HF_TOKEN=""
+ENV HF_TOKEN=${HF_TOKEN}
 
 # Download all NLP models used by the service
 RUN python << 'EOF'
@@ -95,6 +102,21 @@ ssl._create_default_https_context = ssl._create_unverified_context
 import os
 os.environ['CURL_CA_BUNDLE'] = ''
 os.environ['REQUESTS_CA_BUNDLE'] = ''
+os.environ['HF_HUB_DISABLE_XET'] = '1'
+os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '0'
+
+# Configure huggingface_hub before importing transformers
+import huggingface_hub
+huggingface_hub.constants.HF_HUB_DISABLE_XET = True
+
+import requests
+requests.packages.urllib3.disable_warnings()
+_original_request = requests.Session.request
+def _patched_request(self, *args, **kwargs):
+    kwargs['verify'] = False
+    return _original_request(self, *args, **kwargs)
+requests.Session.request = _patched_request
+
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 models = [
