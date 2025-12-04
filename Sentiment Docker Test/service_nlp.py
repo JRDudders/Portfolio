@@ -820,6 +820,35 @@ async def batch_excel(
         # Prepare results list - one dict per text row
         results = [{} for _ in texts]
 
+        def _extract_confidence(val):
+            """Extract numeric confidence from various formats"""
+            if isinstance(val, (int, float)):
+                return round(float(val), 4)
+            if isinstance(val, dict):
+                # Try common keys: score, confidence, value
+                for key in ('score', 'confidence', 'value'):
+                    if key in val and isinstance(val[key], (int, float)):
+                        return round(float(val[key]), 4)
+                # If dict has numeric values, return max
+                nums = [v for v in val.values() if isinstance(v, (int, float))]
+                if nums:
+                    return round(max(nums), 4)
+            return 0.0
+
+        def _get_top_from_dict(pred_dict):
+            """Get top label and confidence from a prediction dict"""
+            # Filter to only items with numeric or extractable values
+            scored_items = []
+            for k, v in pred_dict.items():
+                if k in ('label', 'score', 'confidence', 'labels', 'scores'):
+                    continue  # Skip metadata keys
+                conf = _extract_confidence(v)
+                scored_items.append((k, conf))
+            if scored_items:
+                top = max(scored_items, key=lambda x: x[1])
+                return top[0], top[1]
+            return None, 0.0
+
         # Run sentiment analysis if requested
         if extract_sentiment:
             logger.info(f"Running sentiment analysis with preset: {sentiment_preset}")
@@ -830,12 +859,13 @@ async def batch_excel(
                     # Find the label with highest score
                     if 'label' in pred:
                         results[i]['Sentiment'] = pred['label']
-                        results[i]['Sentiment_Confidence'] = pred.get('score', pred.get('confidence', 0))
+                        results[i]['Sentiment_Confidence'] = _extract_confidence(pred.get('score', pred.get('confidence', 0)))
                     else:
-                        # Format: {'POSITIVE': 0.9, 'NEGATIVE': 0.1}
-                        top_label = max(pred.items(), key=lambda x: x[1])
-                        results[i]['Sentiment'] = top_label[0]
-                        results[i]['Sentiment_Confidence'] = round(top_label[1], 4)
+                        # Format: {'POSITIVE': 0.9, 'NEGATIVE': 0.1} or nested
+                        label, conf = _get_top_from_dict(pred)
+                        if label:
+                            results[i]['Sentiment'] = label
+                            results[i]['Sentiment_Confidence'] = conf
 
         # Run theme/topic extraction if requested
         if extract_themes:
@@ -848,17 +878,18 @@ async def batch_excel(
                 if isinstance(pred, dict):
                     if 'label' in pred:
                         results[i]['Theme'] = pred['label']
-                        results[i]['Theme_Confidence'] = round(pred.get('score', pred.get('confidence', 0)), 4)
+                        results[i]['Theme_Confidence'] = _extract_confidence(pred.get('score', pred.get('confidence', 0)))
                     elif 'labels' in pred and 'scores' in pred:
                         # Zero-shot format: {'labels': [...], 'scores': [...]}
                         top_idx = pred['scores'].index(max(pred['scores']))
                         results[i]['Theme'] = pred['labels'][top_idx]
                         results[i]['Theme_Confidence'] = round(pred['scores'][top_idx], 4)
                     else:
-                        # Format: {'politics': 0.8, 'economy': 0.1, ...}
-                        top_label = max(pred.items(), key=lambda x: x[1])
-                        results[i]['Theme'] = top_label[0]
-                        results[i]['Theme_Confidence'] = round(top_label[1], 4)
+                        # Format: {'politics': 0.8, 'economy': 0.1, ...} or nested
+                        label, conf = _get_top_from_dict(pred)
+                        if label:
+                            results[i]['Theme'] = label
+                            results[i]['Theme_Confidence'] = conf
 
         logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes}")
 
