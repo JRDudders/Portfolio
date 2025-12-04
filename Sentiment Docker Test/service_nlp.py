@@ -244,38 +244,69 @@ def _texts_from_csv_bytes(b: bytes) -> List[str]:
     return vals
 
 
-def _texts_from_excel_bytes(b: bytes, sheet_name: Optional[str] = None, text_column: Optional[str] = None) -> List[str]:
-    """Extract texts from Excel bytes"""
+def _texts_from_excel_bytes(b: bytes, sheet_names: Optional[str] = None, text_column: Optional[str] = None) -> List[str]:
+    """Extract texts from Excel bytes
+
+    Args:
+        b: Excel file bytes
+        sheet_names: Comma-separated sheet names to process, or None for all sheets
+        text_column: Column name containing text, or None to auto-detect
+
+    Returns:
+        List of text strings from all specified sheets
+    """
     from excel_utils import detect_text_column
 
     excel_file = pd.ExcelFile(io.BytesIO(b))
 
-    # Select sheet
-    if sheet_name:
-        if sheet_name not in excel_file.sheet_names:
-            raise ValueError(f"Sheet '{sheet_name}' not found. Available sheets: {', '.join(excel_file.sheet_names)}")
-        df = pd.read_excel(excel_file, sheet_name=sheet_name)
+    # Determine which sheets to process
+    if sheet_names:
+        # Parse comma-separated sheet names
+        requested_sheets = [s.strip() for s in sheet_names.split(',') if s.strip()]
+        sheets_to_process = []
+        for sheet in requested_sheets:
+            if sheet not in excel_file.sheet_names:
+                raise ValueError(f"Sheet '{sheet}' not found. Available sheets: {', '.join(excel_file.sheet_names)}")
+            sheets_to_process.append(sheet)
     else:
-        # Use first sheet
-        df = pd.read_excel(excel_file, sheet_name=0)
+        # Process all sheets
+        sheets_to_process = excel_file.sheet_names
 
-    # Detect or validate text column
-    if text_column:
-        if text_column not in df.columns:
-            raise ValueError(f"Column '{text_column}' not found. Available columns: {', '.join(df.columns)}")
-        col = text_column
-    else:
-        col = detect_text_column(df)
-        logger.info(f"Auto-detected text column: {col}")
+    logger.info(f"Processing {len(sheets_to_process)} sheet(s): {sheets_to_process}")
 
-    # Extract texts
-    texts = df[col].dropna().astype(str).tolist()
+    all_texts = []
 
-    if not texts:
-        raise ValueError(f"No text data found in column '{col}'")
+    for sheet in sheets_to_process:
+        df = pd.read_excel(excel_file, sheet_name=sheet)
 
-    logger.info(f"Extracted {len(texts)} texts from Excel column '{col}'")
-    return texts
+        if df.empty:
+            logger.info(f"Sheet '{sheet}' is empty, skipping")
+            continue
+
+        # Detect or validate text column for this sheet
+        if text_column:
+            if text_column not in df.columns:
+                logger.warning(f"Column '{text_column}' not found in sheet '{sheet}', skipping. Available: {list(df.columns)}")
+                continue
+            col = text_column
+        else:
+            try:
+                col = detect_text_column(df)
+                logger.info(f"Sheet '{sheet}': auto-detected text column '{col}'")
+            except ValueError:
+                logger.warning(f"Sheet '{sheet}': no suitable text column found, skipping")
+                continue
+
+        # Extract texts from this sheet
+        texts = df[col].dropna().astype(str).tolist()
+        logger.info(f"Sheet '{sheet}': extracted {len(texts)} texts from column '{col}'")
+        all_texts.extend(texts)
+
+    if not all_texts:
+        raise ValueError(f"No text data found in any of the processed sheets")
+
+    logger.info(f"Total: extracted {len(all_texts)} texts from {len(sheets_to_process)} sheet(s)")
+    return all_texts
 
 
 def _make_download(name: str, payload: bytes, mime: str = "application/json") -> StreamingResponse:
@@ -526,6 +557,8 @@ async def analyze_file(
     labels: Optional[str] = Query(None, description="Comma-separated labels for zero-shot"),
     claim: Optional[str] = Query(None, description="Claim/hypothesis for stance detection"),
     include_stopwords: Optional[bool] = Query(False),
+    text_column: Optional[str] = Query(None, description="Column name containing text (auto-detect if not specified)"),
+    sheets: Optional[str] = Query(None, description="Comma-separated sheet names to process (all sheets if not specified)"),
 ):
     """
     Analyze text file and return annotated results as downloadable file
@@ -555,8 +588,8 @@ async def analyze_file(
         elif name.endswith(".csv"):
             texts = _texts_from_csv_bytes(b)
         elif name.endswith((".xlsx", ".xlsm", ".xls")):
-            # Excel file - extract text from auto-detected column
-            texts = _texts_from_excel_bytes(b)
+            # Excel file - extract text from specified or auto-detected column
+            texts = _texts_from_excel_bytes(b, sheet_names=sheets, text_column=text_column)
         elif name.endswith((".html", ".htm")):
             # Extract text from HTML
             html = b.decode("utf-8", errors="ignore")
