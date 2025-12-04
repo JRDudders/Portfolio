@@ -137,8 +137,17 @@ _CLASSIFY_MAX_WORDS = int(os.getenv("CLASSIFY_MAX_WORDS", "320"))  # ~ <= 512 to
 def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
     """
     Cache HF pipeline objects. `key` encodes kwargs that affect pipeline creation.
+    Automatically uses GPU if available.
     """
     from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
+    import torch
+
+    # Detect GPU availability: device=0 for GPU, device=-1 for CPU
+    device = 0 if torch.cuda.is_available() else -1
+    if device == 0:
+        print(f"[nlp] Loading {model_id} on GPU (CUDA)")
+    else:
+        print(f"[nlp] Loading {model_id} on CPU")
 
     # Get HuggingFace token from environment (needed for some models like DeBERTa-MNLI)
     hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
@@ -147,13 +156,13 @@ def _hf_pipeline_cache(task: str, model_id: str, key: str = ""):
         tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
         mdl = AutoModelForSequenceClassification.from_pretrained(model_id, token=hf_token)
         return pipeline("text-classification" if task != "zero-shot-classification" else "zero-shot-classification",
-                        model=mdl, tokenizer=tok, device=-1)
+                        model=mdl, tokenizer=tok, device=device)
 
     if task == "token-classification":
         tok = AutoTokenizer.from_pretrained(model_id, token=hf_token)
         mdl = AutoModelForTokenClassification.from_pretrained(model_id, token=hf_token)
         # aggregation handled at call-time via kwargs
-        return pipeline("token-classification", model=mdl, tokenizer=tok, device=-1)
+        return pipeline("token-classification", model=mdl, tokenizer=tok, device=device)
 
     raise ValueError(f"Unsupported HF task: {task}")
 

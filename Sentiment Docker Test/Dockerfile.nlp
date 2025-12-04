@@ -58,9 +58,9 @@ ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 # Copy requirements first (better layer caching)
 COPY requirements-nlp.txt .
 
-# Install PyTorch (CPU version) first to avoid conflicts
-# Use >=2.3 for compatibility, let pip find the latest available version for the platform
-RUN pip install --no-cache-dir "torch>=2.3" --index-url https://download.pytorch.org/whl/cpu
+# Install PyTorch with CUDA support for GPU acceleration
+# Use CUDA 12.1 which is widely compatible; falls back to CPU if no GPU available
+RUN pip install --no-cache-dir "torch>=2.3" --index-url https://download.pytorch.org/whl/cu121
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements-nlp.txt
