@@ -52,18 +52,43 @@ import urllib.request
 if os.getenv("HF_HUB_DISABLE_SSL_VERIFY", "").lower() in ("1", "true", "yes"):
     # Disable SSL verification globally for urllib
     ssl._create_default_https_context = ssl._create_unverified_context
-    # Also set environment variables that various libraries check
+
+    # Clear CA bundle env vars to prevent SSL verification
     os.environ["CURL_CA_BUNDLE"] = ""
     os.environ["REQUESTS_CA_BUNDLE"] = ""
+    os.environ["SSL_CERT_FILE"] = ""
+
     # Disable requests SSL verification
     import requests
+    from requests.adapters import HTTPAdapter
     requests.packages.urllib3.disable_warnings()
+
+    # Create a custom session with SSL verification disabled
+    class SSLDisabledAdapter(HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            kwargs['ssl_context'] = ssl._create_unverified_context()
+            return super().init_poolmanager(*args, **kwargs)
+
     # Monkey-patch requests to disable SSL verification
     _original_request = requests.Session.request
     def _patched_request(self, *args, **kwargs):
-        kwargs.setdefault('verify', False)
+        kwargs['verify'] = False
         return _original_request(self, *args, **kwargs)
     requests.Session.request = _patched_request
+
+    # Configure huggingface_hub to disable SSL
+    try:
+        import huggingface_hub
+        from huggingface_hub import configure_http_backend
+
+        def _backend_factory() -> requests.Session:
+            session = requests.Session()
+            session.verify = False
+            return session
+
+        configure_http_backend(backend_factory=_backend_factory)
+    except ImportError:
+        pass  # huggingface_hub not installed yet
 
 # ------------------------ Defaults & Presets -------------------------------- #
 
