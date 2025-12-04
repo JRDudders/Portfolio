@@ -87,6 +87,8 @@ RUN mkdir -p /app/temp
 # Pre-download HuggingFace models during build (avoids runtime download issues with corporate firewalls)
 # This caches models in /root/.cache/huggingface/ inside the image
 ENV HF_HUB_DISABLE_SSL_VERIFY=1
+
+# Download all NLP models used by the service
 RUN python -c "\
 import ssl; \
 ssl._create_default_https_context = ssl._create_unverified_context; \
@@ -94,13 +96,19 @@ import os; \
 os.environ['CURL_CA_BUNDLE'] = ''; \
 os.environ['REQUESTS_CA_BUNDLE'] = ''; \
 from transformers import AutoTokenizer, AutoModelForSequenceClassification; \
-print('Downloading distilbert-base-uncased-finetuned-sst-2-english...'); \
-AutoTokenizer.from_pretrained('distilbert-base-uncased-finetuned-sst-2-english'); \
-AutoModelForSequenceClassification.from_pretrained('distilbert-base-uncased-finetuned-sst-2-english'); \
-print('Downloading MoritzLaurer/mDeBERTa-v3-base-mnli-xnli...'); \
-AutoTokenizer.from_pretrained('MoritzLaurer/mDeBERTa-v3-base-mnli-xnli'); \
-AutoModelForSequenceClassification.from_pretrained('MoritzLaurer/mDeBERTa-v3-base-mnli-xnli'); \
-print('Models downloaded successfully!')"
+models = [ \
+    'cardiffnlp/twitter-roberta-base-sentiment-latest', \
+    'distilbert-base-uncased-finetuned-sst-2-english', \
+    'facebook/bart-large-mnli', \
+    'MoritzLaurer/mDeBERTa-v3-base-mnli-xnli', \
+    'MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli', \
+    'MoritzLaurer/DeBERTa-v3-large-mnli-fever-anli-ling-wanli', \
+]; \
+for model in models: \
+    print(f'Downloading {model}...'); \
+    AutoTokenizer.from_pretrained(model); \
+    AutoModelForSequenceClassification.from_pretrained(model); \
+print('All models downloaded successfully!')"
 
 # Expose port
 EXPOSE 8001
