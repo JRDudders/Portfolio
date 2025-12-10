@@ -23,6 +23,7 @@ from bs4 import BeautifulSoup
 import trafilatura
 import logging
 from datetime import datetime
+from fetch import fetch_url_bytes_sync
 
 # Configure logging
 logging.basicConfig(
@@ -894,6 +895,69 @@ async def batch_excel(
         if not process_sheets and guidance_sheet:
             # Exclude Guidance sheet from processing if no sheets specified
             process_sheets = ','.join([s for s in excel_file.sheet_names if s != guidance_sheet])
+
+        # Fetch URLs and populate Body column for each sheet
+        sheets_to_process = [s.strip() for s in process_sheets.split(',')] if process_sheets else [s for s in excel_file.sheet_names if s != guidance_sheet]
+
+        modified_dfs = {}
+        url_fetch_count = 0
+
+        for sheet in sheets_to_process:
+            if sheet not in excel_file.sheet_names:
+                continue
+            df = pd.read_excel(excel_file, sheet_name=sheet)
+
+            # Find URL column (case-insensitive)
+            url_col = None
+            for col in df.columns:
+                if 'url' in str(col).lower():
+                    url_col = col
+                    break
+
+            if url_col and text_column not in df.columns:
+                logger.info(f"Sheet '{sheet}': Found URL column '{url_col}', fetching content for Body column")
+                body_texts = []
+
+                for idx, url in enumerate(df[url_col]):
+                    if pd.isna(url) or not str(url).strip():
+                        body_texts.append('')
+                        continue
+
+                    url_str = str(url).strip()
+                    try:
+                        # Fetch URL content
+                        content_bytes, kind = fetch_url_bytes_sync(url_str)
+                        if kind == 'html' or b'<html' in content_bytes.lower()[:1000]:
+                            text = _extract_text_from_html(content_bytes.decode('utf-8', errors='ignore'))
+                        else:
+                            text = content_bytes.decode('utf-8', errors='ignore')
+                        body_texts.append(text[:50000])  # Limit text length
+                        url_fetch_count += 1
+                        if url_fetch_count % 10 == 0:
+                            logger.info(f"Fetched {url_fetch_count} URLs...")
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch URL {url_str}: {e}")
+                        body_texts.append('')
+
+                df[text_column] = body_texts
+                logger.info(f"Sheet '{sheet}': Populated {len([t for t in body_texts if t])} Body cells from URLs")
+
+            modified_dfs[sheet] = df
+
+        if url_fetch_count > 0:
+            logger.info(f"Total URLs fetched: {url_fetch_count}")
+            # Rebuild Excel bytes with Body column populated
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                for sheet_name in excel_file.sheet_names:
+                    if sheet_name in modified_dfs:
+                        modified_dfs[sheet_name].to_excel(writer, sheet_name=sheet_name, index=False)
+                    else:
+                        pd.read_excel(excel_file, sheet_name=sheet_name).to_excel(writer, sheet_name=sheet_name, index=False)
+            output.seek(0)
+            b = output.read()
+            # Re-open Excel file with new data
+            excel_file = pd.ExcelFile(io.BytesIO(b))
 
         texts = _texts_from_excel_bytes(b, sheet_names=process_sheets, text_column=text_column)
         logger.info(f"Extracted {len(texts)} texts from Excel")
