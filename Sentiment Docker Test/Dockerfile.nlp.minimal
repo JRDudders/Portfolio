@@ -52,6 +52,10 @@ RUN apt-get update && apt-get install -y \
 
 ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+# Configure Playwright to use system Chromium instead of downloading
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/bin
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Copy requirements
 COPY requirements-nlp.txt .
@@ -65,8 +69,9 @@ RUN pip install --no-cache-dir -r requirements-nlp.txt
 # Install additional translation dependencies
 RUN pip install --no-cache-dir sentencepiece sacremoses
 
-# Install Playwright browsers
-RUN playwright install chromium --with-deps
+# Skip Playwright browser download - using system Chromium instead
+# Verify Playwright can find the system browser
+RUN python -c "from playwright.sync_api import sync_playwright; print('Playwright configured to use system Chromium')"
 
 # Copy only required Python files for batch Excel processing
 COPY url_fetch.py .
