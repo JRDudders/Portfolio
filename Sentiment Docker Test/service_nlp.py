@@ -829,19 +829,41 @@ async def batch_excel(
                 break
 
         if guidance_sheet:
+            # Try reading with headers first
             guidance_df = pd.read_excel(excel_file, sheet_name=guidance_sheet)
-            # Look for Guidance column (case-insensitive)
-            guidance_col = None
-            for col in guidance_df.columns:
-                if str(col).lower() == 'guidance':
-                    guidance_col = col
-                    break
 
-            if guidance_col:
-                # Extract unique non-empty values as theme labels
-                guidance_labels = guidance_df[guidance_col].dropna().astype(str).str.strip()
-                guidance_labels = [lbl for lbl in guidance_labels.unique() if lbl]
-                logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet: {guidance_labels}")
+            # Look for Hierarchy column first (priority), then Guidance (case-insensitive)
+            target_col = None
+            col_source = None
+            for col in guidance_df.columns:
+                col_lower = str(col).lower()
+                if col_lower == 'hierarchy':
+                    target_col = col
+                    col_source = 'Hierarchy'
+                    break
+                elif col_lower == 'guidance' and target_col is None:
+                    target_col = col
+                    col_source = 'Guidance'
+
+            if target_col:
+                # Extract unique non-empty values as theme labels (use set for deduplication)
+                all_values = set()
+                for val in guidance_df[target_col].dropna().astype(str).str.strip():
+                    if val:
+                        all_values.add(val)
+                guidance_labels = list(all_values)
+                logger.info(f"Extracted {len(guidance_labels)} theme labels from {col_source} column: {guidance_labels}")
+            else:
+                # No column headers found - try reading without headers and use first column
+                guidance_df_no_header = pd.read_excel(excel_file, sheet_name=guidance_sheet, header=None)
+                if not guidance_df_no_header.empty and len(guidance_df_no_header.columns) > 0:
+                    # Use first column as labels
+                    all_values = set()
+                    for val in guidance_df_no_header.iloc[:, 0].dropna().astype(str).str.strip():
+                        if val:
+                            all_values.add(val)
+                    guidance_labels = list(all_values)
+                    logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet (no header): {guidance_labels}")
 
         # Default text_column to "Body" if not specified
         if not text_column:
