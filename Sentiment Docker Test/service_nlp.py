@@ -829,41 +829,43 @@ async def batch_excel(
                 break
 
         if guidance_sheet:
-            # Try reading with headers first
-            guidance_df = pd.read_excel(excel_file, sheet_name=guidance_sheet)
+            # Read without headers to handle various formats (numbered lists, no headers, etc.)
+            guidance_df = pd.read_excel(excel_file, sheet_name=guidance_sheet, header=None)
+            logger.info(f"Guidance sheet has {len(guidance_df)} rows, {len(guidance_df.columns)} columns")
 
-            # Look for Hierarchy column first (priority), then Guidance (case-insensitive)
-            target_col = None
-            col_source = None
-            for col in guidance_df.columns:
-                col_lower = str(col).lower()
-                if col_lower == 'hierarchy':
-                    target_col = col
-                    col_source = 'Hierarchy'
-                    break
-                elif col_lower == 'guidance' and target_col is None:
-                    target_col = col
-                    col_source = 'Guidance'
+            all_values = set()
 
-            if target_col:
-                # Extract unique non-empty values as theme labels (use set for deduplication)
-                all_values = set()
-                for val in guidance_df[target_col].dropna().astype(str).str.strip():
-                    if val:
-                        all_values.add(val)
-                guidance_labels = list(all_values)
-                logger.info(f"Extracted {len(guidance_labels)} theme labels from {col_source} column: {guidance_labels}")
+            # Determine which column contains the theme labels
+            # Format: Col A = numbers (1,2,3...), Col B = theme labels
+            if len(guidance_df.columns) >= 2:
+                first_col = guidance_df.iloc[:, 0]
+                # Check if first column is mostly numeric (ranking numbers)
+                numeric_count = sum(1 for v in first_col.dropna() if str(v).strip().replace('.', '').isdigit())
+                if numeric_count >= len(first_col.dropna()) * 0.3:
+                    # First column is ranking, use second column for labels
+                    label_col = 1
+                    logger.info("Detected numeric ranking in column A, using column B for labels")
+                else:
+                    label_col = 0
             else:
-                # No column headers found - try reading without headers and use first column
-                guidance_df_no_header = pd.read_excel(excel_file, sheet_name=guidance_sheet, header=None)
-                if not guidance_df_no_header.empty and len(guidance_df_no_header.columns) > 0:
-                    # Use first column as labels
-                    all_values = set()
-                    for val in guidance_df_no_header.iloc[:, 0].dropna().astype(str).str.strip():
-                        if val:
-                            all_values.add(val)
-                    guidance_labels = list(all_values)
-                    logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet (no header): {guidance_labels}")
+                label_col = 0
+
+            # Extract labels from the identified column
+            for val in guidance_df.iloc[:, label_col].dropna():
+                val_str = str(val).strip()
+                # Skip header-like rows (description text)
+                val_lower = val_str.lower()
+                if any(skip in val_lower for skip in ['hierarchy', 'informal', 'instance', 'mention', 'focus', 'equally', 'theme:']):
+                    continue
+                # Skip pure numbers
+                if val_str.replace('.', '').isdigit():
+                    continue
+                # Skip empty or very short values
+                if val_str and len(val_str) > 1:
+                    all_values.add(val_str)
+
+            guidance_labels = list(all_values)
+            logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet: {guidance_labels}")
 
         # Default text_column to "Body" if not specified
         if not text_column:
