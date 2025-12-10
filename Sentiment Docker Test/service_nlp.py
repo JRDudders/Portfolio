@@ -23,7 +23,7 @@ from bs4 import BeautifulSoup
 import trafilatura
 import logging
 from datetime import datetime
-from fetch import fetch_url_bytes_sync
+from fetch import fetch_url_bytes_sync, fetch_url_bytes_rendered, ensure_browser
 
 # Configure logging
 logging.basicConfig(
@@ -918,6 +918,9 @@ async def batch_excel(
                 logger.info(f"Sheet '{sheet}': Found URL column '{url_col}', fetching content for Body column")
                 body_texts = []
 
+                # Get browser for JS-rendered content
+                browser = await ensure_browser(app)
+
                 for idx, url in enumerate(df[url_col]):
                     if pd.isna(url) or not str(url).strip():
                         body_texts.append('')
@@ -925,12 +928,14 @@ async def batch_excel(
 
                     url_str = str(url).strip()
                     try:
-                        # Fetch URL content
-                        content_bytes, kind = fetch_url_bytes_sync(url_str)
-                        if kind == 'html' or b'<html' in content_bytes.lower()[:1000]:
-                            text = _extract_text_from_html(content_bytes.decode('utf-8', errors='ignore'))
-                        else:
-                            text = content_bytes.decode('utf-8', errors='ignore')
+                        # Fetch URL content with JavaScript rendering (Playwright)
+                        content_bytes, kind = await fetch_url_bytes_rendered(
+                            url_str,
+                            browser,
+                            timeout_ms=30000,  # 30 second timeout per page
+                            scroll_passes=2    # Light scrolling to trigger lazy-load
+                        )
+                        text = _extract_text_from_html(content_bytes.decode('utf-8', errors='ignore'))
                         body_texts.append(text[:50000])  # Limit text length
                         url_fetch_count += 1
                         if url_fetch_count % 10 == 0:
