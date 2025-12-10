@@ -891,14 +891,30 @@ async def batch_excel(
         if not text_column:
             text_column = "Body"
 
-        # Extract texts from Excel (excluding Guidance sheet)
+        # Helper to check if sheet should be excluded
+        def _should_exclude_sheet(sheet_name):
+            name_lower = sheet_name.lower()
+            if guidance_sheet and sheet_name == guidance_sheet:
+                return True
+            if 'pivot' in name_lower:
+                return True
+            return False
+
+        # Extract texts from Excel (excluding Guidance and Pivot sheets)
         process_sheets = sheets
-        if not process_sheets and guidance_sheet:
-            # Exclude Guidance sheet from processing if no sheets specified
-            process_sheets = ','.join([s for s in excel_file.sheet_names if s != guidance_sheet])
+        if not process_sheets:
+            # Exclude Guidance and Pivot sheets from processing if no sheets specified
+            process_sheets = ','.join([s for s in excel_file.sheet_names if not _should_exclude_sheet(s)])
 
         # Fetch URLs and populate Body column for each sheet
-        sheets_to_process = [s.strip() for s in process_sheets.split(',')] if process_sheets else [s for s in excel_file.sheet_names if s != guidance_sheet]
+        sheets_to_process = [s.strip() for s in process_sheets.split(',')] if process_sheets else [s for s in excel_file.sheet_names if not _should_exclude_sheet(s)]
+        # Filter out excluded sheets even if explicitly specified
+        sheets_to_process = [s for s in sheets_to_process if not _should_exclude_sheet(s)]
+
+        if sheets_to_process:
+            excluded = [s for s in excel_file.sheet_names if _should_exclude_sheet(s)]
+            if excluded:
+                logger.info(f"Excluding sheets: {excluded}")
 
         modified_dfs = {}
         url_fetch_count = 0
