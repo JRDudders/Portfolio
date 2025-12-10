@@ -1,11 +1,36 @@
 # fetch.py
 from __future__ import annotations
-import asyncio, os, time, json
+import asyncio, os, time, json, ssl
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urljoin, urlunparse, urlencode
 from collections import deque
 
+# Disable SSL certificate verification globally (for corporate firewalls like Zscaler)
+ssl._create_default_https_context = ssl._create_unverified_context
+os.environ['CURL_CA_BUNDLE'] = ''
+os.environ['REQUESTS_CA_BUNDLE'] = ''
+
 import requests
+# Disable SSL warnings and patch requests to skip verification
+requests.packages.urllib3.disable_warnings()
+_original_session_request = requests.Session.request
+def _patched_session_request(self, *args, **kwargs):
+    kwargs['verify'] = False
+    return _original_session_request(self, *args, **kwargs)
+requests.Session.request = _patched_session_request
+
+# Also patch module-level request functions
+_original_get = requests.get
+_original_post = requests.post
+def _patched_get(*args, **kwargs):
+    kwargs['verify'] = False
+    return _original_get(*args, **kwargs)
+def _patched_post(*args, **kwargs):
+    kwargs['verify'] = False
+    return _original_post(*args, **kwargs)
+requests.get = _patched_get
+requests.post = _patched_post
+
 from bs4 import BeautifulSoup
 
 SEL_ENGINE = os.getenv("SELENIUM_ENGINE", "chrome")
@@ -117,6 +142,7 @@ async def fetch_url_bytes_rendered(
         user_agent=DEFAULT_FETCH_HEADERS["User-Agent"],
         locale="en-US",
         viewport={"width": 1366, "height": 900},
+        ignore_https_errors=True,  # Bypass SSL cert verification (for corporate firewalls)
     )
     headers = {k: v for k, v in DEFAULT_FETCH_HEADERS.items() if k.lower() != "user-agent"}
     if extra_headers: headers.update({str(k): str(v) for k, v in extra_headers.items()})
