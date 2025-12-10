@@ -93,10 +93,15 @@ async def ensure_browser(app) -> Browser:
     if not hasattr(app.state, "playwright") or app.state.playwright is None:
         app.state.playwright = await async_playwright().start()
     if not hasattr(app.state, "browser") or app.state.browser is None:
-        app.state.browser = await app.state.playwright.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-        )
+        # Use system Chromium if available, otherwise let Playwright find its own
+        chromium_path = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH") or os.environ.get("CHROME_BIN")
+        launch_args = {
+            "headless": True,
+            "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+        }
+        if chromium_path and os.path.exists(chromium_path):
+            launch_args["executable_path"] = chromium_path
+        app.state.browser = await app.state.playwright.chromium.launch(**launch_args)
     return app.state.browser
 
 async def shutdown_playwright(app):
