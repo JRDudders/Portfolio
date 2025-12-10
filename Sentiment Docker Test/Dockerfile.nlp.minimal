@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # NLP Service - Minimal Build for Batch Excel Processing
 # Only includes: Sentiment, Zero-shot themes, Translation, Narrative generation
 FROM python:3.12-slim
@@ -96,7 +97,10 @@ ARG HF_TOKEN=""
 ENV HF_TOKEN=${HF_TOKEN}
 
 # Download ONLY the minimal models needed for batch Excel processing
-RUN python << 'EOF'
+# Uses BuildKit cache mount to speed up rebuilds, then copies to image
+ENV HF_HOME=/app/models
+RUN --mount=type=cache,target=/tmp/hf_cache \
+    python << 'EOF'
 import ssl
 ssl._create_default_https_context = ssl._create_unverified_context
 import os
@@ -104,6 +108,7 @@ os.environ['CURL_CA_BUNDLE'] = ''
 os.environ['REQUESTS_CA_BUNDLE'] = ''
 os.environ['HF_HUB_DISABLE_XET'] = '1'
 os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '0'
+os.environ['HF_HOME'] = '/tmp/hf_cache'
 
 import requests
 requests.packages.urllib3.disable_warnings()
@@ -137,6 +142,10 @@ AutoModelForCausalLM.from_pretrained('microsoft/Phi-3-mini-4k-instruct', trust_r
 
 print('All minimal models downloaded successfully!')
 EOF
+
+# Copy cached models into the image
+RUN --mount=type=cache,target=/tmp/hf_cache \
+    cp -r /tmp/hf_cache/* /app/models/ 2>/dev/null || mkdir -p /app/models
 
 EXPOSE 8001
 
