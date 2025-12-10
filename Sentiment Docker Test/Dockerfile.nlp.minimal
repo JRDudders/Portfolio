@@ -1,0 +1,141 @@
+# NLP Service - Minimal Build for Batch Excel Processing
+# Only includes: Sentiment, Zero-shot themes, Translation, Narrative generation
+FROM python:3.12-slim
+
+ENV PIP_DEFAULT_TIMEOUT=200
+ENV PIP_RETRIES=5
+
+WORKDIR /app
+
+# Copy certificates directory (may be empty or contain corporate certs like Zscaler)
+COPY certs/ /tmp/certs/
+
+# Install corporate certificates BEFORE any other apt-get operations
+RUN apt-get update && apt-get install -y ca-certificates apt-transport-https && \
+    if ls /tmp/certs/*.crt 1> /dev/null 2>&1; then \
+        cp /tmp/certs/*.crt /usr/local/share/ca-certificates/ && \
+        update-ca-certificates && \
+        echo "Corporate certificates installed"; \
+    else \
+        echo "No corporate certificates found"; \
+    fi && \
+    rm -rf /tmp/certs && \
+    rm -rf /var/lib/apt/lists/*
+
+# Configure Python to use system certificates
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV CURL_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+# Install system dependencies for Chromium (URL fetching)
+RUN apt-get update && apt-get install -y \
+    chromium \
+    chromium-driver \
+    wget \
+    gnupg \
+    ca-certificates \
+    fonts-liberation \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libnspr4 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    xdg-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+
+# Copy requirements
+COPY requirements-nlp.txt .
+
+# Install PyTorch with CUDA support
+RUN pip install --no-cache-dir "torch>=2.3" --index-url https://download.pytorch.org/whl/cu121
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements-nlp.txt
+
+# Install additional translation dependencies
+RUN pip install --no-cache-dir sentencepiece sacremoses
+
+# Install Playwright browsers
+RUN playwright install chromium --with-deps
+
+# Copy only required Python files for batch Excel processing
+COPY url_fetch.py .
+COPY service_nlp.py .
+COPY nlp.py .
+COPY fetch.py .
+COPY adapters.py .
+COPY apputils.py .
+COPY excel_utils.py .
+COPY file_store.py .
+
+# Create temp directory
+RUN mkdir -p /app/temp
+
+# HuggingFace settings
+ENV HF_HUB_DISABLE_SSL_VERIFY=1
+ENV HF_HUB_DISABLE_TELEMETRY=1
+ENV HF_HUB_DISABLE_XET=1
+ENV HF_HUB_ENABLE_HF_TRANSFER=0
+
+ARG HF_TOKEN=""
+ENV HF_TOKEN=${HF_TOKEN}
+
+# Download ONLY the minimal models needed for batch Excel processing
+RUN python << 'EOF'
+import ssl
+ssl._create_default_https_context = ssl._create_unverified_context
+import os
+os.environ['CURL_CA_BUNDLE'] = ''
+os.environ['REQUESTS_CA_BUNDLE'] = ''
+os.environ['HF_HUB_DISABLE_XET'] = '1'
+os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '0'
+
+import requests
+requests.packages.urllib3.disable_warnings()
+_original_request = requests.Session.request
+def _patched_request(self, *args, **kwargs):
+    kwargs['verify'] = False
+    return _original_request(self, *args, **kwargs)
+requests.Session.request = _patched_request
+
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModelForCausalLM, AutoModelForSeq2SeqLM
+
+# 1. Sentiment Analysis
+print('Downloading cardiffnlp/twitter-roberta-base-sentiment-latest...')
+AutoTokenizer.from_pretrained('cardiffnlp/twitter-roberta-base-sentiment-latest')
+AutoModelForSequenceClassification.from_pretrained('cardiffnlp/twitter-roberta-base-sentiment-latest')
+
+# 2. Zero-shot Classification (for themes)
+print('Downloading facebook/bart-large-mnli...')
+AutoTokenizer.from_pretrained('facebook/bart-large-mnli')
+AutoModelForSequenceClassification.from_pretrained('facebook/bart-large-mnli')
+
+# 3. Translation (multilingual to English)
+print('Downloading Helsinki-NLP/opus-mt-mul-en...')
+AutoTokenizer.from_pretrained('Helsinki-NLP/opus-mt-mul-en')
+AutoModelForSeq2SeqLM.from_pretrained('Helsinki-NLP/opus-mt-mul-en')
+
+# 4. Narrative Generation (local LLM)
+print('Downloading microsoft/Phi-3-mini-4k-instruct...')
+AutoTokenizer.from_pretrained('microsoft/Phi-3-mini-4k-instruct', trust_remote_code=True)
+AutoModelForCausalLM.from_pretrained('microsoft/Phi-3-mini-4k-instruct', trust_remote_code=True)
+
+print('All minimal models downloaded successfully!')
+EOF
+
+EXPOSE 8001
+
+HEALTHCHECK --interval=600s --timeout=10s --start-period=60s --retries=3 \
+  CMD python -c "import requests; requests.get('http://localhost:8001/health').raise_for_status()"
+
+CMD ["python", "service_nlp.py"]

@@ -42,7 +42,7 @@ from nlp_processor import (
     extract_entities,
     analyze_topics
 )
-from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task, generate_narratives_batch
+from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task, generate_narratives_batch, translate_batch
 from adapters import process_url
 from excel_utils import (
     preview_excel_structure,
@@ -984,8 +984,49 @@ async def batch_excel(
         texts = _texts_from_excel_bytes(b, sheet_names=process_sheets, text_column=text_column)
         logger.info(f"Extracted {len(texts)} texts from Excel")
 
+        # Translate texts to English and create "Body (Translated)" column
+        logger.info("Translating texts to English...")
+        translated_texts = translate_batch(texts)
+        logger.info(f"Translated {len([t for t in translated_texts if t])} texts")
+
+        # Add translated texts to the Excel sheets
+        trans_col = "Body (Translated)"
+        trans_idx = 0
+        for sheet in sheets_to_process:
+            if sheet not in modified_dfs:
+                if sheet in excel_file.sheet_names:
+                    modified_dfs[sheet] = pd.read_excel(excel_file, sheet_name=sheet)
+                else:
+                    continue
+
+            df = modified_dfs[sheet]
+            if text_column in df.columns:
+                valid_mask = df[text_column].notna()
+                num_valid = valid_mask.sum()
+                df[trans_col] = None
+                for idx in df.index[valid_mask]:
+                    if trans_idx < len(translated_texts):
+                        df.at[idx, trans_col] = translated_texts[trans_idx]
+                        trans_idx += 1
+                modified_dfs[sheet] = df
+
+        # Rebuild Excel bytes with translation column
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            for sheet_name in excel_file.sheet_names:
+                if sheet_name in modified_dfs:
+                    modified_dfs[sheet_name].to_excel(writer, sheet_name=sheet_name, index=False)
+                else:
+                    pd.read_excel(excel_file, sheet_name=sheet_name).to_excel(writer, sheet_name=sheet_name, index=False)
+        output.seek(0)
+        b = output.read()
+        excel_file = pd.ExcelFile(io.BytesIO(b))
+
+        # Use translated texts for analysis
+        analysis_texts = translated_texts
+
         # Prepare results list - one dict per text row
-        results = [{} for _ in texts]
+        results = [{} for _ in analysis_texts]
 
         def _extract_confidence(val):
             """Extract numeric confidence from various formats"""
@@ -1019,7 +1060,7 @@ async def batch_excel(
         # Run sentiment analysis if requested
         if extract_sentiment:
             logger.info(f"Running sentiment analysis with preset: {sentiment_preset}")
-            sentiment_preds = run_task(texts, preset=sentiment_preset)
+            sentiment_preds = run_task(analysis_texts, preset=sentiment_preset)
 
             for i, pred in enumerate(sentiment_preds):
                 if isinstance(pred, dict):
@@ -1051,7 +1092,7 @@ async def batch_excel(
                 logger.info(f"Using {len(lbls)} default theme labels")
 
             logger.info(f"Running theme extraction with preset: {theme_preset}, top_themes={top_themes}, labels={lbls[:5]}{'...' if len(lbls) > 5 else ''}")
-            theme_preds = run_task(texts, preset=theme_preset, labels=lbls)
+            theme_preds = run_task(analysis_texts, preset=theme_preset, labels=lbls)
 
             for i, pred in enumerate(theme_preds):
                 if isinstance(pred, dict):
@@ -1083,10 +1124,10 @@ async def batch_excel(
         if generate_narrative and extract_themes:
             logger.info("Generating narratives using local LLM...")
             # Get the top theme for each text
-            top_theme_list = [results[i].get('Themes', '').split(',')[0].strip() for i in range(len(texts))]
+            top_theme_list = [results[i].get('Themes', '').split(',')[0].strip() for i in range(len(analysis_texts))]
             theme_labels = lbls if 'lbls' in dir() else guidance_labels or DEFAULT_ZS_LABELS
 
-            narratives = generate_narratives_batch(texts, theme_labels, top_theme_list)
+            narratives = generate_narratives_batch(analysis_texts, theme_labels, top_theme_list)
 
             for i, narrative in enumerate(narratives):
                 results[i]['Narrative'] = narrative

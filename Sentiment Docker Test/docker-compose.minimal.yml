@@ -24,13 +24,14 @@ services:
       - ./index.html:/usr/share/nginx/html/index.html:ro
 
   # ============================================================
-  # NLP Service - Sentiment, Entities, Topics, etc.
+  # NLP Service - Minimal: Batch Excel Processing Only
+  # Models: Sentiment, Zero-shot themes, Translation, Narrative
   # ============================================================
   nlp:
     profiles: ["full", "core", "nlp"]
     build:
       context: .
-      dockerfile: Dockerfile.nlp
+      dockerfile: Dockerfile.nlp.minimal
     ports:
       - "8001:8001"
     environment:

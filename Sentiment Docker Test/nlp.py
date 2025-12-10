@@ -679,6 +679,96 @@ def run_task(
     raise ValueError(f"Unknown task: {task}")
 
 
+# -------------------- Translation (Multilingual to English) -------------------- #
+
+_translation_model = None
+_translation_tokenizer = None
+
+def _load_translation_model():
+    """Load translation model (Helsinki-NLP opus-mt-mul-en)"""
+    global _translation_model, _translation_tokenizer
+
+    if _translation_model is not None:
+        return _translation_model, _translation_tokenizer
+
+    import torch
+    from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+
+    model_id = "Helsinki-NLP/opus-mt-mul-en"
+    hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
+
+    print(f"[nlp] Loading translation model: {model_id}")
+
+    _translation_tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token)
+    _translation_model = AutoModelForSeq2SeqLM.from_pretrained(model_id, token=hf_token)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _translation_model = _translation_model.to(device)
+
+    print(f"[nlp] Translation model loaded on {device.upper()}")
+    return _translation_model, _translation_tokenizer
+
+
+def translate_to_english(text: str, max_length: int = 512) -> str:
+    """
+    Translate text to English using Helsinki-NLP opus-mt-mul-en.
+
+    Args:
+        text: Text in any language
+        max_length: Maximum output length
+
+    Returns:
+        English translation
+    """
+    import torch
+
+    if not text or not text.strip():
+        return ""
+
+    model, tokenizer = _load_translation_model()
+    device = next(model.parameters()).device
+
+    # Truncate input if too long
+    inputs = tokenizer(text[:5000], return_tensors="pt", truncation=True, max_length=512)
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model.generate(**inputs, max_length=max_length)
+
+    translated = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return translated
+
+
+def translate_batch(texts: List[str], max_length: int = 512) -> List[str]:
+    """
+    Translate multiple texts to English.
+
+    Args:
+        texts: List of texts in any language
+        max_length: Maximum output length per text
+
+    Returns:
+        List of English translations
+    """
+    translations = []
+    for i, text in enumerate(texts):
+        if not text or not text.strip():
+            translations.append("")
+            continue
+
+        try:
+            translated = translate_to_english(text, max_length)
+            translations.append(translated)
+        except Exception as e:
+            print(f"[nlp] Translation failed for item {i}: {e}")
+            translations.append(text)  # Fallback to original
+
+        if (i + 1) % 20 == 0:
+            print(f"[nlp] Translated {i + 1}/{len(texts)} texts...")
+
+    return translations
+
+
 # -------------------- Local LLM for Narrative Generation -------------------- #
 
 _narrative_model = None
