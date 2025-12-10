@@ -817,8 +817,43 @@ async def batch_excel(
         if not name.endswith((".xlsx", ".xlsm", ".xls")):
             raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx, .xlsm, .xls)")
 
-        # Extract texts from Excel
-        texts = _texts_from_excel_bytes(b, sheet_names=sheets, text_column=text_column)
+        # Check for Guidance sheet/column to extract theme labels
+        guidance_labels = None
+        excel_file = pd.ExcelFile(io.BytesIO(b))
+
+        # Look for Guidance tab (case-insensitive)
+        guidance_sheet = None
+        for sheet in excel_file.sheet_names:
+            if sheet.lower() == 'guidance':
+                guidance_sheet = sheet
+                break
+
+        if guidance_sheet:
+            guidance_df = pd.read_excel(excel_file, sheet_name=guidance_sheet)
+            # Look for Guidance column (case-insensitive)
+            guidance_col = None
+            for col in guidance_df.columns:
+                if str(col).lower() == 'guidance':
+                    guidance_col = col
+                    break
+
+            if guidance_col:
+                # Extract unique non-empty values as theme labels
+                guidance_labels = guidance_df[guidance_col].dropna().astype(str).str.strip()
+                guidance_labels = [lbl for lbl in guidance_labels.unique() if lbl]
+                logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet: {guidance_labels}")
+
+        # Default text_column to "Body" if not specified
+        if not text_column:
+            text_column = "Body"
+
+        # Extract texts from Excel (excluding Guidance sheet)
+        process_sheets = sheets
+        if not process_sheets and guidance_sheet:
+            # Exclude Guidance sheet from processing if no sheets specified
+            process_sheets = ','.join([s for s in excel_file.sheet_names if s != guidance_sheet])
+
+        texts = _texts_from_excel_bytes(b, sheet_names=process_sheets, text_column=text_column)
         logger.info(f"Extracted {len(texts)} texts from Excel")
 
         # Prepare results list - one dict per text row
@@ -876,9 +911,18 @@ async def batch_excel(
 
         # Run theme/topic extraction if requested
         if extract_themes:
-            logger.info(f"Running theme extraction with preset: {theme_preset}, top_themes={top_themes}")
-            # Parse labels for zero-shot
-            lbls = _parse_labels_csv(labels) if labels else DEFAULT_ZS_LABELS
+            # Use guidance_labels if extracted from Guidance sheet, else user-provided, else defaults
+            if guidance_labels:
+                lbls = guidance_labels
+                logger.info(f"Using {len(lbls)} theme labels from Guidance sheet")
+            elif labels:
+                lbls = _parse_labels_csv(labels)
+                logger.info(f"Using {len(lbls)} user-provided theme labels")
+            else:
+                lbls = DEFAULT_ZS_LABELS
+                logger.info(f"Using {len(lbls)} default theme labels")
+
+            logger.info(f"Running theme extraction with preset: {theme_preset}, top_themes={top_themes}, labels={lbls[:5]}{'...' if len(lbls) > 5 else ''}")
             theme_preds = run_task(texts, preset=theme_preset, labels=lbls)
 
             for i, pred in enumerate(theme_preds):
@@ -910,11 +954,11 @@ async def batch_excel(
         elapsed_time = time.time() - start_time
         logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes} in {elapsed_time:.2f}s")
 
-        # Create annotated Excel
+        # Create annotated Excel (use process_sheets to exclude Guidance sheet)
         excel_bytes = _process_excel_with_predictions(
             b,
             results,
-            sheet_names=sheets,
+            sheet_names=process_sheets,
             text_column=text_column,
             preset=f"sentiment+themes"
         )
