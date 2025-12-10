@@ -835,20 +835,38 @@ async def batch_excel(
 
             all_values = set()
 
-            # Determine which column contains the theme labels
-            # Format: Col A = numbers (1,2,3...), Col B = theme labels
-            if len(guidance_df.columns) >= 2:
-                first_col = guidance_df.iloc[:, 0]
-                # Check if first column is mostly numeric (ranking numbers)
-                numeric_count = sum(1 for v in first_col.dropna() if str(v).strip().replace('.', '').isdigit())
-                if numeric_count >= len(first_col.dropna()) * 0.3:
-                    # First column is ranking, use second column for labels
-                    label_col = 1
-                    logger.info("Detected numeric ranking in column A, using column B for labels")
-                else:
-                    label_col = 0
-            else:
-                label_col = 0
+            # Find the numeric ranking column (could be any column, not just A)
+            # Then use the next column for labels
+            ranking_col = None
+            label_col = None
+
+            for col_idx in range(len(guidance_df.columns)):
+                col_data = guidance_df.iloc[:, col_idx].dropna()
+                if len(col_data) == 0:
+                    continue
+                # Check if this column is mostly numeric (ranking numbers 1,2,3...)
+                numeric_count = sum(1 for v in col_data if str(v).strip().replace('.', '').isdigit())
+                if numeric_count >= len(col_data) * 0.3 and numeric_count >= 3:
+                    ranking_col = col_idx
+                    # Use the next column for labels if it exists
+                    if col_idx + 1 < len(guidance_df.columns):
+                        label_col = col_idx + 1
+                        logger.info(f"Detected numeric ranking in column {col_idx}, using column {label_col} for labels")
+                    break
+
+            # If no ranking column found, find first column with text content
+            if label_col is None:
+                for col_idx in range(len(guidance_df.columns)):
+                    col_data = guidance_df.iloc[:, col_idx].dropna()
+                    # Check if column has substantial text (not just numbers)
+                    text_count = sum(1 for v in col_data if not str(v).strip().replace('.', '').isdigit() and len(str(v).strip()) > 2)
+                    if text_count >= 3:
+                        label_col = col_idx
+                        logger.info(f"Using column {col_idx} for labels (text content detected)")
+                        break
+
+            if label_col is None:
+                label_col = 0  # Fallback to first column
 
             # Extract labels from the identified column
             for val in guidance_df.iloc[:, label_col].dropna():
