@@ -110,10 +110,10 @@ requests.Session.request = _patched_request
 
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModelForCausalLM, AutoModelForSeq2SeqLM
 
-# 1. Sentiment Analysis
-print('Downloading cardiffnlp/twitter-roberta-base-sentiment-latest...')
-AutoTokenizer.from_pretrained('cardiffnlp/twitter-roberta-base-sentiment-latest')
-AutoModelForSequenceClassification.from_pretrained('cardiffnlp/twitter-roberta-base-sentiment-latest')
+# 1. Stance Detection (NLI-based)
+print('Downloading MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli for stance detection...')
+AutoTokenizer.from_pretrained('MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli')
+AutoModelForSequenceClassification.from_pretrained('MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli')
 
 # 2. Zero-shot Classification (for themes)
 print('Downloading facebook/bart-large-mnli...')

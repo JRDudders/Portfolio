@@ -787,29 +787,31 @@ async def analyze_file(
 @app.post("/batch-excel")
 async def batch_excel(
     file: UploadFile = File(...),
-    sentiment_preset: Optional[str] = Query("sentiment-twitter", description="Sentiment preset"),
+    stance_preset: Optional[str] = Query("stance-deberta", description="Stance detection preset"),
     theme_preset: Optional[str] = Query("zeroshot-bart", description="Theme/zero-shot preset"),
     labels: Optional[str] = Query(None, description="Comma-separated theme labels"),
+    hypothesis: Optional[str] = Query(None, description="Custom hypothesis for stance detection (auto-generated from guidance if not provided)"),
     text_column: Optional[str] = Query(None, description="Column name containing text"),
     sheets: Optional[str] = Query(None, description="Comma-separated sheet names to process"),
-    extract_sentiment: bool = Query(True, description="Extract sentiment"),
+    extract_stance: bool = Query(True, description="Extract stance relative to hypothesis"),
     extract_themes: bool = Query(True, description="Extract themes"),
     top_themes: int = Query(3, description="Number of top themes to return"),
     generate_narrative: bool = Query(True, description="Generate narrative explaining theme relevance"),
 ):
     """
-    Batch process Excel file with sentiment AND theme extraction.
+    Batch process Excel file with stance detection AND theme extraction.
 
-    Returns Excel file with 4 new columns:
-    - Sentiment (POSITIVE/NEGATIVE/NEUTRAL)
-    - Sentiment_Confidence (0-1 score)
-    - Theme (top predicted theme)
-    - Theme_Confidence (0-1 score)
+    Returns Excel file with columns:
+    - Stance (SUPPORT/OPPOSE/NEUTRAL) - relative to guidance hypothesis
+    - Stance_Confidence (0-1 score)
+    - Themes (top N predicted themes)
+    - Themes_Confidence (0-1 scores)
+    - Narrative (LLM-generated explanation)
     """
     import time
     start_time = time.time()
 
-    logger.info(f"Batch Excel processing: {file.filename}, sentiment={extract_sentiment}, themes={extract_themes}")
+    logger.info(f"Batch Excel processing: {file.filename}, stance={extract_stance}, themes={extract_themes}")
 
     try:
         b = await file.read()
@@ -886,6 +888,19 @@ async def batch_excel(
 
             guidance_labels = list(all_values)
             logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet: {guidance_labels}")
+
+        # Generate hypothesis from guidance if not provided
+        generated_hypothesis = hypothesis
+        if not generated_hypothesis and guidance_labels:
+            # Create hypothesis from guidance themes
+            themes_summary = ", ".join(guidance_labels[:5])
+            if len(guidance_labels) > 5:
+                themes_summary += f" (and {len(guidance_labels) - 5} more)"
+            generated_hypothesis = f"U.S. priorities as outlined in the guidance ({themes_summary}) are viewed favorably and having a positive influence."
+            logger.info(f"Generated hypothesis: {generated_hypothesis}")
+        elif not generated_hypothesis:
+            generated_hypothesis = "U.S. strategic priorities and interests are viewed favorably in this content."
+            logger.info(f"Using default hypothesis: {generated_hypothesis}")
 
         # Default text_column to "Body" if not specified
         if not text_column:
@@ -1057,26 +1072,22 @@ async def batch_excel(
                 return top[0], top[1]
             return None, 0.0
 
-        # Run sentiment analysis if requested
-        if extract_sentiment:
-            logger.info(f"Running sentiment analysis with preset: {sentiment_preset}")
-            sentiment_preds = run_task(analysis_texts, preset=sentiment_preset)
+        # Run stance detection if requested
+        if extract_stance:
+            logger.info(f"Running stance detection with preset: {stance_preset}")
+            logger.info(f"Hypothesis: {generated_hypothesis}")
+            stance_preds = run_task(analysis_texts, preset=stance_preset, claim=generated_hypothesis)
 
-            for i, pred in enumerate(sentiment_preds):
+            for i, pred in enumerate(stance_preds):
                 if isinstance(pred, dict):
-                    # Unwrap "topics" key if present (run_task wraps results)
-                    if 'topics' in pred:
-                        pred = pred['topics']
-
-                    # Find the label with highest score
-                    if 'label' in pred:
-                        results[i]['Sentiment_Score'] = pred['label']
-                        results[i]['Sentiment_Confidence'] = _extract_confidence(pred.get('score', pred.get('confidence', 0)))
-                    else:
-                        # Format: {'POSITIVE': 0.9, 'NEGATIVE': 0.1}
-                        top_label = max(pred.items(), key=lambda x: x[1] if isinstance(x[1], (int, float)) else 0)
-                        results[i]['Sentiment_Score'] = top_label[0]
-                        results[i]['Sentiment_Confidence'] = round(float(top_label[1]), 4) if isinstance(top_label[1], (int, float)) else 0
+                    # Stance detection returns: {"stance": "SUPPORT/OPPOSE/NEUTRAL", "scores": {...}, "claim": "..."}
+                    results[i]['Stance'] = pred.get('stance', 'NEUTRAL')
+                    scores = pred.get('scores', {})
+                    # Get confidence for the predicted stance
+                    stance_label = pred.get('stance', 'NEUTRAL')
+                    confidence = scores.get(stance_label, scores.get(stance_label.lower(), 0))
+                    results[i]['Stance_Confidence'] = round(float(confidence), 4) if isinstance(confidence, (int, float)) else 0
+                    results[i]['Hypothesis'] = generated_hypothesis
 
         # Run theme/topic extraction if requested
         if extract_themes:
@@ -1135,7 +1146,7 @@ async def batch_excel(
             logger.info(f"Generated {len([n for n in narratives if n])} narratives")
 
         elapsed_time = time.time() - start_time
-        logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes}, narratives={generate_narrative} in {elapsed_time:.2f}s")
+        logger.info(f"Processing complete: {len(results)} rows with stance={extract_stance}, themes={extract_themes}, narratives={generate_narrative} in {elapsed_time:.2f}s")
 
         # Create annotated Excel (use process_sheets to exclude Guidance sheet)
         excel_bytes = _process_excel_with_predictions(

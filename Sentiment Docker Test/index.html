@@ -309,26 +309,30 @@
         </div>
 
         <div class="inline" style="margin-top:12px">
-          <label class="checkbox"><input type="checkbox" id="batch-extract-sentiment" checked/> Extract Sentiment</label>
+          <label class="checkbox"><input type="checkbox" id="batch-extract-stance" checked/> Extract Stance</label>
           <label class="checkbox" style="margin-left:16px"><input type="checkbox" id="batch-extract-themes" checked/> Extract Themes</label>
           <label class="checkbox" style="margin-left:16px"><input type="checkbox" id="batch-generate-narrative" checked/> Generate Narrative</label>
         </div>
 
         <p style="font-size:11px;color:var(--muted);margin:8px 0">
-          <strong>Auto-detected features:</strong> URLs in sheets are fetched automatically. "Guidance" sheet with theme hierarchy is used for labels.
+          <strong>Auto-detected features:</strong> URLs fetched automatically. "Guidance" sheet used for theme labels AND hypothesis generation.
         </p>
+
+        <label for="batch-hypothesis">Stance Hypothesis (optional - auto-generated from Guidance if empty)</label>
+        <input id="batch-hypothesis" type="text" placeholder="e.g., U.S. priorities are viewed favorably in this content"/>
+        <p style="font-size:11px;color:var(--muted);margin:-4px 0 8px">Stance detection measures SUPPORT/OPPOSE/NEUTRAL relative to this hypothesis</p>
 
         <label for="batch-theme-labels">Custom Theme Labels (optional, comma-separated)</label>
         <input id="batch-theme-labels" type="text" placeholder="e.g., UNITAS exercises,military cooperation,regional security"/>
-        <p style="font-size:11px;color:var(--muted);margin:-4px 0 8px">Leave empty for defaults: politics, economy, military, health, science, technology, sports, entertainment, climate, crime, education, misinformation, opinion</p>
+        <p style="font-size:11px;color:var(--muted);margin:-4px 0 8px">Leave empty to use themes from Guidance sheet</p>
 
         <details>
           <summary>Advanced Options</summary>
           <div style="margin-top:12px">
-            <label for="batch-sentiment-preset">Sentiment Preset</label>
-            <select id="batch-sentiment-preset">
-              <option value="sentiment-twitter" selected>Twitter RoBERTa (fast)</option>
-              <option value="sentiment-sst2">SST-2 DistilBERT (accurate)</option>
+            <label for="batch-stance-preset">Stance Preset</label>
+            <select id="batch-stance-preset">
+              <option value="stance-deberta" selected>DeBERTa-base (fast)</option>
+              <option value="stance-deberta-large">DeBERTa-large (accurate)</option>
             </select>
 
             <label for="batch-theme-preset">Theme Preset</label>
@@ -2849,19 +2853,20 @@
       const runBtn = document.getElementById('run-batch-excel');
 
       // Get options
-      const extractSentiment = document.getElementById('batch-extract-sentiment').checked;
+      const extractStance = document.getElementById('batch-extract-stance').checked;
       const extractThemes = document.getElementById('batch-extract-themes').checked;
       const generateNarrative = document.getElementById('batch-generate-narrative').checked;
+      const hypothesis = document.getElementById('batch-hypothesis').value.trim();
       const themeLabels = document.getElementById('batch-theme-labels').value.trim();
-      const sentimentPreset = document.getElementById('batch-sentiment-preset').value;
+      const stancePreset = document.getElementById('batch-stance-preset').value;
       const themePreset = document.getElementById('batch-theme-preset').value;
       const textColumn = document.getElementById('batch-text-column').value.trim();
       const sheets = document.getElementById('batch-sheets').value.trim();
       const topThemes = document.getElementById('batch-top-themes').value;
       const includeConfidence = document.getElementById('batch-confidence').checked;
 
-      if(!extractSentiment && !extractThemes) {
-        setStatus(statusBatch, 'Please select at least one analysis type (Sentiment or Themes).', 'warn');
+      if(!extractStance && !extractThemes) {
+        setStatus(statusBatch, 'Please select at least one analysis type (Stance or Themes).', 'warn');
         return;
       }
 
@@ -2872,12 +2877,13 @@
         const fd = new FormData();
         fd.append('file', file, file.name);
 
-        // Build query params for batch-excel endpoint (runs BOTH sentiment and theme analysis)
+        // Build query params for batch-excel endpoint (runs stance and theme analysis)
         const params = new URLSearchParams();
-        params.append('sentiment_preset', sentimentPreset);
+        params.append('stance_preset', stancePreset);
         params.append('theme_preset', themePreset);
-        params.append('extract_sentiment', extractSentiment);
+        params.append('extract_stance', extractStance);
         params.append('extract_themes', extractThemes);
+        if(hypothesis) params.append('hypothesis', hypothesis);
         params.append('top_themes', topThemes);
         params.append('generate_narrative', generateNarrative);
 
