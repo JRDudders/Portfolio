@@ -311,7 +311,12 @@
         <div class="inline" style="margin-top:12px">
           <label class="checkbox"><input type="checkbox" id="batch-extract-sentiment" checked/> Extract Sentiment</label>
           <label class="checkbox" style="margin-left:16px"><input type="checkbox" id="batch-extract-themes" checked/> Extract Themes</label>
+          <label class="checkbox" style="margin-left:16px"><input type="checkbox" id="batch-generate-narrative" checked/> Generate Narrative</label>
         </div>
+
+        <p style="font-size:11px;color:var(--muted);margin:8px 0">
+          <strong>Auto-detected features:</strong> URLs in sheets are fetched automatically. "Guidance" sheet with theme hierarchy is used for labels.
+        </p>
 
         <label for="batch-theme-labels">Custom Theme Labels (optional, comma-separated)</label>
         <input id="batch-theme-labels" type="text" placeholder="e.g., UNITAS exercises,military cooperation,regional security"/>
@@ -2846,6 +2851,7 @@
       // Get options
       const extractSentiment = document.getElementById('batch-extract-sentiment').checked;
       const extractThemes = document.getElementById('batch-extract-themes').checked;
+      const generateNarrative = document.getElementById('batch-generate-narrative').checked;
       const themeLabels = document.getElementById('batch-theme-labels').value.trim();
       const sentimentPreset = document.getElementById('batch-sentiment-preset').value;
       const themePreset = document.getElementById('batch-theme-preset').value;
@@ -2873,6 +2879,7 @@
         params.append('extract_sentiment', extractSentiment);
         params.append('extract_themes', extractThemes);
         params.append('top_themes', topThemes);
+        params.append('generate_narrative', generateNarrative);
 
         if(themeLabels) params.append('labels', themeLabels);
         if(textColumn) params.append('text_column', textColumn);
