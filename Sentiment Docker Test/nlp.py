@@ -679,6 +679,130 @@ def run_task(
     raise ValueError(f"Unknown task: {task}")
 
 
+# -------------------- Local LLM for Narrative Generation -------------------- #
+
+_narrative_model = None
+_narrative_tokenizer = None
+
+def _load_narrative_model():
+    """Load local LLM for narrative generation (Phi-3-mini)"""
+    global _narrative_model, _narrative_tokenizer
+
+    if _narrative_model is not None:
+        return _narrative_model, _narrative_tokenizer
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    model_id = "microsoft/Phi-3-mini-4k-instruct"
+    hf_token = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HF_TOKEN")
+
+    print(f"[nlp] Loading narrative LLM: {model_id}")
+
+    _narrative_tokenizer = AutoTokenizer.from_pretrained(model_id, token=hf_token, trust_remote_code=True)
+    _narrative_model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        token=hf_token,
+        trust_remote_code=True,
+        torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+        device_map="auto" if torch.cuda.is_available() else None,
+    )
+
+    if not torch.cuda.is_available():
+        _narrative_model = _narrative_model.to("cpu")
+
+    print(f"[nlp] Narrative LLM loaded on {'GPU' if torch.cuda.is_available() else 'CPU'}")
+    return _narrative_model, _narrative_tokenizer
+
+
+def generate_narrative(body_text: str, themes: List[str], top_theme: str) -> str:
+    """
+    Generate a narrative explaining how the body text relates to identified themes.
+
+    Args:
+        body_text: The extracted text content
+        themes: List of all possible theme categories
+        top_theme: The top identified theme for this text
+
+    Returns:
+        A brief narrative explaining the relevance
+    """
+    import torch
+
+    model, tokenizer = _load_narrative_model()
+
+    # Truncate body text if too long
+    max_body_chars = 2000
+    if len(body_text) > max_body_chars:
+        body_text = body_text[:max_body_chars] + "..."
+
+    themes_str = ", ".join(themes)
+
+    prompt = f"""<|user|>
+You are an analyst. Given the following text and its identified theme, write a brief 1-2 sentence narrative explaining how the text relates to the theme "{top_theme}".
+
+Possible themes: {themes_str}
+Identified theme: {top_theme}
+
+Text:
+{body_text}
+
+Write a concise narrative (1-2 sentences) explaining the relevance to the theme. If the theme is "Other", note any tangential relevance to other themes.<|end|>
+<|assistant|>"""
+
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
+    if torch.cuda.is_available():
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=150,
+            temperature=0.7,
+            do_sample=True,
+            top_p=0.9,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+    return response.strip()
+
+
+def generate_narratives_batch(
+    bodies: List[str],
+    themes: List[str],
+    top_themes: List[str],
+) -> List[str]:
+    """
+    Generate narratives for multiple texts.
+
+    Args:
+        bodies: List of body texts
+        themes: List of all possible theme categories
+        top_themes: List of top theme for each text
+
+    Returns:
+        List of narrative strings
+    """
+    narratives = []
+    for i, (body, top_theme) in enumerate(zip(bodies, top_themes)):
+        if not body or not body.strip():
+            narratives.append("")
+            continue
+
+        try:
+            narrative = generate_narrative(body, themes, top_theme)
+            narratives.append(narrative)
+        except Exception as e:
+            print(f"[nlp] Narrative generation failed for item {i}: {e}")
+            narratives.append("")
+
+        if (i + 1) % 10 == 0:
+            print(f"[nlp] Generated {i + 1}/{len(bodies)} narratives...")
+
+    return narratives
+
+
 __all__ = [
     "MODEL_TASK",
     "MODEL_ID",

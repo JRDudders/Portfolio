@@ -113,7 +113,7 @@ def _patched_request(self, *args, **kwargs):
     return _original_request(self, *args, **kwargs)
 requests.Session.request = _patched_request
 
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModelForCausalLM
 
 models = [
     'cardiffnlp/twitter-roberta-base-sentiment-latest',
@@ -128,6 +128,11 @@ for model in models:
     print(f'Downloading {model}...')
     AutoTokenizer.from_pretrained(model)
     AutoModelForSequenceClassification.from_pretrained(model)
+
+# Download Phi-3-mini for narrative generation (local LLM)
+print('Downloading microsoft/Phi-3-mini-4k-instruct for narrative generation...')
+AutoTokenizer.from_pretrained('microsoft/Phi-3-mini-4k-instruct', trust_remote_code=True)
+AutoModelForCausalLM.from_pretrained('microsoft/Phi-3-mini-4k-instruct', trust_remote_code=True)
 
 print('All models downloaded successfully!')
 EOF

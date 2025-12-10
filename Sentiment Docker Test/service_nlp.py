@@ -42,7 +42,7 @@ from nlp_processor import (
     extract_entities,
     analyze_topics
 )
-from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task
+from nlp import run_task, PRESETS, DEFAULT_ZS_LABELS, preprocess_for_task, generate_narratives_batch
 from adapters import process_url
 from excel_utils import (
     preview_excel_structure,
@@ -795,6 +795,7 @@ async def batch_excel(
     extract_sentiment: bool = Query(True, description="Extract sentiment"),
     extract_themes: bool = Query(True, description="Extract themes"),
     top_themes: int = Query(3, description="Number of top themes to return"),
+    generate_narrative: bool = Query(True, description="Generate narrative explaining theme relevance"),
 ):
     """
     Batch process Excel file with sentiment AND theme extraction.
@@ -1062,8 +1063,22 @@ async def batch_excel(
                             results[i]['Themes'] = ', '.join([p[0] for p in top_n])
                             results[i]['Themes_Confidence'] = ', '.join([str(round(p[1], 4)) for p in top_n])
 
+        # Generate narratives if requested (requires themes to be extracted)
+        if generate_narrative and extract_themes:
+            logger.info("Generating narratives using local LLM...")
+            # Get the top theme for each text
+            top_theme_list = [results[i].get('Themes', '').split(',')[0].strip() for i in range(len(texts))]
+            theme_labels = lbls if 'lbls' in dir() else guidance_labels or DEFAULT_ZS_LABELS
+
+            narratives = generate_narratives_batch(texts, theme_labels, top_theme_list)
+
+            for i, narrative in enumerate(narratives):
+                results[i]['Narrative'] = narrative
+
+            logger.info(f"Generated {len([n for n in narratives if n])} narratives")
+
         elapsed_time = time.time() - start_time
-        logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes} in {elapsed_time:.2f}s")
+        logger.info(f"Processing complete: {len(results)} rows with sentiment={extract_sentiment}, themes={extract_themes}, narratives={generate_narrative} in {elapsed_time:.2f}s")
 
         # Create annotated Excel (use process_sheets to exclude Guidance sheet)
         excel_bytes = _process_excel_with_predictions(
