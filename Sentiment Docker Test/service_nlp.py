@@ -948,33 +948,45 @@ async def batch_excel(
 
             if url_col and text_column not in df.columns:
                 logger.info(f"Sheet '{sheet}': Found URL column '{url_col}', fetching content for Body column")
-                body_texts = []
 
                 # Get browser for JS-rendered content
                 browser = await ensure_browser(app)
 
-                for idx, url in enumerate(df[url_col]):
+                # Parallel URL fetching with semaphore to limit concurrent requests
+                MAX_CONCURRENT_FETCHES = 10
+                semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
+
+                async def fetch_single_url(idx: int, url) -> tuple:
+                    """Fetch a single URL and return (index, text)"""
                     if pd.isna(url) or not str(url).strip():
-                        body_texts.append('')
-                        continue
+                        return (idx, '')
 
                     url_str = str(url).strip()
-                    try:
-                        # Fetch URL content with JavaScript rendering (Playwright)
-                        content_bytes, kind = await fetch_url_bytes_rendered(
-                            url_str,
-                            browser,
-                            timeout_ms=30000,  # 30 second timeout per page
-                            scroll_passes=2    # Light scrolling to trigger lazy-load
-                        )
-                        text = _extract_text_from_html(content_bytes.decode('utf-8', errors='ignore'))
-                        body_texts.append(text[:50000])  # Limit text length
-                        url_fetch_count += 1
-                        if url_fetch_count % 10 == 0:
-                            logger.info(f"Fetched {url_fetch_count} URLs...")
-                    except Exception as e:
-                        logger.warning(f"Failed to fetch URL {url_str}: {e}")
-                        body_texts.append('')
+                    async with semaphore:
+                        try:
+                            content_bytes, kind = await fetch_url_bytes_rendered(
+                                url_str,
+                                browser,
+                                timeout_ms=30000,
+                                scroll_passes=2
+                            )
+                            text = _extract_text_from_html(content_bytes.decode('utf-8', errors='ignore'))
+                            return (idx, text[:50000])
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch URL {url_str}: {e}")
+                            return (idx, '')
+
+                # Create tasks for all URLs
+                tasks = [fetch_single_url(idx, url) for idx, url in enumerate(df[url_col])]
+                logger.info(f"Sheet '{sheet}': Fetching {len(tasks)} URLs in parallel (max {MAX_CONCURRENT_FETCHES} concurrent)")
+
+                # Execute all tasks in parallel
+                results = await asyncio.gather(*tasks)
+
+                # Sort results by index and extract texts
+                results.sort(key=lambda x: x[0])
+                body_texts = [text for _, text in results]
+                url_fetch_count += len([t for t in body_texts if t])
 
                 df[text_column] = body_texts
                 logger.info(f"Sheet '{sheet}': Populated {len([t for t in body_texts if t])} Body cells from URLs")
