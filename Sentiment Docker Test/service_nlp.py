@@ -36,7 +36,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import URL fetch utility
-from url_fetch import fetch_url, guess_file_extension
+from url_fetch import fetch_url, guess_file_extension, get_wayback_snapshot
 
 # Import NLP processing modules
 from nlp_processor import (
@@ -988,6 +988,24 @@ async def batch_excel(
                             return (idx, text[:50000])
                         except Exception as e:
                             logger.warning(f"Failed to fetch URL {url_str}: {e}")
+
+                            # Try Wayback Machine as fallback
+                            if not url_str.startswith('https://web.archive.org/'):
+                                try:
+                                    wayback_url = await get_wayback_snapshot(url_str)
+                                    if wayback_url:
+                                        logger.info(f"Trying Wayback Machine: {wayback_url}")
+                                        content_bytes, kind = await fetch_url_bytes_rendered(
+                                            wayback_url,
+                                            browser,
+                                            timeout_ms=30000,
+                                            scroll_passes=2
+                                        )
+                                        text = _extract_text_from_html(content_bytes.decode('utf-8', errors='ignore'))
+                                        return (idx, text[:50000])
+                                except Exception as wb_e:
+                                    logger.warning(f"Wayback fallback also failed for {url_str}: {wb_e}")
+
                             return (idx, '')
 
                 # Create tasks for all URLs
