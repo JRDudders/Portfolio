@@ -968,6 +968,10 @@ async def batch_excel(
                         return (idx, '')
 
                     url_str = str(url).strip()
+                    # Auto-fix defanged URLs (hxxps -> https, hxxp -> http, [.] -> .)
+                    url_str = url_str.replace('hxxps://', 'https://').replace('hxxp://', 'http://')
+                    url_str = url_str.replace('[.]', '.').replace('[dot]', '.')
+
                     async with semaphore:
                         try:
                             # Small random delay to avoid detection patterns
