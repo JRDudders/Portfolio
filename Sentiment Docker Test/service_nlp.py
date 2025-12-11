@@ -18,6 +18,8 @@ import uvicorn
 import os
 import io
 import json
+import asyncio
+import random
 import pandas as pd
 from bs4 import BeautifulSoup
 import trafilatura
@@ -959,7 +961,6 @@ async def batch_excel(
                 MIN_DELAY_MS = 300   # 0.3 seconds minimum
                 MAX_DELAY_MS = 800   # Randomize up to 0.8s to look natural
                 semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
-                import random
 
                 async def fetch_single_url(idx: int, url) -> tuple:
                     """Fetch a single URL and return (index, text)"""
