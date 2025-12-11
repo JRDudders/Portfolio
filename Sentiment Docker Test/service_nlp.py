@@ -1006,7 +1006,8 @@ async def batch_excel(
                                 except Exception as wb_e:
                                     logger.warning(f"Wayback fallback also failed for {url_str}: {wb_e}")
 
-                            return (idx, '')
+                            # Return failure message instead of empty string
+                            return (idx, f'[FETCH FAILED: {url_str}]')
 
                 # Create tasks for all URLs
                 tasks = [fetch_single_url(idx, url) for idx, url in enumerate(df[url_col])]
@@ -1123,7 +1124,12 @@ async def batch_excel(
             stance_preds = run_task(analysis_texts, preset=stance_preset, claim=generated_hypothesis)
 
             for i, pred in enumerate(stance_preds):
-                if isinstance(pred, dict):
+                # Check if source text was a failed fetch
+                if analysis_texts[i].startswith('[FETCH FAILED'):
+                    results[i]['Stance'] = '[UNAVAILABLE]'
+                    results[i]['Stance_Confidence'] = 0
+                    results[i]['Hypothesis'] = generated_hypothesis
+                elif isinstance(pred, dict):
                     # Stance detection returns: {"stance": "SUPPORT/OPPOSE/NEUTRAL", "scores": {...}, "claim": "..."}
                     results[i]['Stance'] = pred.get('stance', 'NEUTRAL')
                     scores = pred.get('scores', {})
@@ -1150,7 +1156,11 @@ async def batch_excel(
             theme_preds = run_task(analysis_texts, preset=theme_preset, labels=lbls)
 
             for i, pred in enumerate(theme_preds):
-                if isinstance(pred, dict):
+                # Check if source text was a failed fetch
+                if analysis_texts[i].startswith('[FETCH FAILED'):
+                    results[i]['Themes'] = '[UNAVAILABLE]'
+                    results[i]['Themes_Confidence'] = '0'
+                elif isinstance(pred, dict):
                     # Unwrap "topics" key if present (run_task wraps results)
                     if 'topics' in pred:
                         pred = pred['topics']
@@ -1185,7 +1195,11 @@ async def batch_excel(
             narratives = generate_narratives_batch(analysis_texts, theme_labels, top_theme_list)
 
             for i, narrative in enumerate(narratives):
-                results[i]['Narrative'] = narrative
+                # Check if the source text was a failed fetch
+                if analysis_texts[i].startswith('[FETCH FAILED'):
+                    results[i]['Narrative'] = '[NARRATIVE UNAVAILABLE: URL fetch failed]'
+                else:
+                    results[i]['Narrative'] = narrative
 
             logger.info(f"Generated {len([n for n in narratives if n])} narratives")
 
