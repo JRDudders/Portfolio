@@ -8,6 +8,7 @@ httpx>=0.27  # For async URL fetching
 
 # NLP Core
 transformers>=4.40,<4.48  # Pin below 4.48 which requires torch 2.6 (not yet released)
+accelerate>=0.26.0  # Required for Phi-3 and other large models with device_map
 # torch>=2.3  # Commented out - installed separately based on CPU/GPU in Dockerfile
 sentencepiece>=0.1.99
 sentence-transformers>=3.0
