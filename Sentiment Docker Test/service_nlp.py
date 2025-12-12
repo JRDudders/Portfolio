@@ -1007,6 +1007,9 @@ async def batch_excel(
                 MAX_DELAY_MS = 3000  # Randomize up to 3s to look natural
                 semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
 
+                # Track if we need emergency checkpoint save on interrupt
+                url_fetch_interrupted = False
+
                 async def fetch_single_url(idx: int, url) -> tuple:
                     """Fetch a single URL and return (index, text)"""
                     if pd.isna(url) or not str(url).strip():
@@ -1060,21 +1063,58 @@ async def batch_excel(
                 logger.info(f"Sheet '{sheet}': Fetching {len(tasks)} URLs in parallel (max {MAX_CONCURRENT_FETCHES} concurrent)")
 
                 # Execute tasks and log progress as they complete
-                results = []
+                # Save incremental checkpoints every CHECKPOINT_INTERVAL URLs
+                CHECKPOINT_INTERVAL = 10
                 completed = 0
-                for coro in asyncio.as_completed(tasks):
-                    result = await coro
-                    results.append(result)
-                    completed += 1
-                    if completed % 10 == 0 or completed == len(tasks):
-                        logger.info(f"Fetched {completed}/{len(tasks)} URLs...")
-
-                # Update only the rows that were fetched (preserve existing values)
                 fetched_count = 0
-                for idx, text in results:
-                    df.at[idx, text_column] = text
-                    if text:
-                        fetched_count += 1
+                last_checkpoint = 0
+
+                try:
+                    for coro in asyncio.as_completed(tasks):
+                        idx, text = await coro
+                        # Update dataframe immediately as each URL completes
+                        df.at[idx, text_column] = text
+                        if text:
+                            fetched_count += 1
+                        completed += 1
+
+                        if completed % 10 == 0 or completed == len(tasks):
+                            logger.info(f"Fetched {completed}/{len(tasks)} URLs...")
+
+                        # Save incremental checkpoint every CHECKPOINT_INTERVAL URLs
+                        if completed - last_checkpoint >= CHECKPOINT_INTERVAL and completed < len(tasks):
+                            modified_dfs[sheet] = df
+                            # Build checkpoint Excel
+                            checkpoint_output = io.BytesIO()
+                            with pd.ExcelWriter(checkpoint_output, engine='openpyxl') as writer:
+                                for sn in excel_file.sheet_names:
+                                    if sn in modified_dfs:
+                                        modified_dfs[sn].to_excel(writer, sheet_name=sn, index=False)
+                                    else:
+                                        pd.read_excel(excel_file, sheet_name=sn).to_excel(writer, sheet_name=sn, index=False)
+                            checkpoint_output.seek(0)
+                            checkpoint_bytes = checkpoint_output.read()
+                            save_checkpoint(checkpoint_bytes, f"1_urls_partial_{completed}", original_filename)
+                            last_checkpoint = completed
+
+                except (KeyboardInterrupt, asyncio.CancelledError) as e:
+                    # Save emergency checkpoint on Ctrl+C or cancellation
+                    logger.warning(f"URL fetch interrupted after {completed}/{len(tasks)} URLs - saving emergency checkpoint...")
+                    url_fetch_interrupted = True
+                    modified_dfs[sheet] = df
+                    checkpoint_output = io.BytesIO()
+                    with pd.ExcelWriter(checkpoint_output, engine='openpyxl') as writer:
+                        for sn in excel_file.sheet_names:
+                            if sn in modified_dfs:
+                                modified_dfs[sn].to_excel(writer, sheet_name=sn, index=False)
+                            else:
+                                pd.read_excel(excel_file, sheet_name=sn).to_excel(writer, sheet_name=sn, index=False)
+                    checkpoint_output.seek(0)
+                    checkpoint_bytes = checkpoint_output.read()
+                    save_checkpoint(checkpoint_bytes, f"1_urls_interrupted_{completed}", original_filename)
+                    logger.info(f"Emergency checkpoint saved with {completed} URLs fetched")
+                    raise  # Re-raise to stop processing
+
                 url_fetch_count += fetched_count
                 logger.info(f"Sheet '{sheet}': Populated {fetched_count} Body cells from URLs")
 
