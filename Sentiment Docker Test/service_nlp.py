@@ -842,6 +842,60 @@ async def batch_excel(
         if not name.endswith((".xlsx", ".xlsm", ".xls")):
             raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx, .xlsm, .xls)")
 
+        # Detect checkpoint state - which columns already exist and are populated
+        def detect_checkpoint_state(excel_bytes: bytes, sheets_to_check: list = None) -> dict:
+            """Detect which processing stages have already been completed"""
+            xl = pd.ExcelFile(io.BytesIO(excel_bytes))
+            sheets = sheets_to_check or [s for s in xl.sheet_names if 'guidance' not in s.lower() and 'pivot' not in s.lower()]
+
+            state = {
+                'has_body': False,
+                'has_translation': False,
+                'has_stance': False,
+                'has_themes': False,
+                'has_narrative': False,
+            }
+
+            for sheet in sheets:
+                if sheet not in xl.sheet_names:
+                    continue
+                df = pd.read_excel(xl, sheet_name=sheet)
+                cols = [c.lower() for c in df.columns]
+
+                # Check Body column - populated means URL extraction done
+                if 'body' in cols:
+                    body_col = df.columns[[c.lower() for c in df.columns].index('body')]
+                    if df[body_col].notna().sum() > 0:
+                        state['has_body'] = True
+
+                # Check Body (Translated) column
+                if any('translated' in c for c in cols):
+                    for col in df.columns:
+                        if 'translated' in col.lower():
+                            if df[col].notna().sum() > 0:
+                                state['has_translation'] = True
+                            break
+
+                # Check Stance column
+                if 'stance' in cols:
+                    stance_col = df.columns[[c.lower() for c in df.columns].index('stance')]
+                    if df[stance_col].notna().sum() > 0:
+                        state['has_stance'] = True
+
+                # Check Themes column
+                if 'themes' in cols:
+                    themes_col = df.columns[[c.lower() for c in df.columns].index('themes')]
+                    if df[themes_col].notna().sum() > 0:
+                        state['has_themes'] = True
+
+                # Check Narrative column
+                if 'narrative' in cols:
+                    narr_col = df.columns[[c.lower() for c in df.columns].index('narrative')]
+                    if df[narr_col].notna().sum() > 0:
+                        state['has_narrative'] = True
+
+            return state
+
         # Check for Guidance sheet/column to extract theme labels
         guidance_labels = None
         excel_file = pd.ExcelFile(io.BytesIO(b))
@@ -952,6 +1006,31 @@ async def batch_excel(
             if excluded:
                 logger.info(f"Excluding sheets: {excluded}")
 
+        # Detect checkpoint state - which stages are already complete
+        checkpoint_state = detect_checkpoint_state(b, sheets_to_process)
+        logger.info(f"CHECKPOINT DETECTION: Body={checkpoint_state['has_body']}, "
+                   f"Translation={checkpoint_state['has_translation']}, "
+                   f"Stance={checkpoint_state['has_stance']}, "
+                   f"Themes={checkpoint_state['has_themes']}, "
+                   f"Narrative={checkpoint_state['has_narrative']}")
+
+        # Determine which stages to skip
+        skip_url_fetch = checkpoint_state['has_body']
+        skip_translation = checkpoint_state['has_translation']
+        skip_stance = checkpoint_state['has_stance']
+        skip_themes = checkpoint_state['has_themes']
+        skip_narrative = checkpoint_state['has_narrative']
+
+        if any([skip_url_fetch, skip_translation, skip_stance, skip_themes, skip_narrative]):
+            logger.info(f"RESUMING FROM CHECKPOINT - Skipping: " +
+                       ", ".join([s for s, v in [
+                           ("URL fetch", skip_url_fetch),
+                           ("Translation", skip_translation),
+                           ("Stance", skip_stance),
+                           ("Themes", skip_themes),
+                           ("Narrative", skip_narrative)
+                       ] if v]))
+
         modified_dfs = {}
         url_fetch_count = 0
 
@@ -967,7 +1046,12 @@ async def batch_excel(
                     url_col = col
                     break
 
-            if url_col and text_column not in df.columns:
+            # Check if we should fetch URLs for this sheet
+            should_fetch_urls = url_col and text_column not in df.columns and not skip_url_fetch
+            if skip_url_fetch and text_column in df.columns:
+                logger.info(f"Sheet '{sheet}': SKIPPING URL fetch (Body column already populated)")
+
+            if should_fetch_urls:
                 logger.info(f"Sheet '{sheet}': Found URL column '{url_col}', fetching content for Body column")
 
                 # Get browser for JS-rendered content
@@ -1074,30 +1158,42 @@ async def batch_excel(
         logger.info(f"Extracted {len(texts)} texts from Excel")
 
         # Translate texts to English and create "Body (Translated)" column
-        logger.info("Translating texts to English...")
-        translated_texts = translate_batch(texts)
-        logger.info(f"Translated {len([t for t in translated_texts if t])} texts")
-
-        # Add translated texts to the Excel sheets
         trans_col = "Body (Translated)"
-        trans_idx = 0
-        for sheet in sheets_to_process:
-            if sheet not in modified_dfs:
-                if sheet in excel_file.sheet_names:
-                    modified_dfs[sheet] = pd.read_excel(excel_file, sheet_name=sheet)
-                else:
-                    continue
 
-            df = modified_dfs[sheet]
-            if text_column in df.columns:
-                valid_mask = df[text_column].notna()
-                num_valid = valid_mask.sum()
-                df[trans_col] = None
-                for idx in df.index[valid_mask]:
-                    if trans_idx < len(translated_texts):
-                        df.at[idx, trans_col] = translated_texts[trans_idx]
-                        trans_idx += 1
-                modified_dfs[sheet] = df
+        if skip_translation:
+            logger.info("SKIPPING translation (Body (Translated) column already populated)")
+            # Extract existing translations from the spreadsheet
+            translated_texts = []
+            for sheet in sheets_to_process:
+                if sheet in excel_file.sheet_names:
+                    df = pd.read_excel(excel_file, sheet_name=sheet)
+                    if trans_col in df.columns:
+                        translated_texts.extend(df[trans_col].fillna('').tolist())
+            logger.info(f"Loaded {len([t for t in translated_texts if t])} existing translations")
+        else:
+            logger.info("Translating texts to English...")
+            translated_texts = translate_batch(texts)
+            logger.info(f"Translated {len([t for t in translated_texts if t])} texts")
+
+            # Add translated texts to the Excel sheets
+            trans_idx = 0
+            for sheet in sheets_to_process:
+                if sheet not in modified_dfs:
+                    if sheet in excel_file.sheet_names:
+                        modified_dfs[sheet] = pd.read_excel(excel_file, sheet_name=sheet)
+                    else:
+                        continue
+
+                df = modified_dfs[sheet]
+                if text_column in df.columns:
+                    valid_mask = df[text_column].notna()
+                    num_valid = valid_mask.sum()
+                    df[trans_col] = None
+                    for idx in df.index[valid_mask]:
+                        if trans_idx < len(translated_texts):
+                            df.at[idx, trans_col] = translated_texts[trans_idx]
+                            trans_idx += 1
+                    modified_dfs[sheet] = df
 
         # Rebuild Excel bytes with translation column
         output = io.BytesIO()
@@ -1150,7 +1246,24 @@ async def batch_excel(
             return None, 0.0
 
         # Run stance detection if requested
-        if extract_stance:
+        if extract_stance and skip_stance:
+            logger.info("SKIPPING stance detection (Stance column already populated)")
+            # Load existing stance data from the spreadsheet into results
+            stance_idx = 0
+            for sheet in sheets_to_process:
+                if sheet in excel_file.sheet_names:
+                    df = pd.read_excel(excel_file, sheet_name=sheet)
+                    if 'Stance' in df.columns:
+                        for idx in df.index:
+                            if stance_idx < len(results):
+                                results[stance_idx]['Stance'] = df.at[idx, 'Stance'] if pd.notna(df.at[idx, 'Stance']) else ''
+                                if 'Stance_Confidence' in df.columns:
+                                    results[stance_idx]['Stance_Confidence'] = df.at[idx, 'Stance_Confidence'] if pd.notna(df.at[idx, 'Stance_Confidence']) else 0
+                                if 'Hypothesis' in df.columns:
+                                    results[stance_idx]['Hypothesis'] = df.at[idx, 'Hypothesis'] if pd.notna(df.at[idx, 'Hypothesis']) else generated_hypothesis
+                                stance_idx += 1
+            logger.info(f"Loaded {stance_idx} existing stance results from checkpoint")
+        elif extract_stance and not skip_stance:
             logger.info(f"Running stance detection with preset: {stance_preset}")
             logger.info(f"Hypothesis: {generated_hypothesis}")
             stance_preds = run_task(analysis_texts, preset=stance_preset, claim=generated_hypothesis)
@@ -1176,7 +1289,29 @@ async def batch_excel(
             save_checkpoint(checkpoint_bytes, "3_stance", original_filename)
 
         # Run theme/topic extraction if requested
-        if extract_themes:
+        if extract_themes and skip_themes:
+            logger.info("SKIPPING theme extraction (Themes column already populated)")
+            # Still need to set lbls for narrative generation
+            if guidance_labels:
+                lbls = guidance_labels
+            elif labels:
+                lbls = _parse_labels_csv(labels)
+            else:
+                lbls = DEFAULT_ZS_LABELS
+            # Load existing themes from the spreadsheet into results
+            theme_idx = 0
+            for sheet in sheets_to_process:
+                if sheet in excel_file.sheet_names:
+                    df = pd.read_excel(excel_file, sheet_name=sheet)
+                    if 'Themes' in df.columns:
+                        for idx in df.index:
+                            if theme_idx < len(results):
+                                results[theme_idx]['Themes'] = df.at[idx, 'Themes'] if pd.notna(df.at[idx, 'Themes']) else ''
+                                if 'Themes_Confidence' in df.columns:
+                                    results[theme_idx]['Themes_Confidence'] = df.at[idx, 'Themes_Confidence'] if pd.notna(df.at[idx, 'Themes_Confidence']) else ''
+                                theme_idx += 1
+            logger.info(f"Loaded {theme_idx} existing themes from checkpoint")
+        elif extract_themes and not skip_themes:
             # Use guidance_labels if extracted from Guidance sheet, else user-provided, else defaults
             if guidance_labels:
                 lbls = guidance_labels
@@ -1226,7 +1361,20 @@ async def batch_excel(
             save_checkpoint(checkpoint_bytes, "4_themes", original_filename)
 
         # Generate narratives if requested (requires themes to be extracted)
-        if generate_narrative and extract_themes:
+        if generate_narrative and extract_themes and skip_narrative:
+            logger.info("SKIPPING narrative generation (Narrative column already populated)")
+            # Load existing narratives from the spreadsheet
+            narr_idx = 0
+            for sheet in sheets_to_process:
+                if sheet in excel_file.sheet_names:
+                    df = pd.read_excel(excel_file, sheet_name=sheet)
+                    if 'Narrative' in df.columns:
+                        for idx in df.index:
+                            if narr_idx < len(results):
+                                results[narr_idx]['Narrative'] = df.at[idx, 'Narrative'] if pd.notna(df.at[idx, 'Narrative']) else ''
+                                narr_idx += 1
+            logger.info(f"Loaded {narr_idx} existing narratives from checkpoint")
+        elif generate_narrative and extract_themes and not skip_narrative:
             logger.info("Generating narratives using local LLM...")
             # Get the top theme for each text
             top_theme_list = [results[i].get('Themes', '').split(',')[0].strip() for i in range(len(analysis_texts))]
