@@ -11,6 +11,7 @@ os.environ['CURL_CA_BUNDLE'] = ''
 os.environ['REQUESTS_CA_BUNDLE'] = ''
 
 import requests
+import random
 # Disable SSL warnings and patch requests to skip verification
 requests.packages.urllib3.disable_warnings()
 _original_session_request = requests.Session.request
@@ -39,14 +40,60 @@ HTTP_TIMEOUT = (3600, 3600)  # (connect_timeout, read_timeout) in seconds - 1 ho
 MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
 REDDIT_LIMIT = int(os.getenv("REDDIT_LIMIT", "200"))
 
-DEFAULT_FETCH_HEADERS = {
-    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                   "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
-}
+# Pool of realistic, recent user agents (updated Dec 2024)
+USER_AGENT_POOL = [
+    # Chrome on Windows (most common)
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+    # Chrome on Mac
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    # Firefox on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0",
+    # Edge on Windows
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
+]
+
+def get_random_user_agent() -> str:
+    """Return a random user agent from the pool"""
+    return random.choice(USER_AGENT_POOL)
+
+def get_headers_for_user_agent(ua: str) -> dict:
+    """Generate matching headers for a given user agent"""
+    headers = {
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "Upgrade-Insecure-Requests": "1",
+    }
+
+    # Add sec-ch-ua headers for Chrome/Edge browsers (important for anti-bot detection)
+    if "Chrome/" in ua:
+        # Extract Chrome version
+        import re
+        chrome_match = re.search(r'Chrome/(\d+)', ua)
+        if chrome_match:
+            version = chrome_match.group(1)
+            if "Edg/" in ua:
+                headers["sec-ch-ua"] = f'"Microsoft Edge";v="{version}", "Chromium";v="{version}", "Not?A_Brand";v="99"'
+            else:
+                headers["sec-ch-ua"] = f'"Google Chrome";v="{version}", "Chromium";v="{version}", "Not?A_Brand";v="99"'
+            headers["sec-ch-ua-mobile"] = "?0"
+            headers["sec-ch-ua-platform"] = '"Windows"' if "Windows" in ua else '"macOS"'
+            headers["sec-fetch-dest"] = "document"
+            headers["sec-fetch-mode"] = "navigate"
+            headers["sec-fetch-site"] = "none"
+            headers["sec-fetch-user"] = "?1"
+
+    return headers
+
+# Default headers (will be overridden per-request with random UA)
+DEFAULT_FETCH_HEADERS = get_headers_for_user_agent(USER_AGENT_POOL[0])
 
 def _infer_kind(url: str, headers: Dict[str, str]) -> Optional[str]:
     ct = (headers.get("Content-Type") or "").split(";")[0].strip().lower()
@@ -95,9 +142,39 @@ async def ensure_browser(app) -> Browser:
     if not hasattr(app.state, "browser") or app.state.browser is None:
         # Use system Chromium if available, otherwise let Playwright find its own
         chromium_path = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH") or os.environ.get("CHROME_BIN")
+        # Comprehensive anti-detection browser arguments
         launch_args = {
             "headless": True,
-            "args": ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+            "args": [
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--disable-dev-shm-usage",
+                "--disable-browser-side-navigation",
+                "--disable-gpu",
+                "--disable-features=VizDisplayCompositor",
+                "--disable-extensions",
+                # Disable automation flags
+                "--disable-automation",
+                "--disable-blink-features=AutomationControlled",
+                # Make window size realistic
+                "--window-size=1920,1080",
+                "--start-maximized",
+                # Disable various detection vectors
+                "--disable-component-extensions-with-background-pages",
+                "--disable-default-apps",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-background-timer-throttling",
+                # WebRTC leak prevention
+                "--disable-webrtc-hw-encoding",
+                "--disable-webrtc-hw-decoding",
+                # Additional stealth
+                "--no-first-run",
+                "--no-service-autorun",
+                "--password-store=basic",
+                "--use-mock-keychain",
+            ],
         }
         if chromium_path and os.path.exists(chromium_path):
             launch_args["executable_path"] = chromium_path
@@ -129,9 +206,34 @@ async def _dismiss_cookie_banners(page):
             pass
 
 async def _auto_scroll(page, passes: int = 6):
-    for _ in range(max(0, passes)):
-        await page.evaluate("window.scrollBy(0, document.body.scrollHeight * 0.9);")
-        await page.wait_for_timeout(500)
+    """Scroll page with human-like behavior"""
+    for i in range(max(0, passes)):
+        # Randomize scroll amount and timing to appear more human
+        scroll_percent = random.uniform(0.7, 0.95)
+        await page.evaluate(f"window.scrollBy(0, document.body.scrollHeight * {scroll_percent});")
+        # Variable wait time between scrolls
+        await page.wait_for_timeout(random.randint(300, 800))
+
+async def _human_like_mouse_move(page):
+    """Simulate human-like mouse movement"""
+    try:
+        # Move mouse to random positions to simulate human behavior
+        for _ in range(random.randint(2, 4)):
+            x = random.randint(100, 1200)
+            y = random.randint(100, 700)
+            await page.mouse.move(x, y)
+            await page.wait_for_timeout(random.randint(50, 150))
+    except Exception:
+        pass
+
+# Common screen resolutions to randomize (appear more natural)
+SCREEN_RESOLUTIONS = [
+    {"width": 1920, "height": 1080},
+    {"width": 1366, "height": 768},
+    {"width": 1536, "height": 864},
+    {"width": 1440, "height": 900},
+    {"width": 1280, "height": 720},
+]
 
 async def fetch_url_bytes_rendered(
     url: str,
@@ -143,14 +245,40 @@ async def fetch_url_bytes_rendered(
     extra_headers: Optional[Dict[str,str]] = None,
 ) -> Tuple[bytes, str]:
     host = (urlparse(url).hostname or "").lstrip(".")
+
+    # Randomize user agent and get matching headers
+    user_agent = get_random_user_agent()
+    ua_headers = get_headers_for_user_agent(user_agent)
+
+    # Randomize viewport to avoid fingerprinting
+    viewport = random.choice(SCREEN_RESOLUTIONS)
+
+    # Determine platform from user agent for consistent fingerprint
+    is_mac = "Macintosh" in user_agent
+    is_windows = "Windows" in user_agent
+
     ctx = await browser.new_context(
-        user_agent=DEFAULT_FETCH_HEADERS["User-Agent"],
+        user_agent=user_agent,
         locale="en-US",
-        viewport={"width": 1366, "height": 900},
-        ignore_https_errors=True,  # Bypass SSL cert verification (for corporate firewalls)
+        viewport=viewport,
+        screen=viewport,  # Match screen to viewport
+        ignore_https_errors=True,
+        # Additional anti-detection context options
+        color_scheme="light",
+        device_scale_factor=random.choice([1, 1.25, 1.5, 2]),  # Common DPI scales
+        has_touch=False,
+        is_mobile=False,
+        java_script_enabled=True,
+        timezone_id="America/New_York",  # Common timezone
+        geolocation=None,
+        permissions=[],
+        extra_http_headers=ua_headers,
     )
-    headers = {k: v for k, v in DEFAULT_FETCH_HEADERS.items() if k.lower() != "user-agent"}
-    if extra_headers: headers.update({str(k): str(v) for k, v in extra_headers.items()})
+
+    # Set headers (excluding user-agent which is set in context)
+    headers = {k: v for k, v in ua_headers.items() if k.lower() != "user-agent"}
+    if extra_headers:
+        headers.update({str(k): str(v) for k, v in extra_headers.items()})
     await ctx.set_extra_http_headers(headers)
 
     # Optional cookies
@@ -172,13 +300,94 @@ async def fetch_url_bytes_rendered(
             await ctx.add_cookies(jar)
 
     page = await ctx.new_page()
-    if stealth_async:
-        try: await stealth_async(page)
-        except Exception: pass
 
+    # Apply stealth plugin if available
+    if stealth_async:
+        try:
+            await stealth_async(page)
+        except Exception:
+            pass
+
+    # Additional JavaScript stealth overrides (run before page loads)
+    await page.add_init_script("""
+        // Override navigator.webdriver
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+        });
+
+        // Override navigator.plugins to look real
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [
+                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+                { name: 'Native Client', filename: 'internal-nacl-plugin' },
+            ],
+        });
+
+        // Override navigator.languages
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en'],
+        });
+
+        // Override permissions API
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+        );
+
+        // Remove automation-related properties
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+
+        // Override chrome.runtime to appear as regular Chrome
+        window.chrome = {
+            runtime: {},
+            loadTimes: function() {},
+            csi: function() {},
+            app: {},
+        };
+
+        // Make WebGL vendor/renderer look real
+        const getParameterProxyHandler = {
+            apply: function(target, thisArg, args) {
+                const param = args[0];
+                const gl = thisArg;
+                // UNMASKED_VENDOR_WEBGL
+                if (param === 37445) {
+                    return 'Google Inc. (Intel)';
+                }
+                // UNMASKED_RENDERER_WEBGL
+                if (param === 37446) {
+                    return 'ANGLE (Intel, Intel(R) UHD Graphics 620, OpenGL 4.1)';
+                }
+                return target.apply(thisArg, args);
+            }
+        };
+
+        // Override WebGL getParameter
+        const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = new Proxy(originalGetParameter, getParameterProxyHandler);
+        if (typeof WebGL2RenderingContext !== 'undefined') {
+            const originalGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
+            WebGL2RenderingContext.prototype.getParameter = new Proxy(originalGetParameter2, getParameterProxyHandler);
+        }
+    """)
+
+    # Navigate to page
     await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+
+    # Simulate human behavior - random initial delay
+    await page.wait_for_timeout(random.randint(500, 1500))
+
+    # Mouse movement to simulate human presence
+    await _human_like_mouse_move(page)
+
     await _dismiss_cookie_banners(page)
     await _auto_scroll(page, scroll_passes)
+
     try:
         if wait_selector:
             await page.wait_for_selector(wait_selector, timeout=min(timeout_ms, 8000))
@@ -186,6 +395,9 @@ async def fetch_url_bytes_rendered(
             await page.wait_for_load_state("networkidle", timeout=timeout_ms)
     except Exception:
         pass
+
+    # Final mouse movement before capturing content
+    await _human_like_mouse_move(page)
 
     html = (await page.content()).encode("utf-8", errors="ignore")
     await ctx.close()
