@@ -818,6 +818,22 @@ async def batch_excel(
 
     logger.info(f"Batch Excel processing: {file.filename}, stance={extract_stance}, themes={extract_themes}")
 
+    # Helper to save checkpoint files
+    def save_checkpoint(excel_bytes: bytes, stage: str, filename: str):
+        """Save checkpoint file to temp directory"""
+        import os
+        from pathlib import Path
+        checkpoint_dir = Path("/app/temp/checkpoints")
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+        base_name = Path(filename).stem
+        checkpoint_path = checkpoint_dir / f"{base_name}_checkpoint_{stage}.xlsx"
+
+        with open(checkpoint_path, 'wb') as f:
+            f.write(excel_bytes)
+        logger.info(f"CHECKPOINT SAVED: {checkpoint_path} ({len(excel_bytes):,} bytes)")
+        return str(checkpoint_path)
+
     try:
         b = await file.read()
         original_filename = file.filename or "input.xlsx"
@@ -1051,6 +1067,9 @@ async def batch_excel(
             # Re-open Excel file with new data
             excel_file = pd.ExcelFile(io.BytesIO(b))
 
+            # CHECKPOINT 1: After URL extraction
+            save_checkpoint(b, "1_urls_extracted", original_filename)
+
         texts = _texts_from_excel_bytes(b, sheet_names=process_sheets, text_column=text_column)
         logger.info(f"Extracted {len(texts)} texts from Excel")
 
@@ -1091,6 +1110,9 @@ async def batch_excel(
         output.seek(0)
         b = output.read()
         excel_file = pd.ExcelFile(io.BytesIO(b))
+
+        # CHECKPOINT 2: After translation
+        save_checkpoint(b, "2_translated", original_filename)
 
         # Use translated texts for analysis
         analysis_texts = translated_texts
@@ -1149,6 +1171,10 @@ async def batch_excel(
                     results[i]['Stance_Confidence'] = round(float(confidence), 4) if isinstance(confidence, (int, float)) else 0
                     results[i]['Hypothesis'] = generated_hypothesis
 
+            # CHECKPOINT 3: After stance detection
+            checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="stance")
+            save_checkpoint(checkpoint_bytes, "3_stance", original_filename)
+
         # Run theme/topic extraction if requested
         if extract_themes:
             # Use guidance_labels if extracted from Guidance sheet, else user-provided, else defaults
@@ -1195,6 +1221,10 @@ async def batch_excel(
                             results[i]['Themes'] = ', '.join([p[0] for p in top_n])
                             results[i]['Themes_Confidence'] = ', '.join([str(round(p[1], 4)) for p in top_n])
 
+            # CHECKPOINT 4: After theme extraction
+            checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="themes")
+            save_checkpoint(checkpoint_bytes, "4_themes", original_filename)
+
         # Generate narratives if requested (requires themes to be extracted)
         if generate_narrative and extract_themes:
             logger.info("Generating narratives using local LLM...")
@@ -1212,6 +1242,10 @@ async def batch_excel(
                     results[i]['Narrative'] = narrative
 
             logger.info(f"Generated {len([n for n in narratives if n])} narratives")
+
+            # CHECKPOINT 5: After narrative generation
+            checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="narratives")
+            save_checkpoint(checkpoint_bytes, "5_narratives", original_filename)
 
         elapsed_time = time.time() - start_time
         logger.info(f"Processing complete: {len(results)} rows with stance={extract_stance}, themes={extract_themes}, narratives={generate_narrative} in {elapsed_time:.2f}s")
