@@ -1010,6 +1010,79 @@ async def batch_excel(
                 # Track if we need emergency checkpoint save on interrupt
                 url_fetch_interrupted = False
 
+                def is_blocked_response(text: str, url: str) -> bool:
+                    """Check if the response looks like a blocked/login page"""
+                    if not text or len(text.strip()) < 50:
+                        return True
+
+                    text_lower = text.lower()
+                    # Twitter/X specific blocked indicators
+                    twitter_blocked_indicators = [
+                        "sign in to x",
+                        "log in to x",
+                        "sign in to twitter",
+                        "log in to twitter",
+                        "something went wrong",
+                        "try again",
+                        "this page isn't available",
+                        "hmm...this page doesn't exist",
+                        "caution: this profile may include potentially sensitive content",
+                        "age-restricted adult content",
+                        "create your account",
+                        "don't miss what's happening",
+                        "join x today",
+                        "see what's happening",
+                    ]
+
+                    # Generic blocked indicators
+                    generic_blocked = [
+                        "access denied",
+                        "403 forbidden",
+                        "please enable javascript",
+                        "enable cookies",
+                        "verify you are human",
+                        "captcha",
+                        "checking your browser",
+                        "just a moment",  # Cloudflare
+                        "attention required",  # Cloudflare
+                    ]
+
+                    # Check Twitter/X URLs specifically
+                    is_twitter = any(d in url.lower() for d in ['twitter.com', 'x.com', 't.co'])
+
+                    if is_twitter:
+                        for indicator in twitter_blocked_indicators:
+                            if indicator in text_lower:
+                                return True
+                        # Twitter pages should have substantial content
+                        if len(text.strip()) < 200:
+                            return True
+
+                    for indicator in generic_blocked:
+                        if indicator in text_lower:
+                            return True
+
+                    return False
+
+                # List of working Nitter instances (some may go down, so we try multiple)
+                NITTER_INSTANCES = [
+                    "nitter.privacydev.net",
+                    "nitter.poast.org",
+                    "nitter.woodland.cafe",
+                    "n.opnxng.com",
+                    "nitter.lucabased.xyz",
+                ]
+
+                def get_nitter_urls(twitter_url: str) -> list[str]:
+                    """Convert Twitter/X URL to multiple Nitter URLs for fallback attempts"""
+                    import re
+                    # Match twitter.com or x.com URLs
+                    match = re.match(r'https?://(www\.)?(twitter\.com|x\.com)/(.+)', twitter_url)
+                    if match:
+                        path = match.group(3)
+                        return [f"https://{instance}/{path}" for instance in NITTER_INSTANCES]
+                    return []
+
                 async def fetch_single_url(idx: int, url) -> tuple:
                     """Fetch a single URL and return (index, text)"""
                     if pd.isna(url) or not str(url).strip():
@@ -1032,7 +1105,42 @@ async def batch_excel(
                                 timeout_ms=30000,
                                 scroll_passes=2
                             )
-                            text = _extract_text_from_html(content_bytes.decode('utf-8', errors='ignore'))
+                            html_content = content_bytes.decode('utf-8', errors='ignore')
+                            text = _extract_text_from_html(html_content)
+
+                            # Debug logging for text extraction
+                            logger.debug(f"URL {url_str[:50]}... extracted {len(text)} chars")
+
+                            # Check for blocked responses
+                            if is_blocked_response(text, url_str):
+                                logger.warning(f"Blocked response detected for {url_str[:80]}... (extracted {len(text)} chars)")
+
+                                # Try Nitter as fallback for Twitter/X URLs
+                                is_twitter = any(d in url_str.lower() for d in ['twitter.com', 'x.com', 't.co'])
+                                if is_twitter:
+                                    nitter_urls = get_nitter_urls(url_str)
+                                    for nitter_url in nitter_urls:
+                                        logger.info(f"Trying Nitter fallback: {nitter_url}")
+                                        try:
+                                            nitter_bytes, _ = await fetch_url_bytes_rendered(
+                                                nitter_url,
+                                                browser,
+                                                timeout_ms=15000,  # Shorter timeout for Nitter
+                                                scroll_passes=1
+                                            )
+                                            nitter_text = _extract_text_from_html(nitter_bytes.decode('utf-8', errors='ignore'))
+                                            if nitter_text and len(nitter_text.strip()) > 100 and not is_blocked_response(nitter_text, nitter_url):
+                                                logger.info(f"Nitter fallback successful ({nitter_url.split('/')[2]}): {len(nitter_text)} chars")
+                                                return (idx, nitter_text[:50000])
+                                            else:
+                                                logger.debug(f"Nitter instance {nitter_url.split('/')[2]} returned insufficient content")
+                                        except Exception as nitter_e:
+                                            logger.debug(f"Nitter instance {nitter_url.split('/')[2]} failed: {nitter_e}")
+                                            continue  # Try next instance
+
+                                # Mark as blocked
+                                return (idx, f'[BLOCKED: {url_str}]')
+
                             return (idx, text[:50000])
                         except Exception as e:
                             logger.warning(f"Failed to fetch URL {url_str}: {e}")
@@ -1050,7 +1158,12 @@ async def batch_excel(
                                             scroll_passes=2
                                         )
                                         text = _extract_text_from_html(content_bytes.decode('utf-8', errors='ignore'))
-                                        return (idx, text[:50000])
+                                        # Verify Wayback content isn't blocked either
+                                        if text and len(text.strip()) > 100 and not is_blocked_response(text, wayback_url):
+                                            logger.info(f"Wayback fallback successful: {len(text)} chars")
+                                            return (idx, text[:50000])
+                                        else:
+                                            logger.warning(f"Wayback returned blocked/empty content for {url_str}")
                                 except Exception as wb_e:
                                     logger.warning(f"Wayback fallback also failed for {url_str}: {wb_e}")
 
