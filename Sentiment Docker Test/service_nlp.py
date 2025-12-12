@@ -1013,8 +1013,15 @@ async def batch_excel(
                 tasks = [fetch_single_url(idx, url) for idx, url in enumerate(df[url_col])]
                 logger.info(f"Sheet '{sheet}': Fetching {len(tasks)} URLs in parallel (max {MAX_CONCURRENT_FETCHES} concurrent)")
 
-                # Execute all tasks in parallel
-                results = await asyncio.gather(*tasks)
+                # Execute tasks and log progress as they complete
+                results = []
+                completed = 0
+                for coro in asyncio.as_completed(tasks):
+                    result = await coro
+                    results.append(result)
+                    completed += 1
+                    if completed % 10 == 0 or completed == len(tasks):
+                        logger.info(f"Fetched {completed}/{len(tasks)} URLs...")
 
                 # Sort results by index and extract texts
                 results.sort(key=lambda x: x[0])
