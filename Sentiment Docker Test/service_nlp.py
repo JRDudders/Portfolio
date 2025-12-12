@@ -956,10 +956,10 @@ async def batch_excel(
 
                 # Parallel URL fetching with semaphore to limit concurrent requests
                 # Twitter/X rate limits: ~50-100 req/15min unauthenticated
-                # Safe: 1-2s delay, Aggressive: 0.3-0.5s, Risky: 0s
+                # Increased delays to avoid connection refusals
                 MAX_CONCURRENT_FETCHES = 50
-                MIN_DELAY_MS = 300   # 0.3 seconds minimum
-                MAX_DELAY_MS = 800   # Randomize up to 0.8s to look natural
+                MIN_DELAY_MS = 1000  # 1 second minimum
+                MAX_DELAY_MS = 3000  # Randomize up to 3s to look natural
                 semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
 
                 async def fetch_single_url(idx: int, url) -> tuple:
