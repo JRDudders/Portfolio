@@ -1178,15 +1178,60 @@ async def batch_excel(
 
         if texts_to_translate:
             logger.info(f"Translating {len(texts_to_translate)} texts ({len(all_translations) - len(texts_to_translate)} already translated)...")
-            new_translations = translate_batch(texts_to_translate)
 
-            # Fill in the new translations at the correct indices
-            for i, trans in enumerate(new_translations):
-                all_translations[indices_to_translate[i]] = trans
+            # Process translations in chunks with incremental saves
+            TRANS_CHUNK_SIZE = 20
+            total_translated = 0
 
-            logger.info(f"Translated {len([t for t in new_translations if t])} texts")
+            for chunk_start in range(0, len(texts_to_translate), TRANS_CHUNK_SIZE):
+                chunk_end = min(chunk_start + TRANS_CHUNK_SIZE, len(texts_to_translate))
+                chunk_texts = texts_to_translate[chunk_start:chunk_end]
+                chunk_indices = indices_to_translate[chunk_start:chunk_end]
 
-            # Update the Excel sheets with new translations
+                # Translate this chunk
+                chunk_translations = translate_batch(chunk_texts)
+
+                # Fill in the translations at the correct indices
+                for i, trans in enumerate(chunk_translations):
+                    all_translations[chunk_indices[i]] = trans
+
+                total_translated += len(chunk_translations)
+                logger.info(f"Translated {total_translated}/{len(texts_to_translate)} texts...")
+
+                # Save incremental checkpoint after each chunk (except the last one - that's saved below)
+                if chunk_end < len(texts_to_translate):
+                    # Update Excel sheets with translations so far
+                    temp_trans_idx = 0
+                    for sheet in sheets_to_process:
+                        if sheet not in modified_dfs:
+                            if sheet in excel_file.sheet_names:
+                                modified_dfs[sheet] = pd.read_excel(excel_file, sheet_name=sheet)
+                            else:
+                                continue
+                        df = modified_dfs[sheet]
+                        if text_column in df.columns:
+                            if trans_col not in df.columns:
+                                df[trans_col] = None
+                            for idx in df.index:
+                                if pd.notna(df.at[idx, text_column]):
+                                    if temp_trans_idx < len(all_translations) and all_translations[temp_trans_idx] is not None:
+                                        df.at[idx, trans_col] = all_translations[temp_trans_idx]
+                                    temp_trans_idx += 1
+                            modified_dfs[sheet] = df
+                    # Save checkpoint
+                    checkpoint_output = io.BytesIO()
+                    with pd.ExcelWriter(checkpoint_output, engine='openpyxl') as writer:
+                        for sn in excel_file.sheet_names:
+                            if sn in modified_dfs:
+                                modified_dfs[sn].to_excel(writer, sheet_name=sn, index=False)
+                            else:
+                                pd.read_excel(excel_file, sheet_name=sn).to_excel(writer, sheet_name=sn, index=False)
+                    checkpoint_output.seek(0)
+                    save_checkpoint(checkpoint_output.read(), f"2_translated_partial_{total_translated}", original_filename)
+
+            logger.info(f"Translated {len([t for t in all_translations if t])} texts total")
+
+            # Update the Excel sheets with all translations
             trans_idx = 0
             for sheet in sheets_to_process:
                 if sheet not in modified_dfs:
@@ -1298,24 +1343,43 @@ async def batch_excel(
             if texts_needing_stance:
                 logger.info(f"Running stance detection on {len(texts_needing_stance)} rows ({len(results) - len(texts_needing_stance)} already have stance)")
                 logger.info(f"Hypothesis: {generated_hypothesis}")
-                stance_preds = run_task(texts_needing_stance, preset=stance_preset, claim=generated_hypothesis)
 
-                for i, pred in enumerate(stance_preds):
-                    result_idx = indices_needing_stance[i]
-                    text = texts_needing_stance[i]
+                # Process stance detection in chunks with incremental saves
+                STANCE_CHUNK_SIZE = 20
+                total_processed = 0
 
-                    # Check if source text was a failed fetch
-                    if text.startswith('[FETCH FAILED'):
-                        results[result_idx]['Stance'] = '[UNAVAILABLE]'
-                        results[result_idx]['Stance_Confidence'] = 0
-                        results[result_idx]['Hypothesis'] = generated_hypothesis
-                    elif isinstance(pred, dict):
-                        results[result_idx]['Stance'] = pred.get('stance', 'NEUTRAL')
-                        scores = pred.get('scores', {})
-                        stance_label = pred.get('stance', 'NEUTRAL')
-                        confidence = scores.get(stance_label, scores.get(stance_label.lower(), 0))
-                        results[result_idx]['Stance_Confidence'] = round(float(confidence), 4) if isinstance(confidence, (int, float)) else 0
-                        results[result_idx]['Hypothesis'] = generated_hypothesis
+                for chunk_start in range(0, len(texts_needing_stance), STANCE_CHUNK_SIZE):
+                    chunk_end = min(chunk_start + STANCE_CHUNK_SIZE, len(texts_needing_stance))
+                    chunk_texts = texts_needing_stance[chunk_start:chunk_end]
+                    chunk_indices = indices_needing_stance[chunk_start:chunk_end]
+
+                    # Run stance detection on this chunk
+                    stance_preds = run_task(chunk_texts, preset=stance_preset, claim=generated_hypothesis)
+
+                    for i, pred in enumerate(stance_preds):
+                        result_idx = chunk_indices[i]
+                        text = chunk_texts[i]
+
+                        # Check if source text was a failed fetch
+                        if text.startswith('[FETCH FAILED'):
+                            results[result_idx]['Stance'] = '[UNAVAILABLE]'
+                            results[result_idx]['Stance_Confidence'] = 0
+                            results[result_idx]['Hypothesis'] = generated_hypothesis
+                        elif isinstance(pred, dict):
+                            results[result_idx]['Stance'] = pred.get('stance', 'NEUTRAL')
+                            scores = pred.get('scores', {})
+                            stance_label = pred.get('stance', 'NEUTRAL')
+                            confidence = scores.get(stance_label, scores.get(stance_label.lower(), 0))
+                            results[result_idx]['Stance_Confidence'] = round(float(confidence), 4) if isinstance(confidence, (int, float)) else 0
+                            results[result_idx]['Hypothesis'] = generated_hypothesis
+
+                    total_processed += len(chunk_texts)
+                    logger.info(f"Stance detection: {total_processed}/{len(texts_needing_stance)} processed...")
+
+                    # Save incremental checkpoint after each chunk (except last)
+                    if chunk_end < len(texts_needing_stance):
+                        checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="stance")
+                        save_checkpoint(checkpoint_bytes, f"3_stance_partial_{total_processed}", original_filename)
 
                 # CHECKPOINT 3: After stance detection
                 checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="stance")
@@ -1365,40 +1429,59 @@ async def batch_excel(
             if texts_needing_themes:
                 logger.info(f"Running theme extraction on {len(texts_needing_themes)} rows ({len(results) - len(texts_needing_themes)} already have themes)")
                 logger.info(f"Using {len(lbls)} theme labels, top_themes={top_themes}")
-                theme_preds = run_task(texts_needing_themes, preset=theme_preset, labels=lbls)
 
-                for i, pred in enumerate(theme_preds):
-                    result_idx = indices_needing_themes[i]
-                    text = texts_needing_themes[i]
+                # Process theme extraction in chunks with incremental saves
+                THEME_CHUNK_SIZE = 20
+                total_processed = 0
 
-                    # Check if source text was a failed fetch
-                    if text.startswith('[FETCH FAILED'):
-                        results[result_idx]['Themes'] = '[UNAVAILABLE]'
-                        results[result_idx]['Themes_Confidence'] = '0'
-                    elif isinstance(pred, dict):
-                        # Unwrap "topics" key if present (run_task wraps results)
-                        if 'topics' in pred:
-                            pred = pred['topics']
+                for chunk_start in range(0, len(texts_needing_themes), THEME_CHUNK_SIZE):
+                    chunk_end = min(chunk_start + THEME_CHUNK_SIZE, len(texts_needing_themes))
+                    chunk_texts = texts_needing_themes[chunk_start:chunk_end]
+                    chunk_indices = indices_needing_themes[chunk_start:chunk_end]
 
-                        if 'labels' in pred and 'scores' in pred:
-                            # Zero-shot format: {'labels': [...], 'scores': [...]}
-                            paired = list(zip(pred['labels'], pred['scores']))
-                            paired.sort(key=lambda x: x[1], reverse=True)
-                            top_n = paired[:top_themes]
-                            results[result_idx]['Themes'] = ', '.join([p[0] for p in top_n])
-                            results[result_idx]['Themes_Confidence'] = ', '.join([str(round(p[1], 4)) for p in top_n])
-                        elif 'label' in pred:
-                            # Single label format
-                            results[result_idx]['Themes'] = pred['label']
-                            results[result_idx]['Themes_Confidence'] = _extract_confidence(pred.get('score', pred.get('confidence', 0)))
-                        else:
-                            # Format: {'politics': 0.8, 'economy': 0.1, ...}
-                            scored_items = [(k, v) for k, v in pred.items() if isinstance(v, (int, float))]
-                            if scored_items:
-                                scored_items.sort(key=lambda x: x[1], reverse=True)
-                                top_n = scored_items[:top_themes]
+                    # Run theme extraction on this chunk
+                    theme_preds = run_task(chunk_texts, preset=theme_preset, labels=lbls)
+
+                    for i, pred in enumerate(theme_preds):
+                        result_idx = chunk_indices[i]
+                        text = chunk_texts[i]
+
+                        # Check if source text was a failed fetch
+                        if text.startswith('[FETCH FAILED'):
+                            results[result_idx]['Themes'] = '[UNAVAILABLE]'
+                            results[result_idx]['Themes_Confidence'] = '0'
+                        elif isinstance(pred, dict):
+                            # Unwrap "topics" key if present (run_task wraps results)
+                            if 'topics' in pred:
+                                pred = pred['topics']
+
+                            if 'labels' in pred and 'scores' in pred:
+                                # Zero-shot format: {'labels': [...], 'scores': [...]}
+                                paired = list(zip(pred['labels'], pred['scores']))
+                                paired.sort(key=lambda x: x[1], reverse=True)
+                                top_n = paired[:top_themes]
                                 results[result_idx]['Themes'] = ', '.join([p[0] for p in top_n])
                                 results[result_idx]['Themes_Confidence'] = ', '.join([str(round(p[1], 4)) for p in top_n])
+                            elif 'label' in pred:
+                                # Single label format
+                                results[result_idx]['Themes'] = pred['label']
+                                results[result_idx]['Themes_Confidence'] = _extract_confidence(pred.get('score', pred.get('confidence', 0)))
+                            else:
+                                # Format: {'politics': 0.8, 'economy': 0.1, ...}
+                                scored_items = [(k, v) for k, v in pred.items() if isinstance(v, (int, float))]
+                                if scored_items:
+                                    scored_items.sort(key=lambda x: x[1], reverse=True)
+                                    top_n = scored_items[:top_themes]
+                                    results[result_idx]['Themes'] = ', '.join([p[0] for p in top_n])
+                                    results[result_idx]['Themes_Confidence'] = ', '.join([str(round(p[1], 4)) for p in top_n])
+
+                    total_processed += len(chunk_texts)
+                    logger.info(f"Theme extraction: {total_processed}/{len(texts_needing_themes)} processed...")
+
+                    # Save incremental checkpoint after each chunk (except last)
+                    if chunk_end < len(texts_needing_themes):
+                        checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="themes")
+                        save_checkpoint(checkpoint_bytes, f"4_themes_partial_{total_processed}", original_filename)
 
                 # CHECKPOINT 4: After theme extraction
                 checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="themes")
@@ -1442,19 +1525,39 @@ async def batch_excel(
                 logger.info(f"Generating narratives for {len(texts_needing_narrative)} rows ({len(results) - len(texts_needing_narrative)} already have narratives)...")
                 theme_labels = lbls if 'lbls' in dir() else guidance_labels or DEFAULT_ZS_LABELS
 
-                narratives = generate_narratives_batch(texts_needing_narrative, theme_labels, themes_needing_narrative)
+                # Process narrative generation in chunks with incremental saves
+                # Narratives are slow (LLM generation), so use smaller chunks
+                NARRATIVE_CHUNK_SIZE = 10
+                total_processed = 0
 
-                for i, narrative in enumerate(narratives):
-                    result_idx = indices_needing_narrative[i]
-                    text = texts_needing_narrative[i]
+                for chunk_start in range(0, len(texts_needing_narrative), NARRATIVE_CHUNK_SIZE):
+                    chunk_end = min(chunk_start + NARRATIVE_CHUNK_SIZE, len(texts_needing_narrative))
+                    chunk_texts = texts_needing_narrative[chunk_start:chunk_end]
+                    chunk_themes = themes_needing_narrative[chunk_start:chunk_end]
+                    chunk_indices = indices_needing_narrative[chunk_start:chunk_end]
 
-                    # Check if the source text was a failed fetch
-                    if text.startswith('[FETCH FAILED'):
-                        results[result_idx]['Narrative'] = '[NARRATIVE UNAVAILABLE: URL fetch failed]'
-                    else:
-                        results[result_idx]['Narrative'] = narrative
+                    # Generate narratives for this chunk
+                    narratives = generate_narratives_batch(chunk_texts, theme_labels, chunk_themes)
 
-                logger.info(f"Generated {len([n for n in narratives if n])} narratives")
+                    for i, narrative in enumerate(narratives):
+                        result_idx = chunk_indices[i]
+                        text = chunk_texts[i]
+
+                        # Check if the source text was a failed fetch
+                        if text.startswith('[FETCH FAILED'):
+                            results[result_idx]['Narrative'] = '[NARRATIVE UNAVAILABLE: URL fetch failed]'
+                        else:
+                            results[result_idx]['Narrative'] = narrative
+
+                    total_processed += len(chunk_texts)
+                    logger.info(f"Narrative generation: {total_processed}/{len(texts_needing_narrative)} processed...")
+
+                    # Save incremental checkpoint after each chunk (except last)
+                    if chunk_end < len(texts_needing_narrative):
+                        checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="narratives")
+                        save_checkpoint(checkpoint_bytes, f"5_narratives_partial_{total_processed}", original_filename)
+
+                logger.info(f"Generated {total_processed} narratives total")
 
                 # CHECKPOINT 5: After narrative generation
                 checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="narratives")
