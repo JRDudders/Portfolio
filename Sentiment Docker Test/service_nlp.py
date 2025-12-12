@@ -27,12 +27,15 @@ import logging
 from datetime import datetime
 from fetch import fetch_url_bytes_sync, fetch_url_bytes_rendered, ensure_browser
 
-# Configure logging
+# Configure logging with local time
+import time
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+# Use local time instead of UTC
+logging.Formatter.converter = time.localtime
 logger = logging.getLogger(__name__)
 
 # Import URL fetch utility
