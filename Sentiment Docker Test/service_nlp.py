@@ -1064,8 +1064,9 @@ async def batch_excel(
 
                     return False
 
-                # List of working Nitter instances (some may go down, so we try multiple)
+                # List of working Nitter/Twitter mirrors (some may go down, so we try multiple)
                 NITTER_INSTANCES = [
+                    "xcancel.com",  # Most reliable, try first
                     "nitter.privacydev.net",
                     "nitter.poast.org",
                     "nitter.woodland.cafe",
