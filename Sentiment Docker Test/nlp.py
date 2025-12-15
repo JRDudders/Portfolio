@@ -858,10 +858,81 @@ Write a concise narrative (1-2 sentences) explaining the relevance to the theme.
     return response.strip()
 
 
+def generate_narrative_with_examples(
+    body_text: str,
+    themes: List[str],
+    top_theme: str,
+    few_shot_examples: Optional[List[Dict[str, Any]]] = None
+) -> str:
+    """
+    Generate a narrative with optional few-shot examples from training data.
+
+    Args:
+        body_text: The extracted text content
+        themes: List of all possible theme categories
+        top_theme: The top identified theme for this text
+        few_shot_examples: Optional list of similar examples with their narratives
+
+    Returns:
+        A brief narrative explaining the relevance
+    """
+    import torch
+
+    model, tokenizer = _load_narrative_model()
+
+    # Truncate body text if too long
+    max_body_chars = 1500 if few_shot_examples else 2000
+    if len(body_text) > max_body_chars:
+        body_text = body_text[:max_body_chars] + "..."
+
+    themes_str = ", ".join(themes)
+
+    # Build few-shot examples section
+    examples_section = ""
+    if few_shot_examples:
+        examples_section = "\nHere are examples of how to write narratives:\n"
+        for i, ex in enumerate(few_shot_examples[:3], 1):  # Max 3 examples
+            ex_text = ex.get('text', '')[:400]
+            ex_themes = ', '.join(ex.get('themes', []))
+            ex_narrative = ex.get('narrative', '')[:200]
+            if ex_narrative:
+                examples_section += f"\nExample {i}:\nText: {ex_text}...\nThemes: {ex_themes}\nNarrative: {ex_narrative}\n"
+
+    prompt = f"""<|user|>
+You are an analyst. Given the following text and its identified theme, write a brief 1-2 sentence narrative explaining how the text relates to the theme "{top_theme}".
+
+Possible themes: {themes_str}
+Identified theme: {top_theme}
+{examples_section}
+Text to analyze:
+{body_text}
+
+Write a concise narrative (1-2 sentences) explaining the relevance to the theme. Match the style of the examples if provided. If the theme is "Other", note any tangential relevance to other themes.<|end|>
+<|assistant|>"""
+
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=2048)
+    if torch.cuda.is_available():
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=150,
+            temperature=0.7,
+            do_sample=True,
+            top_p=0.9,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    response = tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
+    return response.strip()
+
+
 def generate_narratives_batch(
     bodies: List[str],
     themes: List[str],
     top_themes: List[str],
+    training_store: Optional[Any] = None,
 ) -> List[str]:
     """
     Generate narratives for multiple texts.
@@ -870,6 +941,7 @@ def generate_narratives_batch(
         bodies: List of body texts
         themes: List of all possible theme categories
         top_themes: List of top theme for each text
+        training_store: Optional TrainingStore for few-shot learning
 
     Returns:
         List of narrative strings
@@ -881,7 +953,17 @@ def generate_narratives_batch(
             continue
 
         try:
-            narrative = generate_narrative(body, themes, top_theme)
+            # Get few-shot examples if training store is available
+            few_shot_examples = None
+            if training_store:
+                few_shot_examples = training_store.get_few_shot_examples(
+                    body, task='narrative', num_examples=3
+                )
+
+            if few_shot_examples:
+                narrative = generate_narrative_with_examples(body, themes, top_theme, few_shot_examples)
+            else:
+                narrative = generate_narrative(body, themes, top_theme)
             narratives.append(narrative)
         except Exception as e:
             print(f"[nlp] Narrative generation failed for item {i}: {e}")

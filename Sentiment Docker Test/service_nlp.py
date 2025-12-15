@@ -54,6 +54,11 @@ from excel_utils import (
     extract_texts_from_excel
 )
 from file_store import FileStore
+from training_store import (
+    get_training_store,
+    parse_excel_training_data,
+    TrainingExample
+)
 
 app = FastAPI(
     title="CiceroWatch NLP Service",
@@ -163,6 +168,142 @@ async def delete_saved_file(file_id: str):
 async def get_storage_stats():
     """Get overall storage statistics"""
     return file_store.get_stats()
+
+
+# ============================================================
+# Training Data Management (Few-Shot Learning)
+# ============================================================
+
+@app.post("/training-data/upload")
+async def upload_training_data(
+    file: UploadFile = File(...),
+    text_column: Optional[str] = Query(None, description="Column containing text (auto-detected if not specified)"),
+    stance_column: Optional[str] = Query(None, description="Column containing stance labels"),
+    themes_column: Optional[str] = Query(None, description="Column containing theme labels"),
+    narrative_column: Optional[str] = Query(None, description="Column containing narratives"),
+    append: bool = Query(True, description="Append to existing data (False = replace all)"),
+    generate_embeddings: bool = Query(True, description="Generate embeddings after upload"),
+):
+    """
+    Upload a human-labeled Excel file to use as training data for few-shot learning.
+
+    The system will:
+    1. Parse the Excel file and extract labeled examples
+    2. Generate embeddings for similarity-based retrieval
+    3. Use these examples as few-shot context when processing new files
+
+    Expected columns (auto-detected, case-insensitive):
+    - Text: Body, Text, Content, Post, Tweet, Message
+    - Stance: Stance (SUPPORT/OPPOSE/NEUTRAL)
+    - Themes: Themes (comma-separated)
+    - Narrative: Narrative, Summary
+
+    Returns statistics about the uploaded training data.
+    """
+    logger.info(f"Uploading training data: {file.filename}")
+
+    # Validate file type
+    filename = file.filename or "upload.xlsx"
+    if not filename.lower().endswith(('.xlsx', '.xlsm', '.xls')):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx, .xlsm, .xls)")
+
+    # Read file content
+    content = await file.read()
+
+    # Parse training examples
+    examples = parse_excel_training_data(
+        excel_bytes=content,
+        text_column=text_column or "Body",
+        stance_column=stance_column or "Stance",
+        themes_column=themes_column or "Themes",
+        narrative_column=narrative_column or "Narrative",
+        source_filename=filename
+    )
+
+    if not examples:
+        raise HTTPException(status_code=400, detail="No valid training examples found in file. Ensure there are rows with text and at least one label (stance, themes, or narrative).")
+
+    # Get training store
+    store = get_training_store()
+
+    # Clear existing data if not appending
+    if not append:
+        store.clear()
+        logger.info("Cleared existing training data")
+
+    # Add examples
+    added = store.add_examples(examples)
+    logger.info(f"Added {added} training examples")
+
+    # Generate embeddings
+    if generate_embeddings:
+        logger.info("Generating embeddings...")
+        store.generate_embeddings()
+
+    # Save to disk
+    store._save()
+
+    # Return stats
+    stats = store.get_stats()
+    stats["examples_added"] = added
+    stats["source_file"] = filename
+
+    return stats
+
+
+@app.get("/training-data/stats")
+async def get_training_data_stats():
+    """Get statistics about the current training data"""
+    store = get_training_store()
+    return store.get_stats()
+
+
+@app.delete("/training-data/clear")
+async def clear_training_data():
+    """Clear all training data"""
+    store = get_training_store()
+    store.clear()
+    return {"status": "success", "message": "All training data cleared"}
+
+
+@app.post("/training-data/generate-embeddings")
+async def regenerate_embeddings():
+    """Regenerate embeddings for all training examples"""
+    store = get_training_store()
+    count = store.generate_embeddings()
+    return {"status": "success", "examples_processed": count}
+
+
+@app.get("/training-data/similar")
+async def find_similar_examples(
+    text: str = Query(..., description="Text to find similar examples for"),
+    task: Optional[str] = Query(None, description="Filter by task type: stance, themes, narrative"),
+    top_k: int = Query(5, description="Number of similar examples to return"),
+):
+    """
+    Find training examples most similar to the given text.
+
+    Useful for debugging and understanding what few-shot examples will be used.
+    """
+    store = get_training_store()
+    similar = store.find_similar(text, top_k=top_k, task=task)
+
+    results = []
+    for example, score in similar:
+        results.append({
+            "similarity": round(score, 4),
+            "text": example.text[:500] + "..." if len(example.text) > 500 else example.text,
+            "stance": example.stance,
+            "themes": example.themes,
+            "narrative": example.narrative[:200] + "..." if example.narrative and len(example.narrative) > 200 else example.narrative,
+            "source": example.source_file
+        })
+
+    return {
+        "query": text[:200] + "..." if len(text) > 200 else text,
+        "task_filter": task,
+        "results": results
+    }
 
 
 # ============================================================
@@ -802,9 +943,14 @@ async def batch_excel(
     extract_themes: bool = Query(True, description="Extract themes"),
     top_themes: int = Query(3, description="Number of top themes to return"),
     generate_narrative: bool = Query(True, description="Generate narrative explaining theme relevance"),
+    use_training_data: bool = Query(True, description="Use uploaded training data for few-shot learning"),
 ):
     """
     Batch process Excel file with stance detection AND theme extraction.
+
+    If training data has been uploaded via /training-data/upload, it will be used for:
+    - Theme labels (extracted from training examples)
+    - Few-shot narrative generation (similar examples inform the LLM)
 
     Returns Excel file with columns:
     - Stance (SUPPORT/OPPOSE/NEUTRAL) - relative to guidance hypothesis
@@ -909,6 +1055,23 @@ async def batch_excel(
 
             guidance_labels = list(all_values)
             logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet: {guidance_labels}")
+
+        # If no guidance sheet, try to get labels from training data
+        training_store_instance = None
+        if use_training_data:
+            training_store_instance = get_training_store()
+            stats = training_store_instance.get_stats()
+
+            if stats["total_examples"] > 0:
+                logger.info(f"Training data available: {stats['total_examples']} examples")
+
+                # Use training data labels if no guidance labels
+                if not guidance_labels and stats["unique_themes"]:
+                    guidance_labels = stats["unique_themes"]
+                    logger.info(f"Using {len(guidance_labels)} theme labels from training data: {guidance_labels}")
+            else:
+                logger.info("No training data uploaded - using defaults")
+                training_store_instance = None  # Don't use if empty
 
         # Generate hypothesis from guidance if not provided
         generated_hypothesis = hypothesis
@@ -1652,8 +1815,11 @@ async def batch_excel(
                     chunk_themes = themes_needing_narrative[chunk_start:chunk_end]
                     chunk_indices = indices_needing_narrative[chunk_start:chunk_end]
 
-                    # Generate narratives for this chunk
-                    narratives = generate_narratives_batch(chunk_texts, theme_labels, chunk_themes)
+                    # Generate narratives for this chunk (with few-shot learning if training data available)
+                    narratives = generate_narratives_batch(
+                        chunk_texts, theme_labels, chunk_themes,
+                        training_store=training_store_instance
+                    )
 
                     for i, narrative in enumerate(narratives):
                         result_idx = chunk_indices[i]
