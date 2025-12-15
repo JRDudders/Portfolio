@@ -1067,11 +1067,13 @@ async def batch_excel(
                 # List of working Nitter/Twitter mirrors (some may go down, so we try multiple)
                 NITTER_INSTANCES = [
                     "xcancel.com",  # Most reliable, try first
-                    "nitter.privacydev.net",
                     "nitter.poast.org",
-                    "nitter.woodland.cafe",
-                    "n.opnxng.com",
-                    "nitter.lucabased.xyz",
+                    "nitter.privacyredirect.com",
+                    "lightbrd.com",
+                    "nitter.space",
+                    "nitter.tiekoetter.com",
+                    "nuku.trabun.org",
+                    "nitter.catsarch.com",
                 ]
 
                 def get_nitter_urls(twitter_url: str) -> list[str]:
