@@ -289,6 +289,60 @@
         </div>
       </div>
 
+      <!-- TRAINING DATA MANAGEMENT -->
+      <div class="card">
+        <h2>🎓 Training Data (Few-Shot Learning)</h2>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Upload human-labeled Excel files to teach the AI your labeling style. The system will use similar examples to improve accuracy.</p>
+
+        <div class="inline">
+          <button class="btn" id="btn-training-data">Upload Training Data</button>
+          <span class="file-name" id="training-data-name">No file selected</span>
+          <input type="file" id="training-data-input" style="display:none" accept=".xlsx,.xlsm,.xls"/>
+        </div>
+
+        <div id="training-stats" style="display:none;margin-top:12px;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px">
+          <h4 style="margin:0 0 8px;font-size:13px">📊 Training Data Statistics</h4>
+          <div id="training-stats-content" style="font-size:12px;color:var(--muted)"></div>
+        </div>
+
+        <details style="margin-top:12px">
+          <summary>Column Mapping (optional)</summary>
+          <div style="margin-top:8px">
+            <p style="font-size:11px;color:var(--muted);margin:0 0 8px">Auto-detects columns by name. Override here if needed:</p>
+            <div class="inline" style="gap:8px">
+              <div style="flex:1">
+                <label for="training-text-col" style="font-size:11px">Text Column</label>
+                <input id="training-text-col" type="text" placeholder="Body, Text, Content"/>
+              </div>
+              <div style="flex:1">
+                <label for="training-stance-col" style="font-size:11px">Stance Column</label>
+                <input id="training-stance-col" type="text" placeholder="Stance"/>
+              </div>
+            </div>
+            <div class="inline" style="gap:8px;margin-top:6px">
+              <div style="flex:1">
+                <label for="training-themes-col" style="font-size:11px">Themes Column</label>
+                <input id="training-themes-col" type="text" placeholder="Themes"/>
+              </div>
+              <div style="flex:1">
+                <label for="training-narrative-col" style="font-size:11px">Narrative Column</label>
+                <input id="training-narrative-col" type="text" placeholder="Narrative"/>
+              </div>
+            </div>
+            <div class="inline" style="margin-top:8px">
+              <label class="checkbox"><input type="checkbox" id="training-append" checked/> Append to existing data</label>
+            </div>
+          </div>
+        </details>
+
+        <div class="controls">
+          <button class="btn primary" id="upload-training-data" disabled>Upload & Train</button>
+          <button class="btn" id="clear-training-data">Clear All Data</button>
+          <button class="btn" id="refresh-training-stats">Refresh Stats</button>
+        </div>
+        <div id="status-training" class="status"></div>
+      </div>
+
       <!-- BATCH EXCEL PROCESSING -->
       <div class="card">
         <h2>📊 Batch Excel Processing</h2>
@@ -314,8 +368,13 @@
           <label class="checkbox" style="margin-left:16px"><input type="checkbox" id="batch-generate-narrative" checked/> Generate Narrative</label>
         </div>
 
+        <div class="inline" style="margin-top:8px">
+          <label class="checkbox"><input type="checkbox" id="batch-use-training" checked/> <strong>Use Training Data</strong> (few-shot learning)</label>
+          <span id="training-data-indicator" style="font-size:11px;color:var(--muted);margin-left:8px">No training data loaded</span>
+        </div>
+
         <p style="font-size:11px;color:var(--muted);margin:8px 0">
-          <strong>Auto-detected features:</strong> URLs fetched automatically. "Guidance" sheet used for theme labels AND hypothesis generation.
+          <strong>Auto-detected features:</strong> URLs fetched automatically. "Guidance" sheet used for theme labels AND hypothesis generation. Training data provides few-shot examples.
         </p>
 
         <label for="batch-hypothesis">Stance Hypothesis (optional - auto-generated from Guidance if empty)</label>
@@ -2633,6 +2692,152 @@
       }
     });
 
+    // --- Training Data Management ---
+    const trainingDataBtn = document.getElementById('btn-training-data');
+    const trainingDataInput = document.getElementById('training-data-input');
+    const trainingDataName = document.getElementById('training-data-name');
+    const uploadTrainingBtn = document.getElementById('upload-training-data');
+    const statusTraining = document.getElementById('status-training');
+    const trainingStatsDiv = document.getElementById('training-stats');
+    const trainingStatsContent = document.getElementById('training-stats-content');
+    const trainingDataIndicator = document.getElementById('training-data-indicator');
+
+    trainingDataBtn.onclick = () => trainingDataInput.click();
+    trainingDataInput.onchange = () => {
+      const file = trainingDataInput.files?.[0];
+      trainingDataName.textContent = file ? file.name : 'No file selected';
+      uploadTrainingBtn.disabled = !file;
+    };
+
+    // Function to refresh and display training stats
+    async function refreshTrainingStats() {
+      try {
+        const res = await fetch('/api/nlp/training-data/stats');
+        if (!res.ok) throw new Error('Failed to fetch stats');
+        const stats = await res.json();
+
+        if (stats.total_examples > 0) {
+          trainingStatsDiv.style.display = 'block';
+          trainingStatsContent.innerHTML = `
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px">
+              <div><strong>Total Examples:</strong> ${stats.total_examples}</div>
+              <div><strong>With Stance:</strong> ${stats.with_stance}</div>
+              <div><strong>With Themes:</strong> ${stats.with_themes}</div>
+              <div><strong>With Narrative:</strong> ${stats.with_narrative}</div>
+            </div>
+            ${stats.unique_themes.length > 0 ? `
+              <div style="margin-top:8px">
+                <strong>Themes:</strong>
+                <div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px">
+                  ${stats.unique_themes.slice(0, 15).map(t => `<span class="pill">${t}</span>`).join('')}
+                  ${stats.unique_themes.length > 15 ? `<span class="pill">+${stats.unique_themes.length - 15} more</span>` : ''}
+                </div>
+              </div>
+            ` : ''}
+            ${stats.stance_distribution ? `
+              <div style="margin-top:8px">
+                <strong>Stance Distribution:</strong>
+                ${Object.entries(stats.stance_distribution).map(([k,v]) => `<span class="pill">${k}: ${v}</span>`).join(' ')}
+              </div>
+            ` : ''}
+            <div style="margin-top:8px;font-size:11px;color:var(--ok)">
+              ✓ Embeddings: ${stats.has_embeddings ? 'Generated' : 'Not generated'}
+            </div>
+          `;
+          trainingDataIndicator.innerHTML = `<span style="color:var(--ok)">✓ ${stats.total_examples} examples loaded</span>`;
+        } else {
+          trainingStatsDiv.style.display = 'none';
+          trainingDataIndicator.textContent = 'No training data loaded';
+        }
+      } catch (e) {
+        console.error('Failed to fetch training stats:', e);
+        trainingStatsDiv.style.display = 'none';
+        trainingDataIndicator.textContent = 'No training data loaded';
+      }
+    }
+
+    // Refresh stats on page load
+    refreshTrainingStats();
+
+    // Refresh stats button
+    document.getElementById('refresh-training-stats').onclick = async () => {
+      setStatus(statusTraining, 'Refreshing stats...');
+      await refreshTrainingStats();
+      setStatus(statusTraining, 'Stats refreshed', 'ok');
+    };
+
+    // Upload training data
+    uploadTrainingBtn.onclick = async () => {
+      const file = trainingDataInput.files?.[0];
+      if (!file) {
+        setStatus(statusTraining, 'Please select a file first', 'warn');
+        return;
+      }
+
+      const textCol = document.getElementById('training-text-col').value.trim();
+      const stanceCol = document.getElementById('training-stance-col').value.trim();
+      const themesCol = document.getElementById('training-themes-col').value.trim();
+      const narrativeCol = document.getElementById('training-narrative-col').value.trim();
+      const append = document.getElementById('training-append').checked;
+
+      setStatus(statusTraining, `Uploading ${file.name} and generating embeddings...`);
+      uploadTrainingBtn.disabled = true;
+
+      try {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+
+        const params = new URLSearchParams();
+        params.append('append', append);
+        params.append('generate_embeddings', 'true');
+        if (textCol) params.append('text_column', textCol);
+        if (stanceCol) params.append('stance_column', stanceCol);
+        if (themesCol) params.append('themes_column', themesCol);
+        if (narrativeCol) params.append('narrative_column', narrativeCol);
+
+        const res = await fetch(`/api/nlp/training-data/upload?${params.toString()}`, {
+          method: 'POST',
+          body: fd
+        });
+
+        if (!res.ok) {
+          const err = await res.text().catch(() => res.statusText);
+          throw new Error(err);
+        }
+
+        const result = await res.json();
+        setStatus(statusTraining, `✓ Uploaded ${result.examples_added} examples from ${file.name}`, 'ok');
+        await refreshTrainingStats();
+
+        // Clear file input
+        trainingDataInput.value = '';
+        trainingDataName.textContent = 'No file selected';
+        uploadTrainingBtn.disabled = true;
+
+      } catch (e) {
+        setStatus(statusTraining, 'Error: ' + (e?.message || e), 'err');
+      } finally {
+        uploadTrainingBtn.disabled = !trainingDataInput.files?.[0];
+      }
+    };
+
+    // Clear all training data
+    document.getElementById('clear-training-data').onclick = async () => {
+      if (!confirm('Are you sure you want to clear all training data? This cannot be undone.')) {
+        return;
+      }
+
+      setStatus(statusTraining, 'Clearing training data...');
+      try {
+        const res = await fetch('/api/nlp/training-data/clear', { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to clear');
+        setStatus(statusTraining, 'Training data cleared', 'ok');
+        await refreshTrainingStats();
+      } catch (e) {
+        setStatus(statusTraining, 'Error: ' + (e?.message || e), 'err');
+      }
+    };
+
     // --- Batch Excel Processing ---
     const batchExcelBtn = document.getElementById('btn-batch-excel');
     const batchExcelInput = document.getElementById('batch-excel-input');
@@ -2856,6 +3061,7 @@
       const extractStance = document.getElementById('batch-extract-stance').checked;
       const extractThemes = document.getElementById('batch-extract-themes').checked;
       const generateNarrative = document.getElementById('batch-generate-narrative').checked;
+      const useTrainingData = document.getElementById('batch-use-training').checked;
       const hypothesis = document.getElementById('batch-hypothesis').value.trim();
       const themeLabels = document.getElementById('batch-theme-labels').value.trim();
       const stancePreset = document.getElementById('batch-stance-preset').value;
@@ -2883,6 +3089,7 @@
         params.append('theme_preset', themePreset);
         params.append('extract_stance', extractStance);
         params.append('extract_themes', extractThemes);
+        params.append('use_training_data', useTrainingData);
         if(hypothesis) params.append('hypothesis', hypothesis);
         params.append('top_themes', topThemes);
         params.append('generate_narrative', generateNarrative);
