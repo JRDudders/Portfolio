@@ -308,28 +308,81 @@ async def fetch_url_bytes_rendered(
         except Exception:
             pass
 
-    # Additional JavaScript stealth overrides (run before page loads)
+    # Comprehensive JavaScript stealth overrides (run before page loads)
+    # This script handles most common fingerprinting techniques
     await page.add_init_script("""
-        // Override navigator.webdriver
+        // ============================================
+        // NAVIGATOR PROPERTIES
+        // ============================================
+
+        // Override navigator.webdriver (primary detection)
         Object.defineProperty(navigator, 'webdriver', {
             get: () => undefined,
         });
 
-        // Override navigator.plugins to look real
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [
-                { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
-                { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
-                { name: 'Native Client', filename: 'internal-nacl-plugin' },
-            ],
+        // Delete webdriver property entirely
+        delete Object.getPrototypeOf(navigator).webdriver;
+
+        // Override navigator.plugins with realistic plugins
+        const mockPlugins = [
+            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+            { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+        ];
+
+        const pluginArray = Object.create(PluginArray.prototype);
+        mockPlugins.forEach((p, i) => {
+            const plugin = Object.create(Plugin.prototype);
+            Object.defineProperties(plugin, {
+                name: { value: p.name },
+                filename: { value: p.filename },
+                description: { value: p.description },
+                length: { value: 0 },
+            });
+            pluginArray[i] = plugin;
         });
+        Object.defineProperty(pluginArray, 'length', { value: mockPlugins.length });
+        Object.defineProperty(navigator, 'plugins', { get: () => pluginArray });
 
         // Override navigator.languages
         Object.defineProperty(navigator, 'languages', {
             get: () => ['en-US', 'en'],
         });
 
-        // Override permissions API
+        // Override navigator.platform consistently
+        Object.defineProperty(navigator, 'platform', {
+            get: () => 'Win32',
+        });
+
+        // Override navigator.hardwareConcurrency (realistic value)
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+            get: () => 8,
+        });
+
+        // Override navigator.deviceMemory
+        Object.defineProperty(navigator, 'deviceMemory', {
+            get: () => 8,
+        });
+
+        // Override navigator.maxTouchPoints
+        Object.defineProperty(navigator, 'maxTouchPoints', {
+            get: () => 0,
+        });
+
+        // Override navigator.connection
+        Object.defineProperty(navigator, 'connection', {
+            get: () => ({
+                effectiveType: '4g',
+                rtt: 50,
+                downlink: 10,
+                saveData: false,
+            }),
+        });
+
+        // ============================================
+        // PERMISSIONS API
+        // ============================================
+
         const originalQuery = window.navigator.permissions.query;
         window.navigator.permissions.query = (parameters) => (
             parameters.name === 'notifications' ?
@@ -337,43 +390,231 @@ async def fetch_url_bytes_rendered(
                 originalQuery(parameters)
         );
 
+        // ============================================
+        // CHROME OBJECT
+        // ============================================
+
         // Remove automation-related properties
         delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
         delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
         delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_JSON;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Object;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Proxy;
 
-        // Override chrome.runtime to appear as regular Chrome
+        // Override chrome object to appear as regular Chrome
         window.chrome = {
-            runtime: {},
-            loadTimes: function() {},
-            csi: function() {},
-            app: {},
+            runtime: {
+                connect: function() {},
+                sendMessage: function() {},
+                onMessage: { addListener: function() {} },
+                onConnect: { addListener: function() {} },
+                PlatformOs: { MAC: 'mac', WIN: 'win', ANDROID: 'android', CROS: 'cros', LINUX: 'linux', OPENBSD: 'openbsd' },
+                PlatformArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64' },
+                PlatformNaclArch: { ARM: 'arm', X86_32: 'x86-32', X86_64: 'x86-64' },
+                RequestUpdateCheckStatus: { THROTTLED: 'throttled', NO_UPDATE: 'no_update', UPDATE_AVAILABLE: 'update_available' },
+            },
+            loadTimes: function() {
+                return {
+                    requestTime: Date.now() * 0.001 - Math.random() * 1000,
+                    startLoadTime: Date.now() * 0.001 - Math.random() * 500,
+                    commitLoadTime: Date.now() * 0.001 - Math.random() * 100,
+                    finishDocumentLoadTime: Date.now() * 0.001,
+                    finishLoadTime: Date.now() * 0.001,
+                    firstPaintTime: Date.now() * 0.001 - Math.random() * 50,
+                    firstPaintAfterLoadTime: 0,
+                    navigationType: 'Other',
+                    wasFetchedViaSpdy: false,
+                    wasNpnNegotiated: true,
+                    npnNegotiatedProtocol: 'h2',
+                    wasAlternateProtocolAvailable: false,
+                    connectionInfo: 'h2',
+                };
+            },
+            csi: function() {
+                return {
+                    onloadT: Date.now(),
+                    pageT: Date.now() * 0.001,
+                    startE: Date.now(),
+                    tran: 15,
+                };
+            },
+            app: {
+                isInstalled: false,
+                InstallState: { INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                RunningState: { RUNNING: 'running', CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run' },
+            },
         };
 
-        // Make WebGL vendor/renderer look real
+        // ============================================
+        // WEBGL FINGERPRINTING
+        // ============================================
+
         const getParameterProxyHandler = {
             apply: function(target, thisArg, args) {
                 const param = args[0];
-                const gl = thisArg;
                 // UNMASKED_VENDOR_WEBGL
                 if (param === 37445) {
                     return 'Google Inc. (Intel)';
                 }
                 // UNMASKED_RENDERER_WEBGL
                 if (param === 37446) {
-                    return 'ANGLE (Intel, Intel(R) UHD Graphics 620, OpenGL 4.1)';
+                    return 'ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)';
                 }
                 return target.apply(thisArg, args);
             }
         };
 
-        // Override WebGL getParameter
         const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter = new Proxy(originalGetParameter, getParameterProxyHandler);
         if (typeof WebGL2RenderingContext !== 'undefined') {
             const originalGetParameter2 = WebGL2RenderingContext.prototype.getParameter;
             WebGL2RenderingContext.prototype.getParameter = new Proxy(originalGetParameter2, getParameterProxyHandler);
         }
+
+        // ============================================
+        // CANVAS FINGERPRINTING PROTECTION
+        // ============================================
+
+        // Add subtle noise to canvas to prevent fingerprinting
+        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function(type) {
+            if (type === 'image/png' || type === undefined) {
+                const context = this.getContext('2d');
+                if (context) {
+                    const imageData = context.getImageData(0, 0, this.width, this.height);
+                    // Add tiny random noise to a few pixels
+                    for (let i = 0; i < Math.min(10, imageData.data.length / 4); i++) {
+                        const idx = Math.floor(Math.random() * imageData.data.length / 4) * 4;
+                        imageData.data[idx] = (imageData.data[idx] + Math.floor(Math.random() * 2)) % 256;
+                    }
+                    context.putImageData(imageData, 0, 0);
+                }
+            }
+            return originalToDataURL.apply(this, arguments);
+        };
+
+        const originalGetImageData = CanvasRenderingContext2D.prototype.getImageData;
+        CanvasRenderingContext2D.prototype.getImageData = function() {
+            const imageData = originalGetImageData.apply(this, arguments);
+            // Add tiny random noise
+            for (let i = 0; i < Math.min(10, imageData.data.length / 4); i++) {
+                const idx = Math.floor(Math.random() * imageData.data.length / 4) * 4;
+                imageData.data[idx] = (imageData.data[idx] + Math.floor(Math.random() * 2)) % 256;
+            }
+            return imageData;
+        };
+
+        // ============================================
+        // AUDIO FINGERPRINTING PROTECTION
+        // ============================================
+
+        // Override AudioContext to prevent audio fingerprinting
+        const originalAudioContext = window.AudioContext || window.webkitAudioContext;
+        if (originalAudioContext) {
+            window.AudioContext = window.webkitAudioContext = function() {
+                const ctx = new originalAudioContext();
+                const originalCreateAnalyser = ctx.createAnalyser.bind(ctx);
+                ctx.createAnalyser = function() {
+                    const analyser = originalCreateAnalyser();
+                    const originalGetFloatFrequencyData = analyser.getFloatFrequencyData.bind(analyser);
+                    analyser.getFloatFrequencyData = function(array) {
+                        originalGetFloatFrequencyData(array);
+                        // Add noise
+                        for (let i = 0; i < array.length; i++) {
+                            array[i] += (Math.random() - 0.5) * 0.1;
+                        }
+                    };
+                    return analyser;
+                };
+                return ctx;
+            };
+        }
+
+        // ============================================
+        // WINDOW DIMENSIONS CONSISTENCY
+        // ============================================
+
+        // Make window dimensions consistent (prevents detection via dimension mismatches)
+        const targetWidth = window.innerWidth;
+        const targetHeight = window.innerHeight;
+
+        Object.defineProperty(window, 'outerWidth', { get: () => targetWidth + 16 });
+        Object.defineProperty(window, 'outerHeight', { get: () => targetHeight + 88 });
+        Object.defineProperty(screen, 'availWidth', { get: () => targetWidth + 16 });
+        Object.defineProperty(screen, 'availHeight', { get: () => targetHeight + 40 });
+
+        // ============================================
+        // IFRAME DETECTION
+        // ============================================
+
+        // Prevent detection of being in an iframe (if applicable)
+        try {
+            if (window.self !== window.top) {
+                Object.defineProperty(window, 'self', { get: () => window.top });
+            }
+        } catch (e) {}
+
+        // ============================================
+        // TIMING PROTECTION
+        // ============================================
+
+        // Reduce timing precision to prevent timing attacks
+        const originalNow = performance.now;
+        performance.now = function() {
+            return Math.floor(originalNow.call(performance) / 10) * 10;
+        };
+
+        // ============================================
+        // MEDIA DEVICES
+        // ============================================
+
+        // Override mediaDevices to return consistent device list
+        if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+            navigator.mediaDevices.enumerateDevices = async function() {
+                return [
+                    { deviceId: 'default', groupId: 'default', kind: 'audioinput', label: '' },
+                    { deviceId: 'default', groupId: 'default', kind: 'audiooutput', label: '' },
+                    { deviceId: 'default', groupId: 'default', kind: 'videoinput', label: '' },
+                ];
+            };
+        }
+
+        // ============================================
+        // BATTERY API (if available)
+        // ============================================
+
+        // Override getBattery to return consistent values
+        if (navigator.getBattery) {
+            navigator.getBattery = async function() {
+                return {
+                    charging: true,
+                    chargingTime: 0,
+                    dischargingTime: Infinity,
+                    level: 1.0,
+                    addEventListener: function() {},
+                    removeEventListener: function() {},
+                };
+            };
+        }
+
+        // ============================================
+        // MISC DETECTION VECTORS
+        // ============================================
+
+        // Override toString to hide proxy usage
+        const originalFunctionToString = Function.prototype.toString;
+        Function.prototype.toString = function() {
+            if (this === Function.prototype.toString) {
+                return 'function toString() { [native code] }';
+            }
+            if (this === navigator.permissions.query) {
+                return 'function query() { [native code] }';
+            }
+            return originalFunctionToString.call(this);
+        };
+
+        console.log('Stealth scripts loaded');
     """)
 
     # Navigate to page
