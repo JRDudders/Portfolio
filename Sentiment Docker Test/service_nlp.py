@@ -1245,29 +1245,17 @@ async def batch_excel(
                     Convert Twitter/X URL to multiple Nitter URLs for fallback attempts.
 
                     Returns list of (url, mirror_name) tuples.
-                    Handles twiiit.com specially - it only needs the username for search.
+                    All mirrors (including twiiit.com) accept the full path.
+                    twiiit.com auto-redirects to a working mirror.
                     """
                     import re
-                    # Match twitter.com or x.com URLs and extract username + path
-                    match = re.match(r'https?://(www\.)?(twitter\.com|x\.com)/([^/]+)(/.*)?', twitter_url)
+                    # Match twitter.com or x.com URLs
+                    match = re.match(r'https?://(www\.)?(twitter\.com|x\.com)/(.+)', twitter_url)
                     if not match:
                         return []
 
-                    username = match.group(3)
-                    rest_of_path = match.group(4) or ""  # e.g., /status/123456
-                    full_path = username + rest_of_path
-
-                    urls = []
-                    for instance in NITTER_INSTANCES:
-                        if instance == "twiiit.com":
-                            # twiiit.com is a search service - use just username
-                            # It will show mirrors that have this user's data
-                            urls.append((f"https://{instance}/{username}", instance))
-                        else:
-                            # Regular mirrors - use full path
-                            urls.append((f"https://{instance}/{full_path}", instance))
-
-                    return urls
+                    path = match.group(3)  # e.g., "username/status/123456"
+                    return [(f"https://{instance}/{path}", instance) for instance in NITTER_INSTANCES]
 
                 async def fetch_single_url(idx: int, url) -> tuple:
                     """Fetch a single URL and return (index, text)"""
@@ -1301,62 +1289,29 @@ async def batch_excel(
                             if is_blocked_response(text, url_str):
                                 logger.warning(f"Blocked response detected for {url_str[:80]}... (extracted {len(text)} chars)")
 
-                                # Try Nitter as fallback for Twitter/X URLs
+                                # Try Nitter/Twitter mirrors as fallback
                                 is_twitter = any(d in url_str.lower() for d in ['twitter.com', 'x.com', 't.co'])
                                 if is_twitter:
                                     nitter_urls = get_nitter_urls(url_str)
                                     for nitter_url, mirror_name in nitter_urls:
-                                        logger.info(f"Trying Nitter fallback ({mirror_name}): {nitter_url}")
+                                        logger.info(f"Trying mirror fallback ({mirror_name}): {nitter_url}")
                                         try:
+                                            # twiiit.com auto-redirects to working mirror
+                                            # Playwright follows redirects automatically
                                             nitter_bytes, _ = await fetch_url_bytes_rendered(
                                                 nitter_url,
                                                 browser,
-                                                timeout_ms=15000,  # Shorter timeout for Nitter
+                                                timeout_ms=15000,
                                                 scroll_passes=1
                                             )
-                                            nitter_html = nitter_bytes.decode('utf-8', errors='ignore')
-
-                                            # Special handling for twiiit.com - it's a search/redirect page
-                                            # Look for links to working mirrors in the response
-                                            if mirror_name == "twiiit.com":
-                                                import re
-                                                # twiiit.com shows links to working nitter instances
-                                                # Extract the first working mirror link and follow it
-                                                mirror_links = re.findall(r'href="(https?://[^"]+nitter[^"]*)"', nitter_html)
-                                                if not mirror_links:
-                                                    # Also look for other common mirror patterns
-                                                    mirror_links = re.findall(r'href="(https?://(?:xcancel|lightbrd|n\.)[^"]+)"', nitter_html)
-
-                                                if mirror_links:
-                                                    # Try the first few mirror links found
-                                                    for mirror_link in mirror_links[:3]:
-                                                        logger.info(f"twiiit.com found mirror: {mirror_link}")
-                                                        try:
-                                                            mirror_bytes, _ = await fetch_url_bytes_rendered(
-                                                                mirror_link,
-                                                                browser,
-                                                                timeout_ms=15000,
-                                                                scroll_passes=1
-                                                            )
-                                                            mirror_text = _extract_text_from_html(mirror_bytes.decode('utf-8', errors='ignore'))
-                                                            if mirror_text and len(mirror_text.strip()) > 100 and not is_blocked_response(mirror_text, mirror_link):
-                                                                logger.info(f"twiiit.com redirect successful: {len(mirror_text)} chars")
-                                                                return (idx, mirror_text[:50000])
-                                                        except Exception as me:
-                                                            logger.debug(f"twiiit.com mirror {mirror_link} failed: {me}")
-                                                            continue
-                                                logger.debug(f"twiiit.com didn't find working mirrors")
-                                                continue  # Try next instance
-
-                                            # Regular mirror - extract text directly
-                                            nitter_text = _extract_text_from_html(nitter_html)
+                                            nitter_text = _extract_text_from_html(nitter_bytes.decode('utf-8', errors='ignore'))
                                             if nitter_text and len(nitter_text.strip()) > 100 and not is_blocked_response(nitter_text, nitter_url):
-                                                logger.info(f"Nitter fallback successful ({mirror_name}): {len(nitter_text)} chars")
+                                                logger.info(f"Mirror fallback successful ({mirror_name}): {len(nitter_text)} chars")
                                                 return (idx, nitter_text[:50000])
                                             else:
-                                                logger.debug(f"Nitter instance {mirror_name} returned insufficient content")
+                                                logger.debug(f"Mirror {mirror_name} returned insufficient content")
                                         except Exception as nitter_e:
-                                            logger.debug(f"Nitter instance {mirror_name} failed: {nitter_e}")
+                                            logger.debug(f"Mirror {mirror_name} failed: {nitter_e}")
                                             continue  # Try next instance
 
                                 # Mark as blocked
