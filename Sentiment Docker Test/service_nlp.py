@@ -1321,6 +1321,29 @@ async def batch_excel(
                         except Exception as e:
                             logger.warning(f"Failed to fetch URL {url_str}: {e}")
 
+                            # Try Nitter/Twitter mirrors as fallback for Twitter URLs (on exception too)
+                            is_twitter = any(d in url_str.lower() for d in ['twitter.com', 'x.com', 't.co'])
+                            if is_twitter:
+                                nitter_urls = get_nitter_urls(url_str)
+                                for nitter_url, mirror_name in nitter_urls:
+                                    logger.info(f"Trying mirror fallback after exception ({mirror_name}): {nitter_url}")
+                                    try:
+                                        nitter_bytes, _ = await fetch_url_bytes_rendered(
+                                            nitter_url,
+                                            browser,
+                                            timeout_ms=15000,
+                                            scroll_passes=1
+                                        )
+                                        nitter_text = _extract_text_from_html(nitter_bytes.decode('utf-8', errors='ignore'))
+                                        if nitter_text and len(nitter_text.strip()) > 100 and not is_blocked_response(nitter_text, nitter_url):
+                                            logger.info(f"Mirror fallback successful after exception ({mirror_name}): {len(nitter_text)} chars")
+                                            return (idx, nitter_text[:50000])
+                                        else:
+                                            logger.debug(f"Mirror {mirror_name} returned insufficient content")
+                                    except Exception as nitter_e:
+                                        logger.debug(f"Mirror {mirror_name} failed: {nitter_e}")
+                                        continue
+
                             # Try Wayback Machine as fallback
                             if not url_str.startswith('https://web.archive.org/'):
                                 try:
