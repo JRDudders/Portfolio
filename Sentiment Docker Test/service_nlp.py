@@ -1386,9 +1386,18 @@ async def batch_excel(
                         idx, text = await coro
                         # Update dataframe immediately as each URL completes
                         df.at[idx, text_column] = text
-                        # Debug: log what we're actually saving
-                        logger.info(f"Row {idx}: Saved {len(text) if text else 0} chars to '{text_column}' column")
-                        if text:
+
+                        # Debug: log what we're actually saving with preview
+                        text_preview = (text[:100] + '...') if text and len(text) > 100 else text
+                        logger.info(f"Row {idx}: Saved {len(text) if text else 0} chars to '{text_column}'")
+                        logger.debug(f"Row {idx} preview: {text_preview}")
+
+                        # Verify the assignment worked by reading it back
+                        saved_value = df.at[idx, text_column]
+                        if saved_value != text:
+                            logger.error(f"Row {idx}: MISMATCH! Assigned {len(text)} chars but DataFrame has {len(saved_value) if saved_value else 0}")
+
+                        if text and not text.startswith('[FETCH FAILED') and not text.startswith('[BLOCKED'):
                             fetched_count += 1
                         completed += 1
 
@@ -1412,6 +1421,21 @@ async def batch_excel(
                             checkpoint_output.seek(0)
                             checkpoint_bytes = checkpoint_output.read()
                             save_checkpoint(checkpoint_bytes, f"1_urls_partial_{completed}", original_filename)
+
+                            # Verify the saved Excel has the data by reading it back
+                            verify_df = pd.read_excel(io.BytesIO(checkpoint_bytes), sheet_name=sheet)
+                            if text_column in verify_df.columns:
+                                verify_non_empty = verify_df[text_column].notna() & (verify_df[text_column].astype(str).str.strip() != '')
+                                verify_non_fetch_failed = verify_non_empty & (~verify_df[text_column].astype(str).str.startswith('[FETCH FAILED'))
+                                logger.info(f"Checkpoint VERIFIED: Excel has {verify_non_empty.sum()} non-empty '{text_column}' cells ({verify_non_fetch_failed.sum()} actual content)")
+                                # Log a sample of actual content
+                                sample_rows = verify_df[verify_non_fetch_failed].head(2)
+                                for _, row in sample_rows.iterrows():
+                                    sample_text = str(row[text_column])[:80]
+                                    logger.info(f"Sample content: {sample_text}...")
+                            else:
+                                logger.error(f"Checkpoint FAILED: '{text_column}' column not found in saved Excel!")
+
                             last_checkpoint = completed
 
                 except (KeyboardInterrupt, asyncio.CancelledError) as e:
