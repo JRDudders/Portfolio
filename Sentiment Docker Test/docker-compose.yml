@@ -41,6 +41,7 @@ services:
       - cicerowatch
     volumes:
       - ./temp:/app/temp
+      - ./training_data:/app/training_data  # Persist training data between restarts
       # Mount source code for live editing (no rebuild needed)
       - ./url_fetch.py:/app/url_fetch.py
       - ./service_nlp.py:/app/service_nlp.py
@@ -53,6 +54,7 @@ services:
       - ./apputils.py:/app/apputils.py
       - ./excel_utils.py:/app/excel_utils.py
       - ./file_store.py:/app/file_store.py
+      - ./training_store.py:/app/training_store.py
     deploy:
       resources:
         limits:
