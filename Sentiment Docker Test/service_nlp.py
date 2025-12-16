@@ -1363,6 +1363,8 @@ async def batch_excel(
                         idx, text = await coro
                         # Update dataframe immediately as each URL completes
                         df.at[idx, text_column] = text
+                        # Debug: log what we're actually saving
+                        logger.info(f"Row {idx}: Saved {len(text) if text else 0} chars to '{text_column}' column")
                         if text:
                             fetched_count += 1
                         completed += 1
@@ -1373,6 +1375,9 @@ async def batch_excel(
                         # Save incremental checkpoint every CHECKPOINT_INTERVAL URLs
                         if completed - last_checkpoint >= CHECKPOINT_INTERVAL and completed < len(tasks):
                             modified_dfs[sheet] = df
+                            # Debug: verify DataFrame has data before saving
+                            non_empty = df[text_column].notna() & (df[text_column].astype(str).str.strip() != '')
+                            logger.info(f"Checkpoint: DataFrame has {non_empty.sum()} non-empty '{text_column}' cells")
                             # Build checkpoint Excel
                             checkpoint_output = io.BytesIO()
                             with pd.ExcelWriter(checkpoint_output, engine='openpyxl') as writer:
