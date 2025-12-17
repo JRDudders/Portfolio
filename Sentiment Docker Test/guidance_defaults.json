@@ -1,0 +1,17 @@
+{
+  "hypothesis": "U.S. strategic priorities and interests are viewed favorably in this content",
+  "themes": [
+    "Military Cooperation",
+    "Regional Security",
+    "Humanitarian Assistance",
+    "Counter-narcotics Operations",
+    "Democratic Governance",
+    "Economic Partnership",
+    "Disaster Relief",
+    "Training and Exercises",
+    "Maritime Security",
+    "Cybersecurity",
+    "Other"
+  ],
+  "description": "Default guidance for SOUTHCOM-related content analysis. Edit this file to customize theme labels and stance hypothesis."
+}

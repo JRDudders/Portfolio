@@ -61,6 +61,7 @@ services:
       - ./excel_utils.py:/app/excel_utils.py
       - ./file_store.py:/app/file_store.py
       - ./training_store.py:/app/training_store.py
+      - ./guidance_defaults.json:/app/guidance_defaults.json
     deploy:
       resources:
         limits:

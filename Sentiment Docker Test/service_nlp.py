@@ -27,6 +27,43 @@ import logging
 from datetime import datetime
 from fetch import fetch_url_bytes_sync, fetch_url_bytes_rendered, ensure_browser
 
+# Path to default guidance config (mounted in Docker, or local)
+GUIDANCE_DEFAULTS_PATH = os.getenv("GUIDANCE_DEFAULTS_PATH", "/app/guidance_defaults.json")
+
+def load_guidance_defaults():
+    """Load default hypothesis and themes from guidance_defaults.json"""
+    defaults = {
+        "hypothesis": "U.S. strategic priorities and interests are viewed favorably in this content.",
+        "themes": []
+    }
+
+    # Try multiple paths (Docker mount, local dev)
+    paths_to_try = [
+        GUIDANCE_DEFAULTS_PATH,
+        "./guidance_defaults.json",
+        os.path.join(os.path.dirname(__file__), "guidance_defaults.json")
+    ]
+
+    for path in paths_to_try:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    loaded = json.load(f)
+                    if "hypothesis" in loaded:
+                        defaults["hypothesis"] = loaded["hypothesis"]
+                    if "themes" in loaded:
+                        defaults["themes"] = loaded["themes"]
+                    print(f"[nlp] Loaded guidance defaults from {path}: {len(defaults['themes'])} themes")
+                    return defaults
+            except Exception as e:
+                print(f"[nlp] Warning: Failed to load {path}: {e}")
+
+    print("[nlp] No guidance_defaults.json found, using built-in defaults")
+    return defaults
+
+# Load defaults at startup
+_guidance_defaults = load_guidance_defaults()
+
 # Configure logging with local time
 import time
 logging.basicConfig(
@@ -1056,7 +1093,7 @@ async def batch_excel(
             guidance_labels = list(all_values)
             logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet: {guidance_labels}")
 
-        # If no guidance sheet, try to get labels from training data
+        # If no guidance sheet, try to get labels from training data or defaults
         training_store_instance = None
         if use_training_data:
             training_store_instance = get_training_store()
@@ -1070,8 +1107,13 @@ async def batch_excel(
                     guidance_labels = stats["unique_themes"]
                     logger.info(f"Using {len(guidance_labels)} theme labels from training data: {guidance_labels}")
             else:
-                logger.info("No training data uploaded - using defaults")
+                logger.info("No training data uploaded")
                 training_store_instance = None  # Don't use if empty
+
+        # If still no labels, use defaults from guidance_defaults.json
+        if not guidance_labels and _guidance_defaults["themes"]:
+            guidance_labels = _guidance_defaults["themes"]
+            logger.info(f"Using {len(guidance_labels)} theme labels from guidance_defaults.json: {guidance_labels}")
 
         # Generate hypothesis from guidance if not provided
         generated_hypothesis = hypothesis
@@ -1083,8 +1125,9 @@ async def batch_excel(
             generated_hypothesis = f"U.S. priorities as outlined in the guidance ({themes_summary}) are viewed favorably and having a positive influence."
             logger.info(f"Generated hypothesis: {generated_hypothesis}")
         elif not generated_hypothesis:
-            generated_hypothesis = "U.S. strategic priorities and interests are viewed favorably in this content."
-            logger.info(f"Using default hypothesis: {generated_hypothesis}")
+            # Use default hypothesis from guidance_defaults.json
+            generated_hypothesis = _guidance_defaults["hypothesis"]
+            logger.info(f"Using hypothesis from guidance_defaults.json: {generated_hypothesis}")
 
         # Default text_column to "Body" if not specified
         if not text_column:
