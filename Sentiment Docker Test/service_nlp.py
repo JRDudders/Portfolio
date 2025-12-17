@@ -1039,9 +1039,15 @@ async def batch_excel(
         if guidance_sheet:
             # Read without headers to handle various formats (numbered lists, no headers, etc.)
             guidance_df = pd.read_excel(excel_file, sheet_name=guidance_sheet, header=None)
-            logger.info(f"Guidance sheet has {len(guidance_df)} rows, {len(guidance_df.columns)} columns")
+            logger.info(f"Guidance sheet '{guidance_sheet}' has {len(guidance_df)} rows, {len(guidance_df.columns)} columns")
 
-            all_values = set()
+            # Debug: show first few rows of each column
+            for col_idx in range(min(len(guidance_df.columns), 5)):
+                col_data = guidance_df.iloc[:, col_idx].dropna().tolist()[:10]
+                logger.info(f"  Column {col_idx} sample: {col_data}")
+
+            all_values = []  # Use list to preserve order
+            seen = set()  # Track duplicates
 
             # Find the numeric ranking column (could be any column, not just A)
             # Then use the next column for labels
@@ -1075,23 +1081,35 @@ async def batch_excel(
 
             if label_col is None:
                 label_col = 0  # Fallback to first column
+                logger.info(f"Fallback: using column 0 for labels")
 
             # Extract labels from the identified column
+            skipped_values = []
             for val in guidance_df.iloc[:, label_col].dropna():
                 val_str = str(val).strip()
-                # Skip header-like rows (description text)
+                # Skip header-like rows (description text) - be conservative, only skip obvious headers
                 val_lower = val_str.lower()
-                if any(skip in val_lower for skip in ['hierarchy', 'informal', 'instance', 'mention', 'focus', 'equally', 'theme:']):
+                if any(skip in val_lower for skip in ['hierarchy', 'informal instruction', 'theme:']):
+                    skipped_values.append(f"'{val_str}' (header-like)")
                     continue
                 # Skip pure numbers
                 if val_str.replace('.', '').isdigit():
+                    skipped_values.append(f"'{val_str}' (numeric)")
                     continue
                 # Skip empty or very short values
-                if val_str and len(val_str) > 1:
-                    all_values.add(val_str)
+                if not val_str or len(val_str) <= 1:
+                    skipped_values.append(f"'{val_str}' (too short)")
+                    continue
+                # Add to list if not seen before (preserve order)
+                if val_str not in seen:
+                    all_values.append(val_str)
+                    seen.add(val_str)
 
-            guidance_labels = list(all_values)
-            logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet: {guidance_labels}")
+            if skipped_values:
+                logger.info(f"Skipped {len(skipped_values)} values from Guidance: {skipped_values[:5]}...")
+
+            guidance_labels = all_values
+            logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet (ordered): {guidance_labels}")
 
         # If no guidance sheet, try to get labels from training data or defaults
         training_store_instance = None
@@ -1775,10 +1793,13 @@ async def batch_excel(
         # Set lbls first (needed for narrative generation regardless of theme extraction)
         if guidance_labels:
             lbls = guidance_labels
+            logger.info(f"THEME LABELS SOURCE: Guidance sheet ({len(lbls)} labels): {lbls}")
         elif labels:
             lbls = _parse_labels_csv(labels)
+            logger.info(f"THEME LABELS SOURCE: API parameter ({len(lbls)} labels): {lbls}")
         else:
             lbls = DEFAULT_ZS_LABELS
+            logger.info(f"THEME LABELS SOURCE: DEFAULT_ZS_LABELS ({len(lbls)} labels): {lbls}")
 
         if extract_themes:
             # Check which rows already have themes populated
