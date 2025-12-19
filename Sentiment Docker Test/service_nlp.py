@@ -1002,15 +1002,28 @@ async def batch_excel(
     logger.info(f"Batch Excel processing: {file.filename}, stance={extract_stance}, themes={extract_themes}")
 
     # Helper to save checkpoint files
-    def save_checkpoint(excel_bytes: bytes, stage: str, filename: str):
-        """Save checkpoint file to temp directory"""
+    def save_checkpoint(excel_bytes: bytes, stage: str, filename: str, is_partial: bool = False):
+        """Save checkpoint file to temp directory.
+
+        Args:
+            excel_bytes: The Excel file bytes to save
+            stage: Stage name (e.g., '3_stance', '4_themes')
+            filename: Original filename
+            is_partial: If True, overwrites a single 'working' file instead of creating stage-specific files
+        """
         import os
         from pathlib import Path
         checkpoint_dir = Path("/app/temp/checkpoints")
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
         base_name = Path(filename).stem
-        checkpoint_path = checkpoint_dir / f"{base_name}_checkpoint_{stage}.xlsx"
+
+        if is_partial:
+            # Use single working file that gets overwritten
+            checkpoint_path = checkpoint_dir / f"{base_name}_checkpoint_working.xlsx"
+        else:
+            # Stage complete - save with stage name
+            checkpoint_path = checkpoint_dir / f"{base_name}_checkpoint_{stage}.xlsx"
 
         with open(checkpoint_path, 'wb') as f:
             f.write(excel_bytes)
@@ -1481,7 +1494,7 @@ async def batch_excel(
                                         pd.read_excel(excel_file, sheet_name=sn).to_excel(writer, sheet_name=sn, index=False)
                             checkpoint_output.seek(0)
                             checkpoint_bytes = checkpoint_output.read()
-                            save_checkpoint(checkpoint_bytes, f"1_urls_partial_{completed}", original_filename)
+                            save_checkpoint(checkpoint_bytes, "1_urls", original_filename, is_partial=True)
 
                             # Verify the saved Excel has the data by reading it back
                             verify_df = pd.read_excel(io.BytesIO(checkpoint_bytes), sheet_name=sheet)
@@ -1513,7 +1526,7 @@ async def batch_excel(
                                 pd.read_excel(excel_file, sheet_name=sn).to_excel(writer, sheet_name=sn, index=False)
                     checkpoint_output.seek(0)
                     checkpoint_bytes = checkpoint_output.read()
-                    save_checkpoint(checkpoint_bytes, f"1_urls_interrupted_{completed}", original_filename)
+                    save_checkpoint(checkpoint_bytes, "1_urls_interrupted", original_filename, is_partial=True)
                     logger.info(f"Emergency checkpoint saved with {completed} URLs fetched")
                     raise  # Re-raise to stop processing
 
@@ -1629,7 +1642,7 @@ async def batch_excel(
                             else:
                                 pd.read_excel(excel_file, sheet_name=sn).to_excel(writer, sheet_name=sn, index=False)
                     checkpoint_output.seek(0)
-                    save_checkpoint(checkpoint_output.read(), f"2_translated_partial_{total_translated}", original_filename)
+                    save_checkpoint(checkpoint_output.read(), "2_translated", original_filename, is_partial=True)
 
             logger.info(f"Translated {len([t for t in all_translations if t])} texts total")
 
@@ -1781,7 +1794,7 @@ async def batch_excel(
                     # Save incremental checkpoint after each chunk (except last)
                     if chunk_end < len(texts_needing_stance):
                         checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="stance")
-                        save_checkpoint(checkpoint_bytes, f"3_stance_partial_{total_processed}", original_filename)
+                        save_checkpoint(checkpoint_bytes, "3_stance", original_filename, is_partial=True)
 
                 # CHECKPOINT 3: After stance detection
                 checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="stance")
@@ -1886,7 +1899,7 @@ async def batch_excel(
                     # Save incremental checkpoint after each chunk (except last)
                     if chunk_end < len(texts_needing_themes):
                         checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="themes")
-                        save_checkpoint(checkpoint_bytes, f"4_themes_partial_{total_processed}", original_filename)
+                        save_checkpoint(checkpoint_bytes, "4_themes", original_filename, is_partial=True)
 
                 # CHECKPOINT 4: After theme extraction
                 checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="themes")
@@ -1963,7 +1976,7 @@ async def batch_excel(
                     # Save incremental checkpoint after each chunk (except last)
                     if chunk_end < len(texts_needing_narrative):
                         checkpoint_bytes = _process_excel_with_predictions(b, results, sheet_names=process_sheets, text_column=text_column, preset="narratives")
-                        save_checkpoint(checkpoint_bytes, f"5_narratives_partial_{total_processed}", original_filename)
+                        save_checkpoint(checkpoint_bytes, "5_narratives", original_filename, is_partial=True)
 
                 logger.info(f"Generated {total_processed} narratives total")
 
