@@ -396,14 +396,14 @@ def parse_excel_training_data(
             elif 'translated' in col_lower:
                 col_map['text_translated'] = col
 
-            # Stance column
-            if col_lower == 'stance':
+            # Stance/Sentiment column (sentiment is analogous to stance)
+            if col_lower == 'stance' or col_lower == 'sentiment':
                 col_map['stance'] = col
-            elif 'stance' in col_lower and 'confidence' not in col_lower:
+            elif ('stance' in col_lower or 'sentiment' in col_lower) and 'confidence' not in col_lower:
                 col_map.setdefault('stance', col)
 
-            # Stance confidence
-            if 'stance' in col_lower and 'confidence' in col_lower:
+            # Stance/Sentiment confidence
+            if ('stance' in col_lower or 'sentiment' in col_lower) and 'confidence' in col_lower:
                 col_map['stance_confidence'] = col
 
             # Themes column
