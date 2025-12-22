@@ -2484,6 +2484,7 @@ async def compare_annotations(
         output.seek(0)
 
         # Generate filename
+        from pathlib import Path
         base_name = Path(automated_file.filename or "comparison").stem
         output_filename = f"{base_name}_vs_human_diff.xlsx"
 
