@@ -2215,6 +2215,7 @@ async def compare_annotations(
     automated_file: UploadFile = File(..., description="Excel file with automated annotations"),
     human_file: UploadFile = File(..., description="Excel file with human annotations"),
     url_column: str = Query("URL", description="Column name containing URLs for row matching"),
+    sheets: Optional[str] = Query(None, description="Comma-separated sheet names to compare (all sheets if not specified)"),
     compare_stance: bool = Query(True, description="Compare Stance/Sentiment columns"),
     compare_themes: bool = Query(True, description="Compare Themes columns"),
     compare_narrative: bool = Query(False, description="Compare Narrative columns"),
@@ -2229,7 +2230,7 @@ async def compare_annotations(
 
     Returns an Excel file with side-by-side comparison and a summary sheet.
     """
-    logger.info(f"Comparing annotations: automated={automated_file.filename}, human={human_file.filename}")
+    logger.info(f"Comparing annotations: automated={automated_file.filename}, human={human_file.filename}, sheets={sheets}")
 
     try:
         auto_bytes = await automated_file.read()
@@ -2238,10 +2239,22 @@ async def compare_annotations(
         auto_excel = pd.ExcelFile(io.BytesIO(auto_bytes))
         human_excel = pd.ExcelFile(io.BytesIO(human_bytes))
 
+        # Parse specified sheets if provided
+        specified_sheets = None
+        if sheets:
+            specified_sheets = [s.strip() for s in sheets.split(',') if s.strip()]
+            logger.info(f"User specified sheets: {specified_sheets}")
+
         # Find common sheets (excluding Guidance, Pivot, etc.)
         skip_sheets = {'guidance', 'pivot', 'summary', 'stats', 'comparison'}
         auto_sheets = [s for s in auto_excel.sheet_names if s.lower() not in skip_sheets]
         human_sheets = [s for s in human_excel.sheet_names if s.lower() not in skip_sheets]
+
+        # If user specified sheets, filter to only those
+        if specified_sheets:
+            auto_sheets = [s for s in auto_sheets if s in specified_sheets or s.lower() in [ss.lower() for ss in specified_sheets]]
+            human_sheets = [s for s in human_sheets if s in specified_sheets or s.lower() in [ss.lower() for ss in specified_sheets]]
+            logger.info(f"Filtered to specified sheets - auto: {auto_sheets}, human: {human_sheets}")
 
         # Try to match sheets by name
         common_sheets = []

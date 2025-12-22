@@ -375,9 +375,15 @@
               <label class="checkbox"><input type="checkbox" id="compare-themes" checked/> Compare Themes</label>
               <label class="checkbox"><input type="checkbox" id="compare-narrative"/> Compare Narrative</label>
             </div>
-            <div style="margin-top:8px">
-              <label for="url-column" style="font-size:11px">URL Column (for row matching)</label>
-              <input id="url-column" type="text" placeholder="URL" value="URL" style="width:150px"/>
+            <div class="inline" style="margin-top:8px;gap:16px">
+              <div>
+                <label for="url-column" style="font-size:11px">URL Column (for row matching)</label>
+                <input id="url-column" type="text" placeholder="URL" value="URL" style="width:150px"/>
+              </div>
+              <div>
+                <label for="compare-sheets" style="font-size:11px">Sheets to compare (comma-separated, blank=all)</label>
+                <input id="compare-sheets" type="text" placeholder="Sheet1, Sheet2" style="width:200px"/>
+              </div>
             </div>
           </div>
         </details>
@@ -2927,6 +2933,7 @@
       const compareThemes = document.getElementById('compare-themes').checked;
       const compareNarrative = document.getElementById('compare-narrative').checked;
       const urlColumn = document.getElementById('url-column').value || 'URL';
+      const compareSheets = document.getElementById('compare-sheets').value.trim();
 
       setStatus(statusComparison, 'Comparing annotations...');
       runComparisonBtn.disabled = true;
@@ -2942,6 +2949,9 @@
           compare_themes: compareThemes,
           compare_narrative: compareNarrative
         });
+        if (compareSheets) {
+          params.append('sheets', compareSheets);
+        }
 
         const res = await fetch(`/api/nlp/compare-annotations?${params.toString()}`, {
           method: 'POST',
