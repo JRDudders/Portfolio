@@ -2332,6 +2332,7 @@ async def compare_annotations(
             "themes_mismatches": 0,
             "unmatched_auto_rows": 0,
             "unmatched_human_rows": 0,
+            "confusion_matrix": {},  # Tracks Human→Auto stance transitions
         }
 
         for auto_sheet, human_sheet in common_sheets:
@@ -2428,15 +2429,34 @@ async def compare_annotations(
                         auto_stance = str(auto_row.get(auto_stance_col, '')).strip().upper() if pd.notna(auto_row.get(auto_stance_col)) else ''
                         human_stance = str(human_row.get(human_stance_col, '')).strip().upper() if pd.notna(human_row.get(human_stance_col)) else ''
 
-                        # Normalize stance values
-                        stance_map = {'POSITIVE': 'SUPPORT', 'NEGATIVE': 'OPPOSE', 'POS': 'SUPPORT', 'NEG': 'OPPOSE'}
-                        auto_stance = stance_map.get(auto_stance, auto_stance)
-                        human_stance = stance_map.get(human_stance, human_stance)
+                        # Normalize stance values - comprehensive mapping
+                        stance_map = {
+                            # Positive variants → SUPPORT
+                            'POSITIVE': 'SUPPORT', 'POS': 'SUPPORT', 'FAVORABLE': 'SUPPORT',
+                            'SUPPORTIVE': 'SUPPORT', 'PRO': 'SUPPORT', 'AGREE': 'SUPPORT',
+                            'FOR': 'SUPPORT', 'YES': 'SUPPORT', 'ENTAILMENT': 'SUPPORT',
+                            # Negative variants → OPPOSE
+                            'NEGATIVE': 'OPPOSE', 'NEG': 'OPPOSE', 'UNFAVORABLE': 'OPPOSE',
+                            'OPPOSING': 'OPPOSE', 'ANTI': 'OPPOSE', 'CON': 'OPPOSE',
+                            'AGAINST': 'OPPOSE', 'DISAGREE': 'OPPOSE', 'NO': 'OPPOSE',
+                            'CONTRADICTION': 'OPPOSE',
+                            # Neutral variants
+                            'NEU': 'NEUTRAL', 'MIXED': 'NEUTRAL', 'NONE': 'NEUTRAL',
+                            'N/A': 'NEUTRAL', 'NA': 'NEUTRAL', 'UNKNOWN': 'NEUTRAL',
+                        }
+                        auto_stance_norm = stance_map.get(auto_stance, auto_stance)
+                        human_stance_norm = stance_map.get(human_stance, human_stance)
 
-                        comp['Auto_Stance'] = auto_stance
-                        comp['Human_Stance'] = human_stance
+                        comp['Auto_Stance'] = auto_stance_norm
+                        comp['Human_Stance'] = human_stance_norm
+                        comp['Auto_Stance_Raw'] = auto_stance
+                        comp['Human_Stance_Raw'] = human_stance
 
-                        if auto_stance == human_stance:
+                        # Track confusion matrix
+                        confusion_key = f"{human_stance_norm}→{auto_stance_norm}"
+                        summary_stats["confusion_matrix"][confusion_key] = summary_stats["confusion_matrix"].get(confusion_key, 0) + 1
+
+                        if auto_stance_norm == human_stance_norm:
                             comp['Stance_Match'] = 'MATCH'
                             summary_stats["stance_matches"] += 1
                         else:
@@ -2529,6 +2549,16 @@ async def compare_annotations(
             }
             summary_df = pd.DataFrame(summary_data)
             summary_df.to_excel(writer, sheet_name='Summary', index=False)
+
+            # Confusion Matrix sheet (shows Human label → Auto label transitions)
+            if summary_stats["confusion_matrix"]:
+                confusion_data = {
+                    'Human → Auto': list(summary_stats["confusion_matrix"].keys()),
+                    'Count': list(summary_stats["confusion_matrix"].values())
+                }
+                confusion_df = pd.DataFrame(confusion_data)
+                confusion_df = confusion_df.sort_values('Count', ascending=False)
+                confusion_df.to_excel(writer, sheet_name='Confusion Matrix', index=False)
 
         output.seek(0)
 
