@@ -343,6 +343,51 @@
         <div id="status-training" class="status"></div>
       </div>
 
+      <!-- ANNOTATION COMPARISON -->
+      <div class="card">
+        <h2>🔍 Compare Annotations</h2>
+        <p style="font-size:12px;color:var(--muted);margin:4px 0 12px">Compare automated annotations against human annotations. Upload both files and get a diff report showing agreement/disagreement.</p>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px">
+          <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Automated Annotations</label>
+            <div class="inline">
+              <button class="btn" id="btn-auto-file">Choose File</button>
+              <span class="file-name" id="auto-file-name">No file selected</span>
+              <input type="file" id="auto-file-input" style="display:none" accept=".xlsx,.xlsm,.xls"/>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Human Annotations</label>
+            <div class="inline">
+              <button class="btn" id="btn-human-file">Choose File</button>
+              <span class="file-name" id="human-file-name">No file selected</span>
+              <input type="file" id="human-file-input" style="display:none" accept=".xlsx,.xlsm,.xls"/>
+            </div>
+          </div>
+        </div>
+
+        <details style="margin-bottom:12px">
+          <summary>Comparison Options</summary>
+          <div style="margin-top:8px">
+            <div class="inline" style="gap:16px;flex-wrap:wrap">
+              <label class="checkbox"><input type="checkbox" id="compare-stance" checked/> Compare Stance</label>
+              <label class="checkbox"><input type="checkbox" id="compare-themes" checked/> Compare Themes</label>
+              <label class="checkbox"><input type="checkbox" id="compare-narrative"/> Compare Narrative</label>
+            </div>
+            <div style="margin-top:8px">
+              <label for="url-column" style="font-size:11px">URL Column (for row matching)</label>
+              <input id="url-column" type="text" placeholder="URL" value="URL" style="width:150px"/>
+            </div>
+          </div>
+        </details>
+
+        <div class="controls">
+          <button class="btn primary" id="run-comparison" disabled>Compare & Download Diff</button>
+        </div>
+        <div id="status-comparison" class="status"></div>
+      </div>
+
       <!-- BATCH EXCEL PROCESSING -->
       <div class="card">
         <h2>📊 Batch Excel Processing</h2>
@@ -2835,6 +2880,102 @@
         await refreshTrainingStats();
       } catch (e) {
         setStatus(statusTraining, 'Error: ' + (e?.message || e), 'err');
+      }
+    };
+
+    // --- Annotation Comparison ---
+    const autoFileBtn = document.getElementById('btn-auto-file');
+    const autoFileInput = document.getElementById('auto-file-input');
+    const autoFileName = document.getElementById('auto-file-name');
+    const humanFileBtn = document.getElementById('btn-human-file');
+    const humanFileInput = document.getElementById('human-file-input');
+    const humanFileName = document.getElementById('human-file-name');
+    const runComparisonBtn = document.getElementById('run-comparison');
+    const statusComparison = document.getElementById('status-comparison');
+
+    autoFileBtn.onclick = () => autoFileInput.click();
+    humanFileBtn.onclick = () => humanFileInput.click();
+
+    autoFileInput.onchange = () => {
+      const file = autoFileInput.files?.[0];
+      autoFileName.textContent = file ? file.name : 'No file selected';
+      updateComparisonButton();
+    };
+
+    humanFileInput.onchange = () => {
+      const file = humanFileInput.files?.[0];
+      humanFileName.textContent = file ? file.name : 'No file selected';
+      updateComparisonButton();
+    };
+
+    function updateComparisonButton() {
+      const hasAuto = autoFileInput.files?.length > 0;
+      const hasHuman = humanFileInput.files?.length > 0;
+      runComparisonBtn.disabled = !(hasAuto && hasHuman);
+    }
+
+    runComparisonBtn.onclick = async () => {
+      const autoFile = autoFileInput.files?.[0];
+      const humanFile = humanFileInput.files?.[0];
+
+      if (!autoFile || !humanFile) {
+        setStatus(statusComparison, 'Please select both files', 'err');
+        return;
+      }
+
+      const compareStance = document.getElementById('compare-stance').checked;
+      const compareThemes = document.getElementById('compare-themes').checked;
+      const compareNarrative = document.getElementById('compare-narrative').checked;
+      const urlColumn = document.getElementById('url-column').value || 'URL';
+
+      setStatus(statusComparison, 'Comparing annotations...');
+      runComparisonBtn.disabled = true;
+
+      try {
+        const fd = new FormData();
+        fd.append('automated_file', autoFile, autoFile.name);
+        fd.append('human_file', humanFile, humanFile.name);
+
+        const params = new URLSearchParams({
+          url_column: urlColumn,
+          compare_stance: compareStance,
+          compare_themes: compareThemes,
+          compare_narrative: compareNarrative
+        });
+
+        const res = await fetch(`/api/nlp/compare-annotations?${params.toString()}`, {
+          method: 'POST',
+          body: fd
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Server error: ${res.status}`);
+        }
+
+        // Download the result
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition');
+        let filename = 'comparison_diff.xlsx';
+        if (disposition) {
+          const match = disposition.match(/filename=([^;]+)/);
+          if (match) filename = match[1].replace(/"/g, '');
+        }
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        setStatus(statusComparison, `Comparison complete! Downloaded: ${filename}`, 'ok');
+      } catch (e) {
+        setStatus(statusComparison, 'Error: ' + (e?.message || e), 'err');
+      } finally {
+        updateComparisonButton();
       }
     };
 
