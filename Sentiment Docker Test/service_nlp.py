@@ -1040,6 +1040,7 @@ async def batch_excel(
 
         # Check for Guidance sheet/column to extract theme labels
         guidance_labels = None
+        guidance_hypothesis = None  # May be extracted from Guidance sheet
         excel_file = pd.ExcelFile(io.BytesIO(b))
 
         # Look for Guidance tab (case-insensitive)
@@ -1139,6 +1140,34 @@ async def batch_excel(
             guidance_labels = all_values
             logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet (ordered): {guidance_labels}")
 
+            # Also try to extract hypothesis from Guidance sheet
+            # Look for cells containing "hypothesis", "claim", or "research question"
+            guidance_hypothesis = None
+            for col_idx in range(len(guidance_df.columns)):
+                for row_idx in range(len(guidance_df)):
+                    cell_val = guidance_df.iloc[row_idx, col_idx]
+                    if pd.isna(cell_val):
+                        continue
+                    cell_str = str(cell_val).strip().lower()
+                    # Check if this cell is a label for hypothesis
+                    if any(kw in cell_str for kw in ['hypothesis:', 'claim:', 'research question:', 'stance question:']):
+                        # The hypothesis might be in the same cell after the colon, or in the next column
+                        if ':' in cell_str:
+                            parts = str(cell_val).split(':', 1)
+                            if len(parts) > 1 and len(parts[1].strip()) > 10:
+                                guidance_hypothesis = parts[1].strip()
+                                logger.info(f"Extracted hypothesis from Guidance (same cell): {guidance_hypothesis}")
+                                break
+                        # Or check next column
+                        if col_idx + 1 < len(guidance_df.columns):
+                            next_val = guidance_df.iloc[row_idx, col_idx + 1]
+                            if pd.notna(next_val) and len(str(next_val).strip()) > 10:
+                                guidance_hypothesis = str(next_val).strip()
+                                logger.info(f"Extracted hypothesis from Guidance (adjacent cell): {guidance_hypothesis}")
+                                break
+                if guidance_hypothesis:
+                    break
+
         # If no guidance sheet, try to get labels from training data or defaults
         training_store_instance = None
         if use_training_data:
@@ -1163,17 +1192,22 @@ async def batch_excel(
 
         # Generate hypothesis from guidance if not provided
         generated_hypothesis = hypothesis
-        if not generated_hypothesis and guidance_labels:
-            # Create hypothesis from guidance themes
-            themes_summary = ", ".join(guidance_labels[:5])
-            if len(guidance_labels) > 5:
-                themes_summary += f" (and {len(guidance_labels) - 5} more)"
-            generated_hypothesis = f"U.S. priorities as outlined in the guidance ({themes_summary}) are viewed favorably and having a positive influence."
-            logger.info(f"Generated hypothesis: {generated_hypothesis}")
-        elif not generated_hypothesis:
-            # Use default hypothesis from guidance_defaults.json
-            generated_hypothesis = _guidance_defaults["hypothesis"]
-            logger.info(f"Using hypothesis from guidance_defaults.json: {generated_hypothesis}")
+        if not generated_hypothesis:
+            # First try hypothesis extracted from Guidance sheet
+            if guidance_hypothesis:
+                generated_hypothesis = guidance_hypothesis
+                logger.info(f"Using hypothesis from Guidance sheet: {generated_hypothesis}")
+            elif guidance_labels:
+                # Create hypothesis from guidance themes
+                themes_summary = ", ".join(guidance_labels[:5])
+                if len(guidance_labels) > 5:
+                    themes_summary += f" (and {len(guidance_labels) - 5} more)"
+                generated_hypothesis = f"U.S. priorities as outlined in the guidance ({themes_summary}) are viewed favorably and having a positive influence."
+                logger.info(f"Generated hypothesis from themes: {generated_hypothesis}")
+            else:
+                # Use default hypothesis from guidance_defaults.json
+                generated_hypothesis = _guidance_defaults["hypothesis"]
+                logger.info(f"Using hypothesis from guidance_defaults.json: {generated_hypothesis}")
 
         # Default text_column to "Body" if not specified
         if not text_column:
