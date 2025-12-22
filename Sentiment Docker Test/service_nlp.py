@@ -1062,6 +1062,17 @@ async def batch_excel(
             all_values = []  # Use list to preserve order
             seen = set()  # Track duplicates
 
+            # Helper to strip leading numbers from text like "1. Theme" or "1) Theme" or "1 - Theme"
+            import re
+            def strip_leading_number(text):
+                """Remove leading number patterns like '1. ', '1) ', '1 - ', '1: ' from text"""
+                text = str(text).strip()
+                # Pattern: optional number(s), then separator (. ) - : etc), then the actual text
+                match = re.match(r'^\d+[\.\)\-:\s]+\s*(.+)$', text)
+                if match:
+                    return match.group(1).strip()
+                return text
+
             # Find the numeric ranking column (could be any column, not just A)
             # Then use the next column for labels
             ranking_col = None
@@ -1073,7 +1084,7 @@ async def batch_excel(
                     continue
                 # Check if this column is mostly numeric (ranking numbers 1,2,3...)
                 numeric_count = sum(1 for v in col_data if str(v).strip().replace('.', '').isdigit())
-                if numeric_count >= len(col_data) * 0.3 and numeric_count >= 3:
+                if numeric_count >= len(col_data) * 0.5 and numeric_count >= 3:
                     ranking_col = col_idx
                     # Use the next column for labels if it exists
                     if col_idx + 1 < len(guidance_df.columns):
@@ -1100,9 +1111,13 @@ async def batch_excel(
             skipped_values = []
             for val in guidance_df.iloc[:, label_col].dropna():
                 val_str = str(val).strip()
+
+                # Strip leading numbers (handles "1. Theme", "1) Theme", etc.)
+                val_str = strip_leading_number(val_str)
+
                 # Skip header-like rows (description text) - be conservative, only skip obvious headers
                 val_lower = val_str.lower()
-                if any(skip in val_lower for skip in ['hierarchy', 'informal instruction', 'theme:']):
+                if any(skip in val_lower for skip in ['hierarchy', 'informal instruction', 'theme:', 'priority', 'rank']):
                     skipped_values.append(f"'{val_str}' (header-like)")
                     continue
                 # Skip pure numbers
