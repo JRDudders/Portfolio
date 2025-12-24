@@ -2475,7 +2475,11 @@ async def compare_annotations(
                         comp['Auto_Themes'] = auto_themes_raw
                         comp['Human_Themes'] = human_themes_raw
 
-                        if auto_themes_set == human_themes_set:
+                        # Don't count empty vs empty as a match
+                        if not auto_themes_set and not human_themes_set:
+                            comp['Themes_Match'] = 'BOTH_EMPTY'
+                            # Don't count in any category - skip
+                        elif auto_themes_set == human_themes_set:
                             comp['Themes_Match'] = 'MATCH'
                             summary_stats["themes_matches"] += 1
                         elif auto_themes_set & human_themes_set:  # Any overlap
