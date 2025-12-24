@@ -1074,68 +1074,93 @@ async def batch_excel(
                     return match.group(1).strip()
                 return text
 
-            # Find the numeric ranking column (could be any column, not just A)
-            # Then use the next column for labels
+            def is_integer(val):
+                """Check if value is an integer (1, 2, 3, not 1.5)"""
+                if pd.isna(val):
+                    return False, None
+                try:
+                    num = int(float(val))
+                    if float(val) == num:  # Make sure it's not a decimal
+                        return True, num
+                except (ValueError, TypeError):
+                    pass
+                return False, None
+
+            # STRATEGY: Find where numbered list (1, 2, 3...) starts by scanning cells
+            # Look for a cell with "1" followed by "2" in the next row of the same column
             ranking_col = None
+            ranking_start_row = None
             label_col = None
 
             for col_idx in range(len(guidance_df.columns)):
-                col_data = guidance_df.iloc[:, col_idx].dropna()
-                if len(col_data) == 0:
-                    continue
-                # Check if this column is mostly numeric (ranking numbers 1,2,3...)
-                numeric_count = sum(1 for v in col_data if str(v).strip().replace('.', '').isdigit())
-                if numeric_count >= len(col_data) * 0.5 and numeric_count >= 3:
-                    ranking_col = col_idx
-                    # Use the next column for labels if it exists
-                    if col_idx + 1 < len(guidance_df.columns):
-                        label_col = col_idx + 1
-                        logger.info(f"Detected numeric ranking in column {col_idx}, using column {label_col} for labels")
+                for row_idx in range(len(guidance_df) - 1):  # -1 because we check row+1
+                    val = guidance_df.iloc[row_idx, col_idx]
+                    is_int, num = is_integer(val)
+                    if is_int and num == 1:
+                        # Check if next row has 2
+                        next_val = guidance_df.iloc[row_idx + 1, col_idx]
+                        is_next_int, next_num = is_integer(next_val)
+                        if is_next_int and next_num == 2:
+                            # Found the start of a numbered list!
+                            ranking_col = col_idx
+                            ranking_start_row = row_idx
+                            if col_idx + 1 < len(guidance_df.columns):
+                                label_col = col_idx + 1
+                            logger.info(f"Found numbered list starting at row {row_idx}, col {col_idx} (1, 2, ...). Using col {label_col} for labels.")
+                            break
+                if ranking_col is not None:
                     break
 
-            # If no ranking column found, find first column with text content
-            if label_col is None:
+            # If we found a numbered list, extract labels from adjacent column
+            if ranking_col is not None and label_col is not None:
+                # Follow the numbered sequence and extract corresponding labels
+                current_row = ranking_start_row
+                expected_num = 1
+                while current_row < len(guidance_df):
+                    val = guidance_df.iloc[current_row, ranking_col]
+                    is_int, num = is_integer(val)
+
+                    if is_int and num == expected_num:
+                        # Get the label from the adjacent column
+                        label_val = guidance_df.iloc[current_row, label_col]
+                        if pd.notna(label_val):
+                            label_str = str(label_val).strip()
+                            label_str = strip_leading_number(label_str)  # In case there's also a number prefix
+                            if label_str and len(label_str) > 1 and label_str not in seen:
+                                all_values.append(label_str)
+                                seen.add(label_str)
+                                logger.info(f"  Priority {expected_num}: {label_str}")
+                        expected_num += 1
+                        current_row += 1
+                    else:
+                        # Sequence broken, stop
+                        break
+            else:
+                # Fallback: No numbered list found, try to find text column
+                logger.info("No numbered list found, falling back to text column detection")
+                label_col = None
                 for col_idx in range(len(guidance_df.columns)):
                     col_data = guidance_df.iloc[:, col_idx].dropna()
-                    # Check if column has substantial text (not just numbers)
                     text_count = sum(1 for v in col_data if not str(v).strip().replace('.', '').isdigit() and len(str(v).strip()) > 2)
                     if text_count >= 3:
                         label_col = col_idx
                         logger.info(f"Using column {col_idx} for labels (text content detected)")
                         break
 
-            if label_col is None:
-                label_col = 0  # Fallback to first column
-                logger.info(f"Fallback: using column 0 for labels")
-
-            # Extract labels from the identified column
-            skipped_values = []
-            for val in guidance_df.iloc[:, label_col].dropna():
-                val_str = str(val).strip()
-
-                # Strip leading numbers (handles "1. Theme", "1) Theme", etc.)
-                val_str = strip_leading_number(val_str)
-
-                # Skip header-like rows (description text) - be conservative, only skip obvious headers
-                val_lower = val_str.lower()
-                if any(skip in val_lower for skip in ['hierarchy', 'informal instruction', 'theme:', 'priority', 'rank']):
-                    skipped_values.append(f"'{val_str}' (header-like)")
-                    continue
-                # Skip pure numbers
-                if val_str.replace('.', '').isdigit():
-                    skipped_values.append(f"'{val_str}' (numeric)")
-                    continue
-                # Skip empty or very short values
-                if not val_str or len(val_str) <= 1:
-                    skipped_values.append(f"'{val_str}' (too short)")
-                    continue
-                # Add to list if not seen before (preserve order)
-                if val_str not in seen:
-                    all_values.append(val_str)
-                    seen.add(val_str)
-
-            if skipped_values:
-                logger.info(f"Skipped {len(skipped_values)} values from Guidance: {skipped_values[:5]}...")
+                if label_col is not None:
+                    for val in guidance_df.iloc[:, label_col].dropna():
+                        val_str = str(val).strip()
+                        val_str = strip_leading_number(val_str)
+                        val_lower = val_str.lower()
+                        if any(skip in val_lower for skip in ['hierarchy', 'informal instruction', 'theme:', 'priority', 'rank']):
+                            continue
+                        if val_str.replace('.', '').isdigit():
+                            continue
+                        if not val_str or len(val_str) <= 1:
+                            continue
+                        if val_str not in seen:
+                            all_values.append(val_str)
+                            seen.add(val_str)
 
             guidance_labels = all_values
             logger.info(f"Extracted {len(guidance_labels)} theme labels from Guidance sheet (ordered): {guidance_labels}")
