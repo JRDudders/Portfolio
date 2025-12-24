@@ -2429,6 +2429,20 @@ async def compare_annotations(
             logger.info(f"Sheet {auto_sheet}: auto_stance={auto_stance_col}, human_stance={human_stance_col}")
             logger.info(f"Sheet {auto_sheet}: auto_themes={auto_themes_col}, human_themes={human_themes_col}")
 
+            # Debug: show sample values from each column
+            if auto_stance_col:
+                sample_auto_stance = auto_df[auto_stance_col].dropna().head(5).tolist()
+                logger.info(f"  Sample auto stance values: {sample_auto_stance}")
+            if human_stance_col:
+                sample_human_stance = human_df[human_stance_col].dropna().head(5).tolist()
+                logger.info(f"  Sample human stance values: {sample_human_stance}")
+            if auto_themes_col:
+                sample_auto_themes = auto_df[auto_themes_col].dropna().head(5).tolist()
+                logger.info(f"  Sample auto theme values: {sample_auto_themes}")
+            if human_themes_col:
+                sample_human_themes = human_df[human_themes_col].dropna().head(5).tolist()
+                logger.info(f"  Sample human theme values: {sample_human_themes}")
+
             # Build comparison rows
             comparison_rows = []
             matched_human_urls = set()
@@ -2477,16 +2491,22 @@ async def compare_annotations(
                         comp['Auto_Stance_Raw'] = auto_stance
                         comp['Human_Stance_Raw'] = human_stance
 
-                        # Track confusion matrix
-                        confusion_key = f"{human_stance_norm}→{auto_stance_norm}"
-                        summary_stats["confusion_matrix"][confusion_key] = summary_stats["confusion_matrix"].get(confusion_key, 0) + 1
-
-                        if auto_stance_norm == human_stance_norm:
+                        # Don't count empty vs empty as a match
+                        if not auto_stance_norm and not human_stance_norm:
+                            comp['Stance_Match'] = 'BOTH_EMPTY'
+                            # Don't count in any category
+                        elif auto_stance_norm == human_stance_norm:
                             comp['Stance_Match'] = 'MATCH'
                             summary_stats["stance_matches"] += 1
+                            # Track confusion matrix
+                            confusion_key = f"{human_stance_norm}→{auto_stance_norm}"
+                            summary_stats["confusion_matrix"][confusion_key] = summary_stats["confusion_matrix"].get(confusion_key, 0) + 1
                         else:
                             comp['Stance_Match'] = 'MISMATCH'
                             summary_stats["stance_mismatches"] += 1
+                            # Track confusion matrix
+                            confusion_key = f"{human_stance_norm}→{auto_stance_norm}"
+                            summary_stats["confusion_matrix"][confusion_key] = summary_stats["confusion_matrix"].get(confusion_key, 0) + 1
 
                     # Compare themes
                     if compare_themes and auto_themes_col and human_themes_col:
