@@ -2446,6 +2446,7 @@ async def compare_annotations(
             # Build comparison rows
             comparison_rows = []
             matched_human_urls = set()
+            debug_comparison_count = 0  # Log first few comparisons for debugging
 
             for idx, auto_row in auto_df.iterrows():
                 norm_url = auto_row['_norm_url']
@@ -2491,6 +2492,10 @@ async def compare_annotations(
                         comp['Auto_Stance_Raw'] = auto_stance
                         comp['Human_Stance_Raw'] = human_stance
 
+                        # Debug: log first 5 comparisons
+                        if debug_comparison_count < 5:
+                            logger.info(f"  DEBUG Row {idx}: auto_raw='{auto_stance}' -> norm='{auto_stance_norm}', human_raw='{human_stance}' -> norm='{human_stance_norm}'")
+
                         # Don't count empty vs empty as a match
                         if not auto_stance_norm and not human_stance_norm:
                             comp['Stance_Match'] = 'BOTH_EMPTY'
@@ -2501,12 +2506,16 @@ async def compare_annotations(
                             # Track confusion matrix
                             confusion_key = f"{human_stance_norm}→{auto_stance_norm}"
                             summary_stats["confusion_matrix"][confusion_key] = summary_stats["confusion_matrix"].get(confusion_key, 0) + 1
+                            if debug_comparison_count < 5:
+                                logger.info(f"    -> MATCH ('{auto_stance_norm}' == '{human_stance_norm}')")
                         else:
                             comp['Stance_Match'] = 'MISMATCH'
                             summary_stats["stance_mismatches"] += 1
                             # Track confusion matrix
                             confusion_key = f"{human_stance_norm}→{auto_stance_norm}"
                             summary_stats["confusion_matrix"][confusion_key] = summary_stats["confusion_matrix"].get(confusion_key, 0) + 1
+                            if debug_comparison_count < 5:
+                                logger.info(f"    -> MISMATCH ('{auto_stance_norm}' != '{human_stance_norm}')")
 
                     # Compare themes
                     if compare_themes and auto_themes_col and human_themes_col:
@@ -2539,6 +2548,8 @@ async def compare_annotations(
                     if compare_narrative and auto_narrative_col and human_narrative_col:
                         comp['Auto_Narrative'] = str(auto_row.get(auto_narrative_col, ''))[:500] if pd.notna(auto_row.get(auto_narrative_col)) else ''
                         comp['Human_Narrative'] = str(human_row.get(human_narrative_col, ''))[:500] if pd.notna(human_row.get(human_narrative_col)) else ''
+
+                    debug_comparison_count += 1
 
                 else:
                     # No matching human annotation
