@@ -2296,13 +2296,7 @@ async def compare_annotations(
 ):
     """
     Compare automated annotations against human annotations.
-
-    Matches rows by URL and produces a diff showing:
-    - Agreement/disagreement on Stance
-    - Agreement/disagreement on Themes
-    - Overall accuracy metrics
-
-    Returns an Excel file with side-by-side comparison and a summary sheet.
+    Matches rows by URL and produces a diff showing agreement/disagreement.
     """
     logger.info(f"Comparing annotations: automated={automated_file.filename}, human={human_file.filename}, sheets={sheets}")
 
@@ -2339,7 +2333,6 @@ async def compare_annotations(
                     break
 
         if not common_sheets:
-            # If no name matches, use first sheet from each
             if auto_sheets and human_sheets:
                 common_sheets = [(auto_sheets[0], human_sheets[0])]
                 logger.warning(f"No matching sheet names, using {auto_sheets[0]} and {human_sheets[0]}")
@@ -2357,22 +2350,19 @@ async def compare_annotations(
             "themes_mismatches": 0,
             "unmatched_auto_rows": 0,
             "unmatched_human_rows": 0,
-            "confusion_matrix": {},  # Tracks Human→Auto stance transitions
         }
 
         for auto_sheet, human_sheet in common_sheets:
             auto_df = pd.read_excel(auto_excel, sheet_name=auto_sheet)
             human_df = pd.read_excel(human_excel, sheet_name=human_sheet)
 
-            # Find URL column (case-insensitive)
+            # Find URL column
             auto_url_col = None
             human_url_col = None
-
             for col in auto_df.columns:
                 if col.lower() == url_column.lower() or 'url' in col.lower():
                     auto_url_col = col
                     break
-
             for col in human_df.columns:
                 if col.lower() == url_column.lower() or 'url' in col.lower():
                     human_url_col = col
@@ -2382,7 +2372,7 @@ async def compare_annotations(
                 logger.warning(f"URL column not found in sheets {auto_sheet}/{human_sheet}, skipping")
                 continue
 
-            # Normalize URLs for matching (strip whitespace, lowercase)
+            # Normalize URLs for matching
             def normalize_url(url):
                 if pd.isna(url):
                     return None
@@ -2412,41 +2402,17 @@ async def compare_annotations(
                         return col
                 return None
 
-            def find_narrative_col(df):
-                for col in df.columns:
-                    col_lower = col.lower()
-                    if 'narrative' in col_lower or 'summary' in col_lower:
-                        return col
-                return None
-
             auto_stance_col = find_stance_col(auto_df)
             human_stance_col = find_stance_col(human_df)
             auto_themes_col = find_themes_col(auto_df)
             human_themes_col = find_themes_col(human_df)
-            auto_narrative_col = find_narrative_col(auto_df)
-            human_narrative_col = find_narrative_col(human_df)
 
-            logger.info(f"Sheet {auto_sheet}: auto_stance={auto_stance_col}, human_stance={human_stance_col}")
-            logger.info(f"Sheet {auto_sheet}: auto_themes={auto_themes_col}, human_themes={human_themes_col}")
-
-            # Debug: show sample values from each column
-            if auto_stance_col:
-                sample_auto_stance = auto_df[auto_stance_col].dropna().head(5).tolist()
-                logger.info(f"  Sample auto stance values: {sample_auto_stance}")
-            if human_stance_col:
-                sample_human_stance = human_df[human_stance_col].dropna().head(5).tolist()
-                logger.info(f"  Sample human stance values: {sample_human_stance}")
-            if auto_themes_col:
-                sample_auto_themes = auto_df[auto_themes_col].dropna().head(5).tolist()
-                logger.info(f"  Sample auto theme values: {sample_auto_themes}")
-            if human_themes_col:
-                sample_human_themes = human_df[human_themes_col].dropna().head(5).tolist()
-                logger.info(f"  Sample human theme values: {sample_human_themes}")
+            logger.info(f"Sheet {auto_sheet}: auto_stance_col={auto_stance_col}, human_stance_col={human_stance_col}")
+            logger.info(f"Sheet {auto_sheet}: auto_themes_col={auto_themes_col}, human_themes_col={human_themes_col}")
 
             # Build comparison rows
             comparison_rows = []
             matched_human_urls = set()
-            debug_comparison_count = 0  # Log first few comparisons for debugging
 
             for idx, auto_row in auto_df.iterrows():
                 norm_url = auto_row['_norm_url']
@@ -2464,104 +2430,72 @@ async def compare_annotations(
                     matched_human_urls.add(norm_url)
                     summary_stats["total_matched_rows"] += 1
 
-                    # Compare stance
+                    # Compare stance - simple string comparison after normalization
                     if compare_stance and auto_stance_col and human_stance_col:
-                        auto_stance = str(auto_row.get(auto_stance_col, '')).strip().upper() if pd.notna(auto_row.get(auto_stance_col)) else ''
-                        human_stance = str(human_row.get(human_stance_col, '')).strip().upper() if pd.notna(human_row.get(human_stance_col)) else ''
+                        auto_val = auto_row.get(auto_stance_col)
+                        human_val = human_row.get(human_stance_col)
 
-                        # Normalize stance values - comprehensive mapping
-                        stance_map = {
-                            # Positive variants → SUPPORT
-                            'POSITIVE': 'SUPPORT', 'POS': 'SUPPORT', 'FAVORABLE': 'SUPPORT',
-                            'SUPPORTIVE': 'SUPPORT', 'PRO': 'SUPPORT', 'AGREE': 'SUPPORT',
-                            'FOR': 'SUPPORT', 'YES': 'SUPPORT', 'ENTAILMENT': 'SUPPORT',
-                            # Negative variants → OPPOSE
-                            'NEGATIVE': 'OPPOSE', 'NEG': 'OPPOSE', 'UNFAVORABLE': 'OPPOSE',
-                            'OPPOSING': 'OPPOSE', 'ANTI': 'OPPOSE', 'CON': 'OPPOSE',
-                            'AGAINST': 'OPPOSE', 'DISAGREE': 'OPPOSE', 'NO': 'OPPOSE',
-                            'CONTRADICTION': 'OPPOSE',
-                            # Neutral variants
-                            'NEU': 'NEUTRAL', 'MIXED': 'NEUTRAL', 'NONE': 'NEUTRAL',
-                            'N/A': 'NEUTRAL', 'NA': 'NEUTRAL', 'UNKNOWN': 'NEUTRAL',
-                        }
-                        auto_stance_norm = stance_map.get(auto_stance, auto_stance)
-                        human_stance_norm = stance_map.get(human_stance, human_stance)
+                        auto_stance = str(auto_val).strip().upper() if pd.notna(auto_val) else ''
+                        human_stance = str(human_val).strip().upper() if pd.notna(human_val) else ''
 
-                        comp['Auto_Stance'] = auto_stance_norm
-                        comp['Human_Stance'] = human_stance_norm
-                        comp['Auto_Stance_Raw'] = auto_stance
-                        comp['Human_Stance_Raw'] = human_stance
+                        # Simple normalization
+                        stance_map = {'POSITIVE': 'SUPPORT', 'NEGATIVE': 'OPPOSE', 'POS': 'SUPPORT', 'NEG': 'OPPOSE'}
+                        auto_norm = stance_map.get(auto_stance, auto_stance)
+                        human_norm = stance_map.get(human_stance, human_stance)
 
-                        # Debug: log first 5 comparisons
-                        if debug_comparison_count < 5:
-                            logger.info(f"  DEBUG Row {idx}: auto_raw='{auto_stance}' -> norm='{auto_stance_norm}', human_raw='{human_stance}' -> norm='{human_stance_norm}'")
+                        comp['Auto_Stance'] = auto_stance
+                        comp['Human_Stance'] = human_stance
 
-                        # Don't count empty vs empty as a match
-                        if not auto_stance_norm and not human_stance_norm:
+                        # Log first 5 for debugging
+                        if idx < 5:
+                            logger.info(f"  Row {idx}: auto='{auto_stance}'->'{auto_norm}', human='{human_stance}'->'{human_norm}'")
+
+                        # Compare (skip if both empty)
+                        if not auto_norm and not human_norm:
                             comp['Stance_Match'] = 'BOTH_EMPTY'
-                            # Don't count in any category
-                        elif auto_stance_norm == human_stance_norm:
+                        elif auto_norm == human_norm:
                             comp['Stance_Match'] = 'MATCH'
                             summary_stats["stance_matches"] += 1
-                            # Track confusion matrix
-                            confusion_key = f"{human_stance_norm}→{auto_stance_norm}"
-                            summary_stats["confusion_matrix"][confusion_key] = summary_stats["confusion_matrix"].get(confusion_key, 0) + 1
-                            if debug_comparison_count < 5:
-                                logger.info(f"    -> MATCH ('{auto_stance_norm}' == '{human_stance_norm}')")
                         else:
                             comp['Stance_Match'] = 'MISMATCH'
                             summary_stats["stance_mismatches"] += 1
-                            # Track confusion matrix
-                            confusion_key = f"{human_stance_norm}→{auto_stance_norm}"
-                            summary_stats["confusion_matrix"][confusion_key] = summary_stats["confusion_matrix"].get(confusion_key, 0) + 1
-                            if debug_comparison_count < 5:
-                                logger.info(f"    -> MISMATCH ('{auto_stance_norm}' != '{human_stance_norm}')")
 
                     # Compare themes
                     if compare_themes and auto_themes_col and human_themes_col:
-                        auto_themes_raw = str(auto_row.get(auto_themes_col, '')) if pd.notna(auto_row.get(auto_themes_col)) else ''
-                        human_themes_raw = str(human_row.get(human_themes_col, '')) if pd.notna(human_row.get(human_themes_col)) else ''
+                        auto_val = auto_row.get(auto_themes_col)
+                        human_val = human_row.get(human_themes_col)
 
-                        # Parse themes (comma or semicolon separated)
+                        auto_themes_raw = str(auto_val) if pd.notna(auto_val) else ''
+                        human_themes_raw = str(human_val) if pd.notna(human_val) else ''
+
                         auto_themes_set = set(t.strip().lower() for t in auto_themes_raw.replace(';', ',').split(',') if t.strip())
                         human_themes_set = set(t.strip().lower() for t in human_themes_raw.replace(';', ',').split(',') if t.strip())
 
                         comp['Auto_Themes'] = auto_themes_raw
                         comp['Human_Themes'] = human_themes_raw
 
-                        # Don't count empty vs empty as a match
                         if not auto_themes_set and not human_themes_set:
                             comp['Themes_Match'] = 'BOTH_EMPTY'
-                            # Don't count in any category - skip
                         elif auto_themes_set == human_themes_set:
                             comp['Themes_Match'] = 'MATCH'
                             summary_stats["themes_matches"] += 1
-                        elif auto_themes_set & human_themes_set:  # Any overlap
-                            overlap = auto_themes_set & human_themes_set
-                            comp['Themes_Match'] = f'PARTIAL ({len(overlap)} common)'
+                        elif auto_themes_set & human_themes_set:
+                            comp['Themes_Match'] = f'PARTIAL ({len(auto_themes_set & human_themes_set)} common)'
                             summary_stats["themes_partial_matches"] += 1
                         else:
                             comp['Themes_Match'] = 'MISMATCH'
                             summary_stats["themes_mismatches"] += 1
 
-                    # Compare narrative (just show side by side, hard to auto-compare)
-                    if compare_narrative and auto_narrative_col and human_narrative_col:
-                        comp['Auto_Narrative'] = str(auto_row.get(auto_narrative_col, ''))[:500] if pd.notna(auto_row.get(auto_narrative_col)) else ''
-                        comp['Human_Narrative'] = str(human_row.get(human_narrative_col, ''))[:500] if pd.notna(human_row.get(human_narrative_col)) else ''
-
-                    debug_comparison_count += 1
-
                 else:
-                    # No matching human annotation
-                    comp['Auto_Stance'] = str(auto_row.get(auto_stance_col, '')) if auto_stance_col and pd.notna(auto_row.get(auto_stance_col)) else ''
+                    comp['Auto_Stance'] = str(auto_row.get(auto_stance_col, '')) if auto_stance_col else ''
                     comp['Human_Stance'] = '[NOT FOUND]'
                     comp['Stance_Match'] = 'NO_MATCH_ROW'
                     summary_stats["unmatched_auto_rows"] += 1
 
                 comparison_rows.append(comp)
 
-            # Check for human rows not in automated
-            for norm_url, human_row in human_by_url.items():
+            # Count unmatched human rows
+            for norm_url in human_by_url:
                 if norm_url not in matched_human_urls:
                     summary_stats["unmatched_human_rows"] += 1
 
@@ -2570,7 +2504,6 @@ async def compare_annotations(
         # Create output Excel
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            # Comparison sheet
             if all_comparisons:
                 comp_df = pd.DataFrame(all_comparisons)
                 comp_df.to_excel(writer, sheet_name='Comparison', index=False)
@@ -2607,22 +2540,10 @@ async def compare_annotations(
                     summary_stats["unmatched_human_rows"],
                 ]
             }
-            summary_df = pd.DataFrame(summary_data)
-            summary_df.to_excel(writer, sheet_name='Summary', index=False)
-
-            # Confusion Matrix sheet (shows Human label → Auto label transitions)
-            if summary_stats["confusion_matrix"]:
-                confusion_data = {
-                    'Human → Auto': list(summary_stats["confusion_matrix"].keys()),
-                    'Count': list(summary_stats["confusion_matrix"].values())
-                }
-                confusion_df = pd.DataFrame(confusion_data)
-                confusion_df = confusion_df.sort_values('Count', ascending=False)
-                confusion_df.to_excel(writer, sheet_name='Confusion Matrix', index=False)
+            pd.DataFrame(summary_data).to_excel(writer, sheet_name='Summary', index=False)
 
         output.seek(0)
 
-        # Generate filename
         from pathlib import Path
         base_name = Path(automated_file.filename or "comparison").stem
         output_filename = f"{base_name}_vs_human_diff.xlsx"
