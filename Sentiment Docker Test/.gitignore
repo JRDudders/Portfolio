@@ -70,3 +70,6 @@ htmlcov/
 certs/*.crt
 certs/*.pem
 !certs/.gitkeep
+
+# Guidance configuration (may contain client-specific themes)
+guidance*.json
